@@ -14,4 +14,5 @@ First packaging: Press 2.0's kernel generalised.
 - Tested in the simulator against TI's real disk controller DSR (`tools/tifdc.py`, `realdsr` group): catalog decoding, text files, write/read/delete.
   Found there: the DSR has closed the file after a read reports end of file (`FCLOSE` answers 7), and a missing input file opens with error 2.
 - `roms/cf7a+.bin`: the CF7+ DSR ROM, added at the author's request (not yet used by any test).
+- `docs/PROGRAMMERS-GUIDE.pdf` (13 pages, bookmarked) and `tools/guide_pdf.py` to rebuild it.
 - Known: not yet run on real hardware.

@@ -20,7 +20,7 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 
 | | |
 | --- | --- |
-| [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md) | **start here**: write an application |
+| [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md) ([PDF](docs/PROGRAMMERS-GUIDE.pdf)) | **start here**: write an application. The PDF is built by `tools/guide_pdf.py` (pandoc, wkhtmltopdf, pypdf, reportlab) |
 | [docs/ROUTINES.md](docs/ROUTINES.md) | every kernel routine: inputs, outputs, registers used (generated from the source) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the kernel works inside; memory maps |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | the machine's facts the kernel relies on; the key-code table |
