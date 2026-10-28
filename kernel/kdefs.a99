@@ -112,6 +112,13 @@ GOARG  EQU  >20A6            GOMOD: the argument handed to its INIT
 PREVPG EQU  >20A8            the module that was running before the last switch (0 at boot)
 GPUBUF EQU  >20B0            8 bytes: the GPU mailbox as built (VSHIFT)
 NODMA  EQU  >20B8            non-zero: the F18A has no DMA engine (T80INI's test)
+VMNUM  EQU  >20E8            the video mode set by VMODE (0-4)
+VMOPT  EQU  >20EA            its options
+TXCOLS EQU  >20EC            columns of the text screen (80, 40 or 32)
+TXROWS EQU  >20EE            rows (24 or 30)
+TXCELLS EQU >20F0            columns x rows
+TXATTR EQU  >20F2            non-zero: this mode has an attribute table the text routines write
+NAMBAS EQU  >20F4            the name table's VRAM address (NAMTAB, or NAMGM2 in Graphics II)
 POOLBM EQU  >20C0            32 bytes: page-pool bitmap, a bit per page (1 = free)
 POOLLO EQU  >20E0            pool: the first page it manages
 POOLHI EQU  >20E2            pool: the page after its last
@@ -193,18 +200,92 @@ RMARK  EQU  14               markers, labels
 RACCNT EQU  15               accent: the cursor
 
 *----------------------------------------------------------------------
-* Screen geometry (Text 80 at 30 rows) and the VRAM map
+* Video modes (video.a99: VMODE) and the VRAM map they share
+*
+* VMODE R0 = the base mode, R1 = options (added together):
 *----------------------------------------------------------------------
-COLS   EQU  80
+VMT80  EQU  0                Text 80: 80 columns, 6 x 8 glyphs (the boot mode)
+VMT40  EQU  1                Text 40: 40 columns, 6 x 8 glyphs
+VMGM1  EQU  2                Graphics I: 32 columns, 8 x 8 tiles, 256 x 192
+VMGM2  EQU  3                Graphics II (bitmap): 256 x 192, colour per 8 pixels
+VMMC   EQU  4                Multicolor: 64 x 48 blocks
+VO30   EQU  >0001            30 rows instead of 24 (every mode)
+VOPOS  EQU  >0002            a colour attribute per screen position (Text 80/40; Graphics I with ECM)
+VOTE1  EQU  >0004            enhanced colour mode 1 for tiles: 1 plane, 2 colours of a palette pair
+VOTE2  EQU  >0008            ... mode 2: 2 planes, 4 colours
+VOTE3  EQU  >000C            ... mode 3: 3 planes, 8 colours   (Text 80/40 and Graphics I only)
+VOSE1  EQU  >0010            enhanced colour mode 1 for sprites
+VOSE2  EQU  >0020            ... mode 2
+VOSE3  EQU  >0030            ... mode 3
+VOSPR  EQU  >0040            sprites on (VR51 = 32); off leaves them stopped
+VOS16  EQU  >0080            sprites 16 x 16 (else 8 x 8)
+VOSMG  EQU  >0100            sprites magnified x2
+VMDEF  EQU  VO30+VOPOS       the boot mode: Text 80, 30 rows, attribute per position
+
+* The text routines' geometry: set by VMODE
+COLS   EQU  80               (the boot mode's columns: use TXCOLS in code that must follow the mode)
 ROWS   EQU  30
-NAMTAB EQU  >0000            name table, 2,400 bytes (>0000-095F)
-PATTAB EQU  >1000            pattern table, 2,048 bytes (>1000-17FF)
-ATRTAB EQU  >1800            position attributes, 2,400 bytes (>1800-215F)
-GPUMB  EQU  >2800            the GPU's mailbox (8 bytes: a DMA's settings)
-GPUAD  EQU  >2810            the GPU's program
-* free VRAM for the application: >0960-0FFF, >2160-27FF, >2830-35FF;
+
+* VRAM.  Every mode but Graphics II uses this one map, laid out so that the
+* enhanced colour modes (which add pattern planes at +>800 and sprite planes at
+* +>200) fit beside the sprites and the file service.
+NAMTAB EQU  >0000            name table (Graphics II: NAMGM2)
+GPUMB  EQU  >0960            the GPU's mailbox (8 bytes: a DMA's settings)
+GPUAD  EQU  >0970            the GPU's program (about 26 bytes)
+GM1CT  EQU  >09C0            Graphics I's colour table (32 bytes; with ECM or VOPOS ATRTAB is used)
+ATRTAB EQU  >0A00            attribute table (2,400 bytes at 80 x 30)
+SATAB  EQU  >1400            sprite attribute table (32 sprites x 4 bytes; links at +>80)
+PATTAB EQU  >1800            pattern table, plane 0 (2,048 bytes); plane 1 at +>800, plane 2 at +>1000
+SPTAB  EQU  >3000            sprite patterns, plane 0 (+>200 per plane: 64 patterns of 8 x 8)
+* Graphics II (the standard bitmap map)
+GM2PT  EQU  >0000            patterns (6,144 bytes)
+NAMGM2 EQU  >1800            names (768 or 960 bytes)
+GM2SAT EQU  >1C00            sprite attribute table
+GM2CT  EQU  >2000            colours (6,144 bytes)
+GM2SPT EQU  >3800            sprite patterns (these overlap the disk controller's area >37D8-3FFF)
+* free for the application (Text 80, 30 rows): >09E0-09FF, >1500-17FF, and, when no
+* sprites / ECM planes are used, >2000-35FF in pieces: see docs/VIDEO-MODES.md
 * >3600-36FF the file record buffer, >3700-37D7 the PAB, >37D8-3FFF the
 * disk controller's own (nothing else may touch it)
+
+*----------------------------------------------------------------------
+* F18A registers, for VREG (the number written to a register is the
+* byte in the high half of R1)
+*----------------------------------------------------------------------
+VR_MODE0 EQU  0              M3 (bit 1: bitmap), M4 (bit 2: with text, Text 80)
+VR_MODE1 EQU  1              16K, display, interrupts, M1 (text), M2 (multicolor), sprite size, magnify
+VR_NAME  EQU  2              name table, 1K units
+VR_COLOR EQU  3              colour table, 64-byte units
+VR_PATT  EQU  4              pattern table, 2K units
+VR_SAT   EQU  5              sprite attribute table, 128-byte units
+VR_SPT   EQU  6              sprite pattern table, 2K units
+VR_BACK  EQU  7              text colours (fg/bg) and the backdrop
+VR_NAME2 EQU  10             tile layer 2 name table, 1K units
+VR_COLR2 EQU  11             tile layer 2 colour table, 64-byte units
+VR_STAT  EQU  15             status register select
+VR_HINT  EQU  19             horizontal interrupt line (0 = off)
+VR_PALSL EQU  24             palette select: sprites bits 5-4, tile layer 2 bits 3-2, tile layer 1 bits 1-0
+VR_HS2   EQU  25             tile layer 2 horizontal scroll
+VR_VS2   EQU  26             tile layer 2 vertical scroll
+VR_HS1   EQU  27             tile layer 1 horizontal scroll
+VR_VS1   EQU  28             tile layer 1 vertical scroll
+VR_PAGE  EQU  29             page sizes of the two layers; plane offsets of tiles (bits 3-2) and sprites (7-6)
+VR_SPRMX EQU  30             sprites per scan line (0 = the jumper's choice)
+VR_BMPCT EQU  31             bitmap layer control
+VR_BMPAD EQU  32             bitmap layer base, 64-byte units
+VR_BMPX  EQU  33             bitmap layer x
+VR_BMPY  EQU  34             bitmap layer y
+VR_BMPW  EQU  35             bitmap layer width (0 = 256)
+VR_BMPH  EQU  36             bitmap layer height
+VR_PALCT EQU  47             palette data port control
+VR_INCR  EQU  48             VRAM address increment (signed)
+VR_ECM   EQU  49             TL2 on (bit 7), 30 rows (6), tile ECM (5-4), real Y (3), linking (2), sprite ECM (1-0)
+VR_FLAGS EQU  50             GPU triggers, tile layer 1 off (4), report max sprites (3), scan lines (2), position attributes (1), TL2 priority (0)
+VR_STOP  EQU  51             stop sprite: sprites at this index and above are not drawn (32 = all drawn)
+VR_GPUHI EQU  54             GPU start address, high byte
+VR_GPULO EQU  55             ... low byte (writing it starts the GPU)
+VR_GPUCT EQU  56             GPU control
+VR_LOCK  EQU  57             unlock sequence
 
 *----------------------------------------------------------------------
 * File service (files.a99)

@@ -1,0 +1,732 @@
+*======================================================================
+* modes.a99 - every display mode the kernel sets up, one screen each.
+*
+*   1  Text 80, 30 rows, colour per position (the boot mode)
+*   2  Text 80, 24 rows, colours of VR7
+*   3  Text 40, 24 rows           4  Text 40, 30 rows, colour per position
+*   5  Graphics I                 6  Graphics II (bitmap)     7  Multicolor
+*   8  enhanced colour 1 (Text 80)  9  enhanced colour 2 (Text 40)
+*   0  enhanced colour 3 (Graphics I)
+*   A  sprites                    B  enhanced colour sprites, 16 x 16
+*   C  tile layer 2, scrolled     D  bitmap layer, 4 colours (over Graphics I)
+*   E  bitmap layer, 16 colours (over Graphics I)
+*
+* Each screen is VMODE (the base mode and options), then drawing with the
+* kernel's routines, VMBW / VFILL for what the text routines do not cover, and
+* VREG for the registers beyond VMODE's (tile layer 2, the bitmap layer).
+* docs/VIDEO-MODES.md explains each; the tests render every screen.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ANORM  EQU  (RTEXT*16+RBG)*256
+CURSCR EQU  APPRAM+0           the screen showing (0-14)
+TMP1   EQU  APPRAM+2
+TMP2   EQU  APPRAM+4
+TMP3   EQU  APPRAM+6
+PALBUF EQU  APPRAM+16
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+INIT   .enter
+       CLR  @CURSCR
+       BL   @REDRAW
+       .leave
+       RT
+
+* REDRAW - the current screen: its routine from SCRTAB.
+REDRAW .enter
+       MOV  @CURSCR,R1
+       SLA  R1,1
+       MOV  @SCRTAB(R1),R1
+       BL   *R1
+       .leave
+       RT
+
+* TICK - a key: 1-9, 0, A-E pick a screen; FCTN = quits.
+TICK   .enter
+       MOV  R0,R0
+       JEQ  TK9
+       CI   R0,KQUIT*256
+       JNE  TK1
+       SETO @QUITF
+       JMP  TK9
+TK1    CI   R0,>6100           lower case a-e: to capitals
+       JL   TK2
+       AI   R0,->2000
+TK2    CI   R0,>3000           '0'-'9'
+       JL   TK9
+       CI   R0,>3900
+       JH   TK3
+       CI   R0,>3000           '0' is screen 9, '1'-'9' are 0-8
+       JNE  TK2A
+       LI   R0,>0900
+       JMP  TK5
+TK2A   AI   R0,->3100
+       JMP  TK5
+TK3    CI   R0,>4100           'A'-'E' -> 10-14
+       JL   TK9
+       CI   R0,>4500
+       JH   TK9
+       AI   R0,->3700
+TK5    SRL  R0,8
+       MOV  R0,@CURSCR
+       BL   @REDRAW
+TK9    .leave
+       RT
+
+SCRTAB DATA S1,S2,S3,S4,S5,S6,S7,S8,S9,S0,SA,SB,SC,SD,SE
+
+*----------------------------------------------------------------------
+* helpers
+*----------------------------------------------------------------------
+* HDR - the title bar: R1 = the title (length-prefixed).  In a mode without
+* an attribute table FILLA does nothing and the title takes the screen's colours.
+* (The text routines take an attribute byte; what it means depends on the mode.)
+HDR    .enter
+       MOV  R1,@TMP1
+       LI   R4,ABAR            the title bar's attribute: the status bar's colour roles ...
+       MOV  @VMOPT,R0
+       ANDI R0,>000C
+       JEQ  HD1
+       CLR  R4                 ... but in an enhanced colour mode an attribute is flags and a
+HD1    MOV  R4,@TMP2           palette pair, so palette pair 0
+       CLR  R0
+       MOV  R4,R1
+       MOV  @TXCOLS,R2
+       BL   @FILLA
+       LI   R0,1
+       MOV  @TMP1,R1
+       MOV  @TMP2,R2
+       BL   @PUTS
+       .leave
+       RT
+
+* ROLES - the fifteen colour roles as rows of text, each in its own colour.
+ROLES  .enter
+       LI   R9,1
+RL1    MOV  R9,R1
+       AI   R1,2               the row: 2 + role
+       MOV  @TXCOLS,R2
+       MPY  R1,R2              R3 = the row's first position
+       MOV  R3,@TMP2
+       AI   R3,2
+       MOV  R3,R0
+       MOV  R9,R2              the attribute: role in the high nibble, page background
+       SLA  R2,12
+       AI   R2,RBG*256
+       MOV  R2,@TMP3
+       LI   R1,SROLE
+       BL   @PUTS
+       MOV  @TMP2,R0
+       AI   R0,15
+       MOV  R9,R1
+       MOV  @TMP3,R2
+       BL   @DECW
+       INC  R9
+       CI   R9,16
+       JL   RL1
+       .leave
+       RT
+
+* LDPAL - the 64-entry demonstration palette (entry 0 of every group of 8 is dark).
+LDPAL  .enter
+       CLR  R0
+       LI   R1,PAL64
+       LI   R2,64
+       BL   @F18PAL
+       .leave
+       RT
+
+* TILE1 - make glyph 1's three pattern planes: R1 = plane 0 byte, R2 = plane 1,
+* R3 = plane 2 (high bytes), each repeated for the tile's 8 rows.
+TILE1  .enter
+       MOV  R2,@TMP1
+       MOV  R3,@TMP2
+       LI   R0,PATTAB+8
+       LI   R2,8
+       BL   @VFILL
+       LI   R0,PATTAB+>800+8
+       MOV  @TMP1,R1
+       LI   R2,8
+       BL   @VFILL
+       LI   R0,PATTAB+>1000+8
+       MOV  @TMP2,R1
+       LI   R2,8
+       BL   @VFILL
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* the text modes
+*----------------------------------------------------------------------
+S1     .enter
+       LI   R0,VMT80
+       LI   R1,VMDEF
+       BL   @VMODE
+       LI   R1,T1
+       BL   @HDR
+       BL   @ROLES
+       .leave
+       RT
+S2     .enter
+       LI   R0,VMT80
+       CLR  R1
+       BL   @VMODE
+       LI   R1,T2
+       BL   @HDR
+       BL   @ROLES
+       .leave
+       RT
+S3     .enter
+       LI   R0,VMT40
+       CLR  R1
+       BL   @VMODE
+       LI   R1,T3
+       BL   @HDR
+       BL   @ROLES
+       .leave
+       RT
+S4     .enter
+       LI   R0,VMT40
+       LI   R1,VO30+VOPOS
+       BL   @VMODE
+       LI   R1,T4
+       BL   @HDR
+       BL   @ROLES
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* Graphics I: the glyphs 0-255 as tiles, a colour for each group of 8
+*----------------------------------------------------------------------
+S5     .enter
+       LI   R0,VMGM1
+       CLR  R1
+       BL   @VMODE
+       LI   R1,T5
+       BL   @HDR
+       LI   R0,NAMTAB+(3*32)   the 256 glyphs: 8 rows of 32
+       BL   @VWAD
+       CLR  R1
+       LI   R2,256
+S5A    MOVB R1,@VDPWD
+       AI   R1,>0100
+       DEC  R2
+       JNE  S5A
+       LI   R0,GM1CT           colour table: group g = foreground (g mod 14) + 2, on the page
+       BL   @VWAD
+       CLR  R6
+S5B    CLR  R4
+       MOV  R6,R5
+       LI   R7,14
+       DIV  R7,R4              R5 = g mod 14
+       AI   R5,2
+       SLA  R5,4
+       AI   R5,RBG
+       SWPB R5
+       MOVB R5,@VDPWD
+       INC  R6
+       CI   R6,32
+       JL   S5B
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* Graphics II: diagonal lines, a colour per tile
+*----------------------------------------------------------------------
+S6     .enter
+       LI   R0,VMGM2
+       CLR  R1
+       BL   @VMODE
+       LI   R0,GM2PT           768 tiles of a diagonal line
+       BL   @VWAD
+       LI   R3,768
+S6A    LI   R4,PDIAG
+       LI   R5,8
+S6B    MOVB *R4+,@VDPWD
+       DEC  R5
+       JNE  S6B
+       DEC  R3
+       JNE  S6A
+       LI   R0,GM2CT           the colours: (row + column) mod 13 + 2 on the page
+       BL   @VWAD
+       CLR  R6                 the tile
+S6C    MOV  R6,R4
+       SRL  R4,5               row
+       MOV  R6,R5
+       ANDI R5,>001F           column
+       A    R4,R5
+       CLR  R4
+       LI   R7,13
+       DIV  R7,R4              R5 = (row + column) mod 13
+       MOV  R4,R4              (R4:R5 / 13: quotient R4, remainder R5)
+       AI   R5,2
+       SLA  R5,4
+       AI   R5,RBG
+       SWPB R5                 the colour byte
+       LI   R4,8
+S6D    MOVB R5,@VDPWD
+       DEC  R4
+       JNE  S6D
+       INC  R6
+       CI   R6,768
+       JL   S6C
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* Multicolor: each name selects a pattern of 2 x 2 coloured blocks
+*----------------------------------------------------------------------
+S7     .enter
+       LI   R0,VMMC
+       CLR  R1
+       BL   @VMODE
+       LI   R0,NAMTAB          names: (row mod 4) * 32 + column, as the TMS9918A's manual does
+       BL   @VWAD
+       CLR  R6                 the row
+S7A    CLR  R5                 the column
+       MOV  R6,R4
+       ANDI R4,3
+       SLA  R4,5
+S7B    MOV  R4,R3
+       A    R5,R3
+       SWPB R3
+       MOVB R3,@VDPWD
+       INC  R5
+       CI   R5,32
+       JL   S7B
+       INC  R6
+       CI   R6,24
+       JL   S7A
+       LI   R0,PATTAB          the colour blocks of pattern n: byte k = left (n + k) mod 16, right (n/4 + 3k) mod 16
+       BL   @VWAD
+       CLR  R6                 n
+S7C    CLR  R7                 k
+S7D    MOV  R6,R3
+       A    R7,R3
+       ANDI R3,>000F
+       SLA  R3,4               left colour
+       MOV  R6,R4
+       SRL  R4,2
+       MOV  R7,R5
+       SLA  R5,1
+       A    R7,R5
+       A    R5,R4
+       ANDI R4,>000F
+       SOC  R4,R3
+       SWPB R3
+       MOVB R3,@VDPWD
+       INC  R7
+       CI   R7,8
+       JL   S7D
+       INC  R6
+       CI   R6,128
+       JL   S7C
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* enhanced colour 1: one plane, a palette PAIR chosen by the attribute's low nibble
+* (flags: >40 flip x, >20 flip y, >10 colour 0 transparent, >80 priority)
+*----------------------------------------------------------------------
+S8     .enter
+       LI   R0,VMT80
+       LI   R1,VMDEF+VOTE1
+       BL   @VMODE
+       BL   @LDPAL
+       LI   R1,T8
+       BL   @HDR
+       CLR  R9
+S8A    MOV  R9,R1              rows 2-17: pair n
+       AI   R1,2
+       MOV  @TXCOLS,R2
+       MPY  R1,R2
+       AI   R3,2
+       MOV  R3,R0
+       MOV  R9,R2
+       SLA  R2,8               the attribute: the pair
+       LI   R1,SPAIR
+       BL   @PUTS
+       INC  R9
+       CI   R9,16
+       JL   S8A
+       LI   R0,19*80+2         the flags on pair 3
+       LI   R1,SFX
+       LI   R2,>4300
+       BL   @PUTS
+       LI   R0,20*80+2
+       LI   R1,SFY
+       LI   R2,>2300
+       BL   @PUTS
+       LI   R0,21*80+2
+       LI   R1,SFT
+       LI   R2,>1300
+       BL   @PUTS
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* enhanced colour 2: two planes, 4 colours; the attribute picks a set of 4 palette entries
+*----------------------------------------------------------------------
+S9     .enter
+       LI   R0,VMT40
+       LI   R1,VO30+VOPOS+VOTE2
+       BL   @VMODE
+       BL   @LDPAL
+       LI   R1,>A800           plane 0: 1 0 1 0 1 0
+       LI   R2,>CC00           plane 1: 1 1 0 0 1 1
+       CLR  R3
+       BL   @TILE1
+       LI   R1,T9
+       BL   @HDR
+       CLR  R9
+S9A    MOV  R9,R1              rows 3-18: palette set n
+       AI   R1,3
+       MOV  @TXCOLS,R2
+       MPY  R1,R2
+       AI   R3,2
+       MOV  R3,@TMP2
+       MOV  R3,R0
+       LI   R1,>0100           the 4-colour tile, 20 across
+       LI   R2,20
+       BL   @FILLN
+       MOV  @TMP2,R0
+       MOV  R9,R1
+       SLA  R1,8
+       LI   R2,20
+       BL   @FILLA
+       INC  R9
+       CI   R9,16
+       JL   S9A
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* enhanced colour 3: three planes, 8 colours; Graphics I tiles 8 wide
+*----------------------------------------------------------------------
+S0     .enter
+       LI   R0,VMGM1
+       LI   R1,VOPOS+VOTE3
+       BL   @VMODE
+       BL   @LDPAL
+       LI   R1,>AA00           plane 0
+       LI   R2,>CC00           plane 1
+       LI   R3,>F000           plane 2: the colour counts down 7 to 0 across the tile
+       BL   @TILE1
+       LI   R1,T0
+       BL   @HDR
+       CLR  R9
+S0A    MOV  R9,R1              rows 3-10: palette set n (the attribute's bits 3-1)
+       AI   R1,3
+       SLA  R1,5
+       AI   R1,2
+       MOV  R1,@TMP2
+       MOV  R1,R0
+       LI   R1,>0100
+       LI   R2,16
+       BL   @FILLN
+       MOV  @TMP2,R0
+       MOV  R9,R1
+       SLA  R1,9               attribute 2n
+       LI   R2,16
+       BL   @FILLA
+       INC  R9
+       CI   R9,8
+       JL   S0A
+       LI   R0,12*32+2         flip x
+       LI   R1,>0100
+       LI   R2,16
+       BL   @FILLN
+       LI   R0,12*32+2
+       LI   R1,>4000
+       LI   R2,16
+       BL   @FILLA
+       LI   R0,14*32+2         flip y, on a different set
+       LI   R1,>0100
+       LI   R2,16
+       BL   @FILLN
+       LI   R0,14*32+2
+       LI   R1,>2400
+       LI   R2,16
+       BL   @FILLA
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* sprites: eight 8 x 8 balls, colours 2-9
+*----------------------------------------------------------------------
+SA     .enter
+       LI   R0,VMGM1
+       LI   R1,VOSPR
+       BL   @VMODE
+       LI   R1,TA
+       BL   @HDR
+       LI   R0,SPTAB           pattern 0: a ball
+       LI   R1,PBALL
+       LI   R2,8
+       BL   @VMBW
+       LI   R0,SATAB           the attribute table: y - 1, x, pattern, colour; >D0 ends it
+       LI   R1,SATA
+       LI   R2,SATAE-SATA
+       BL   @VMBW
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* enhanced colour sprites: 16 x 16, three planes, palette set from the colour nibble
+*----------------------------------------------------------------------
+SB     .enter
+       LI   R0,VMGM1
+       LI   R1,VOSPR+VOS16+VOSE3
+       BL   @VMODE
+       BL   @LDPAL
+       LI   R1,TB
+       BL   @HDR
+       LI   R0,SPTAB           pattern 0 (16 x 16 = four 8 x 8): plane 0, 1, 2
+       LI   R1,>AA00
+       LI   R2,32
+       BL   @VFILL
+       LI   R0,SPTAB+>200
+       LI   R1,>CC00
+       LI   R2,32
+       BL   @VFILL
+       LI   R0,SPTAB+>400
+       LI   R1,>F000
+       LI   R2,32
+       BL   @VFILL
+       LI   R0,SATAB
+       LI   R1,SATB
+       LI   R2,SATBE-SATB
+       BL   @VMBW
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* tile layer 2: its own name and attribute tables, scrolled 3 across and 4 down
+*----------------------------------------------------------------------
+SC     .enter
+       LI   R0,VMGM1
+       LI   R1,VOPOS+VOTE1
+       BL   @VMODE
+       BL   @LDPAL
+       LI   R1,>AA00           glyph 1: a checker, alternate rows
+       CLR  R2
+       CLR  R3
+       BL   @TILE1
+       LI   R0,PATTAB+8+1      (rows 1, 3, 5, 7 the other way round)
+       LI   R1,>5500
+       LI   R2,1
+       BL   @VFILL
+       LI   R0,PATTAB+8+3
+       LI   R1,>5500
+       LI   R2,1
+       BL   @VFILL
+       LI   R0,PATTAB+8+5
+       LI   R1,>5500
+       LI   R2,1
+       BL   @VFILL
+       LI   R0,PATTAB+8+7
+       LI   R1,>5500
+       LI   R2,1
+       BL   @VFILL
+       LI   R0,NAMTAB          layer 1: the checker everywhere, pair = row mod 8
+       LI   R1,>0100
+       LI   R2,768
+       BL   @VFILL
+       CLR  R9
+SCA    MOV  R9,R0
+       SLA  R0,5
+       AI   R0,ATRTAB
+       MOV  R9,R1
+       ANDI R1,7
+       SLA  R1,8
+       LI   R2,32
+       BL   @VFILL
+       INC  R9
+       CI   R9,24
+       JL   SCA
+       LI   R0,>2000           layer 2's names: spaces, then a word
+       LI   R1,>2000
+       LI   R2,768
+       BL   @VFILL
+       LI   R0,>2000+(10*32)+9
+       LI   R1,SL2+1
+       LI   R2,9
+       BL   @VMBW
+       LI   R0,>2400           layer 2's attributes: colour 0 transparent, pair 1
+       LI   R1,>1100
+       LI   R2,768
+       BL   @VFILL
+       LI   R0,VR_NAME2
+       LI   R1,>0800           names at >2000
+       BL   @VREG
+       LI   R0,VR_COLR2
+       LI   R1,>9000           attributes at >2400
+       BL   @VREG
+       LI   R0,VR_HS2
+       LI   R1,>0300
+       BL   @VREG
+       LI   R0,VR_VS2
+       LI   R1,>0400
+       BL   @VREG
+       LI   R0,VR_ECM          tile layer 2 on, with tile ECM 1 as VMODE set it
+       LI   R1,>9000
+       BL   @VREG
+       LI   R1,TC
+       BL   @HDR
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* the bitmap layer: 4 colours over Graphics I (64 x 40 bitmap pixels)
+*----------------------------------------------------------------------
+SD     .enter
+       LI   R0,VMGM1
+       CLR  R1
+       BL   @VMODE
+       LI   R1,TD
+       BL   @HDR
+       LI   R0,>2000
+       BL   @VWAD
+       CLR  R6                 y
+SDA    CLR  R7                 byte j of the row
+SDB    MOV  R7,R3
+       SRL  R3,2
+       MOV  R6,R4
+       SRL  R4,3
+       A    R4,R3
+       ANDI R3,3               colour = (j/4 + y/8) mod 4
+       MOV  R3,R4
+       SLA  R3,2
+       A    R4,R3              5 * colour
+       MOV  R3,R4
+       SLA  R3,4
+       A    R4,R3              85 * colour = colour * >55: the four pixels alike
+       SWPB R3
+       MOVB R3,@VDPWD
+       INC  R7
+       CI   R7,16
+       JL   SDB
+       INC  R6
+       CI   R6,40
+       JL   SDA
+       LI   R0,VR_BMPAD
+       LI   R1,>8000           at >2000
+       BL   @VREG
+       LI   R0,VR_BMPX
+       LI   R1,>1400           x 20
+       BL   @VREG
+       LI   R0,VR_BMPY
+       LI   R1,>6400           y 100
+       BL   @VREG
+       LI   R0,VR_BMPW
+       LI   R1,>4000           64 wide
+       BL   @VREG
+       LI   R0,VR_BMPH
+       LI   R1,>2800           40 high
+       BL   @VREG
+       LI   R0,VR_BMPCT
+       LI   R1,>8300           on, 4 colours from palette entries 12-15, drawn where the
+       BL   @VREG              tiles show the background
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* the bitmap layer with 16 colours ("fat" pixels, 4 bits each) over Graphics I
+*----------------------------------------------------------------------
+SE     .enter
+       LI   R0,VMGM1
+       CLR  R1
+       BL   @VMODE
+       LI   R1,TE
+       BL   @HDR
+       LI   R0,>2000
+       BL   @VWAD
+       CLR  R6                 y
+SEA    CLR  R7                 byte j of the row: 4 pixels, two fat pixels of 4 bits
+SEB    MOV  R7,R3
+       MOV  R6,R4
+       SRL  R4,1
+       A    R4,R3
+       ANDI R3,>000F           colour = (j + y/2) mod 16
+       MOV  R3,R4
+       SLA  R3,4
+       A    R4,R3              the nibble twice
+       SWPB R3
+       MOVB R3,@VDPWD
+       INC  R7
+       CI   R7,16              a 64 pixel row is 16 bytes
+       JL   SEB
+       INC  R6
+       CI   R6,32
+       JL   SEA
+       LI   R0,VR_BMPAD
+       LI   R1,>8000
+       BL   @VREG
+       LI   R0,VR_BMPX
+       LI   R1,>3C00           x 60
+       BL   @VREG
+       LI   R0,VR_BMPY
+       LI   R1,>5000           y 80
+       BL   @VREG
+       LI   R0,VR_BMPW
+       LI   R1,>4000           64 wide
+       BL   @VREG
+       LI   R0,VR_BMPH
+       LI   R1,>2000           32 high
+       BL   @VREG
+       LI   R0,VR_BMPCT
+       LI   R1,>9000           on, fat pixels: 16 colours
+       BL   @VREG
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* data
+*----------------------------------------------------------------------
+T1     STRI 'Text 80, 30 rows, colour per position    1-9 0 A-E pick a screen   FCTN = quits'
+T2     STRI 'Text 80, 24 rows, colours of VR7 (the attributes are ignored)'
+T3     STRI 'Text 40, 24 rows, colours of VR7'
+T4     STRI 'Text 40, 30 rows, colour per position'
+T5     STRI 'Graphics I: 32 x 24 tiles, a colour for each group of 8'
+T8     STRI 'Enhanced colour 1 (Text 80): the attribute picks a palette pair'
+T9     STRI 'Enhanced colour 2 (Text 40): four colours a tile'
+T0     STRI 'Enhanced colour 3 (Graphics I): eight colours a tile'
+TA     STRI 'Sprites'
+TB     STRI 'Enhanced colour sprites, 16 x 16'
+TC     STRI 'Tile layer 2, scrolled'
+TD     STRI 'Bitmap layer, 4 colours (Graphics I)'
+TE     STRI 'Bitmap layer, 16 colours (Graphics I)'
+SROLE  STRI 'Colour role'
+SPAIR  STRI 'ECM 1 palette pair'
+SFX    STRI 'flip x (>40) on pair 3'
+SFY    STRI 'flip y (>20) on pair 3'
+SFT    STRI 'colour 0 transparent (>10)'
+SL2    STRI 'LAYER TWO'
+       EVEN
+PDIAG  BYTE >80,>40,>20,>10,>08,>04,>02,>01
+PBALL  BYTE >3C,>7E,>FF,>FF,>FF,>FF,>7E,>3C
+* sprites: y - 1, x, pattern, colour
+SATA   BYTE 39,16,0,2,55,44,0,3,71,72,0,4,87,100,0,5
+       BYTE 103,128,0,6,119,156,0,7,135,184,0,8,151,212,0,9
+       BYTE >D0
+SATAE
+       EVEN
+* colour sets 0, 2, 4 (flip x), 6 (flip y); then 12, 10, 8, 14
+SATB   BYTE 59,40,0,0,59,100,0,2,59,160,0,>44,59,220,0,>26
+       BYTE 119,40,0,>0C,119,100,0,>0A,119,160,0,>08,119,220,0,>0E
+       BYTE >D0
+SATBE
+       EVEN
+PAL64
+       DATA >0004,>07E4,>0E9F,>054C,>0CF9,>04A6,>0A54,>0444
+       DATA >0004,>0F6A,>0647,>0DC4,>0474,>0B4E,>04DB,>0988
+       DATA >0004,>07E4,>0E9F,>054C,>0CF9,>04A6,>0A54,>0444
+       DATA >0004,>0F6A,>0647,>0DC4,>0474,>0B4E,>04DB,>0988
+       DATA >0004,>07E4,>0E9F,>054C,>0CF9,>04A6,>0A54,>0444
+       DATA >0004,>0F6A,>0647,>0DC4,>0474,>0B4E,>04DB,>0988
+       DATA >0004,>07E4,>0E9F,>054C,>0CF9,>04A6,>0A54,>0444
+       DATA >0004,>0F6A,>0647,>0DC4,>0474,>0B4E,>04DB,>0988

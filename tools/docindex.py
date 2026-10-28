@@ -17,9 +17,7 @@ TITLES = {'vdp': 'VDP and the frame wait (vdp.a99)', 'f18a': 'The F18A (f18a.a99
           'text': 'Text on the screen (text.a99)', 'modules': 'Modules (modules.a99)', 'pool': 'The page pool (pool.a99)',
           'files': 'Files (files.a99)', 'kernel': 'Main loop and exit (kernel.a99)', 'loader': 'The loader (loader.a99)',
           'f18det': 'F18A detection (f18det.a99, loader only)', 'amsinit': 'Memory card detection (amsinit.a99, loader only)'}
-PUBLIC = '''VDPWR VWAD VRAD VMBW VMBR VFILL VSBW VSBR VSYNC LDSCHM SETSCH VSHIFT T80INI F18PAL F18UNL F18OFF
-PAGEB MAPPG MAPE MAPF SETPB KSCAN KDECOD KPOLL KPUT KEYGET KINIT KFLUSH KIDLE KPFR KWAIT PUTS FILLA FILLN
-DECW PUTC HEX2 HEX4 CLS BOX MODCALL GOMOD PINIT PALLOC PRELS FOPEN FREAD FWRITE FCLOSE FDELETE FCNUM'''.split()
+PUBLIC = [n for line in open(os.path.join(KERN, 'public.txt')) if not line.startswith('#') for n in line.split()]
 HDR = re.compile(r'^\*\s+([A-Z][A-Z0-9]*(?:\s*/\s*[A-Z][A-Z0-9]*)*)\s+-\s+(.*)$')
 
 def headers():

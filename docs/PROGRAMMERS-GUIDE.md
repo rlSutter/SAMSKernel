@@ -24,7 +24,7 @@ card, its size or the F18A is missing.
 
 | | |
 | --- | --- |
-| Screen | 80 x 30 text, an F18A "Text 80" mode with a colour per character cell; 256 six-by-eight glyphs; 15 colour *roles* and five colour schemes; DMA row moves |
+| Screen | boots in 80 x 30 text (F18A "Text 80", a colour per character cell; 256 six-by-eight glyphs; 15 colour *roles* and five colour schemes; DMA row moves); `VMODE` sets **any F18A mode**: Text 80/40, Graphics I and II, Multicolor, enhanced colour, sprites, tile layer 2, the bitmap layer (part 5 and VIDEO-MODES.md) |
 | Keyboard | 64-key buffer, auto-repeat, SHIFT / CTRL / FCTN / ALPHA LOCK chords decoded to one byte each |
 | Memory | 7K of RAM that is always there (slot A), 8K of your code in the window at `>C000`, and up to 1M of SAMS pages you map into `>E000-FFFF`; a page pool to hand them out |
 | Structure | a main loop that calls your module once a frame; up to dozens of 8K modules; `GOMOD` to switch, `MODCALL` to call into another module and come back |
@@ -175,8 +175,10 @@ A module may be **up to 8K**, but not a byte past it: the build stops with an er
 Anything that does not fit is a second module (part 8), or data in a SAMS page (part 7).
 
 The kernel needs nothing else from a module. Everything not in the entry table is yours
-to name, except that **a module may not define a label the kernel already uses**
-(`kernel.equ` is included, so a clash is an assembly error: easy to see).
+to name, except for the names `kernel.equ` exports: the **public routines** (`kernel/public.txt`,
+documented in ROUTINES.md) and every **equate** in `kdefs.a99`. A clash with one of those is an
+assembly error ("duplicate symbol"): easy to see. The kernel's other labels are private and never
+reach your module, so a new kernel release cannot collide with your labels.
 
 ## 4. Calling conventions and registers
 
@@ -287,16 +289,19 @@ to use another, give your application its own `databank.a99` (part 12).
 
 ### VRAM
 
+The standard map, which every mode but Graphics II shares (VIDEO-MODES.md part 3 has the details and Graphics II's map):
+
 | Range | Holds |
 | --- | --- |
-| `>0000-095F` | name table: 2,400 glyph bytes |
-| `>0960-0FFF` | **free** (1,696 bytes) |
-| `>1000-17FF` | pattern table: 256 glyphs |
-| `>1800-215F` | position attributes: 2,400 bytes |
-| `>2160-27FF` | **free** (1,696 bytes) |
-| `>2800-280F` | the GPU mailbox (the DMA row mover's settings) |
-| `>2810-...` | the GPU program (about 40 bytes) |
-| `>2830-35FF` | **free** (3,536 bytes) |
+| `>0000-095F` | name table (2,400 bytes at 80 x 30) |
+| `>0960-097F` | the GPU's mailbox and program (`GPUMB`, `GPUAD`) |
+| `>09C0-09DF` | Graphics I's colour table (`GM1CT`) |
+| `>0A00-135F` | the attribute table (`ATRTAB`, 2,400 bytes at 80 x 30) |
+| `>1400-14FF` | sprite attribute table (`SATAB`) |
+| `>1500-17FF` | **free** (768 bytes) |
+| `>1800-1FFF` | pattern table, plane 0: the 256 glyphs (`PATTAB`) |
+| `>2000-2FFF` | **free**, or the extra pattern planes of enhanced colour 2 and 3 |
+| `>3000-35FF` | **free**, or the sprite patterns (`SPTAB`) |
 | `>3600-36FF` | the file service's record buffer |
 | `>3700-37D7` | the file service's PAB |
 | `>37D8-3FFF` | the disk controller's own: **never touch** |
@@ -309,13 +314,30 @@ interrupts masked, and you leave it that way.
 
 ### Moving rows: `VSHIFT`
 
-`VSHIFT` copies R2 rows of 80 bytes from VRAM address R0 to R1 using the F18A's DMA
+`VSHIFT` copies R2 rows of `TXCOLS` bytes (80 in the boot mode) from VRAM address R0 to R1 using the F18A's DMA
 engine, started by a tiny GPU program the kernel installs. Scrolling a region of the
 screen is two `VSHIFT`s (name table and attribute table) and a redraw of the exposed
 row. R3 = 0 copies forwards, 2 backwards (for overlapping moves; then R0 and R1 point at
 the *last* byte of each block). It waits for the GPU to finish. Not every F18A firmware has
 the DMA engine: the kernel tests it at boot and sets `NODMA` non-zero when it does not; code
 that scrolls should redraw rows itself in that case.
+
+### Other display modes
+
+`VMODE` switches the F18A to any of its modes: R0 = the base mode (`VMT80`, `VMT40`, `VMGM1` Graphics I, `VMGM2` Graphics II, `VMMC` Multicolor), R1 = the options added together (`VO30` 30
+rows, `VOPOS` a colour attribute per position, `VOTE1-3` / `VOSE1-3` enhanced colour for tiles / sprites, `VOSPR` sprites on, `VOS16`, `VOSMG`):
+
+```
+       LI   R0,VMGM1              Graphics I, 8-colour tiles (enhanced colour 3), an attribute per position
+       LI   R1,VOPOS+VOTE3
+       BL   @VMODE
+```
+
+It re-initialises the registers and the VRAM tables (a blank screen, the glyphs, the colour scheme) and sets `TXCOLS`, `TXROWS`, `TXCELLS`, `TXATTR` and `NAMBAS`, which the text routines follow;
+**everything on the screen is gone afterwards**. `VREG` (R0 = register, R1 = value in the high byte) sets the rest: tile layer 2, scrolling, the bitmap layer, the sprite limits. The text routines work in Text 80,
+Text 40 and Graphics I; in Graphics II, Multicolor and the sprite and layer work you write the VRAM yourself. Two things trip people up: in an enhanced colour mode **the attribute byte is flags**
+(priority, flips, transparency, palette select), not a pair of colour roles; and **Graphics II uses the VRAM the file service needs**, so do not read or write files while it shows.
+`examples/modes` has a screen for every mode and VIDEO-MODES.md explains each, with pictures.
 
 ### The cursor
 
@@ -504,7 +526,7 @@ routine runs with *its* module in slot C, so it may not touch your code or data 
 - Shared constants and addresses go in one `shared.a99` that each module `COPY`s
   (see `examples/browser/shared.a99`).
 - Labels in different modules are independent: two modules may both have a `LOOP1`. Only the
-  kernel's labels are reserved.
+  names `kernel.equ` exports (the public routines and the equates) are reserved.
 - A module that must be callable by `MODCALL` while *also* being switched to
   needs its entry table the same either way.
 
@@ -688,6 +710,10 @@ and right), `<S-x>` SHIFT, `<ALPHA>` toggles ALPHA LOCK (**it starts down**, as 
 `<ALPHA>` first for lower case), `<WAIT n>` waits n frames, `<HOLD n>` makes the next key a hold of
 n frames. The first key goes down at frame 60.
 
+**Pictures.** `tools/f18render.py` draws any F18A mode from the simulator's state: `f18render.render(m)` returns a
+numpy picture (256 x 192, 240 rows, or 512 wide in Text 80) and `f18render.save(m, 'shot.png')` writes it; compare a
+pixel with `f18render.palette_rgb(m)[entry]`. `tests/test_kernel.py modes` does that for every screen of `examples/modes`.
+
 **Hooks and disks.** Pass `setup=fn(m)` to prepare the machine before it runs:
 `m.dvfiles['NAME'] = [b'record', ...]` puts a file on the simulator's DSK1 (all DIS/VAR 80
 unless `m.ftypes['NAME'] = (variable?, internal?, record length)` says otherwise),
@@ -728,18 +754,20 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 10. **Never write an F18A register you do not need**, and do not unlock the F18A twice (the second unlock locks it): the kernel handled both.
 11. **Power-up RAM is random**: clear what you use. (The loader clears slot A; nothing else is cleared.)
 12. **A DSR call changes R6-R9 and takes time**; keep the VRAM from `>3600` for the file service.
-13. **The 9918 is not the F18A**: the F18A's extras (30 rows, per-cell colour, palette) are what the kernel gives
-    you; do not rely on a plain TI's video.
+13. **The 9918 is not the F18A**: the F18A's extras (30 rows, per-cell colour, palette, enhanced colour, layers)
+    are what the kernel gives you; do not rely on a plain TI's video.
+    **`VMODE` rewrites the screen**, and the attribute byte means roles in the normal colour modes and flags in
+    the enhanced ones; **Graphics II and file I/O do not mix** (they share VRAM).
 14. **The console's frame counter needs `>83FC`'s high byte non-zero** (the kernel sets it at start and after
     every DSR call). Do not clear it.
 15. **Slot A is 7K.** If you need more, it is a SAMS page.
 16. **It works in the simulator** is the beginning of a test, not the end: js99er, then the real machine.
 
-## 15. What the kernel does not do (version 1.0)
+## 15. What the kernel does not do (version 1.1)
 
-- No sprites, graphics modes or other text modes: the screen is Text 80. A module may set the VDP up
-  differently, but must put Text 80 (`T80INI` does it all) back before it returns control, and keep `VR1CPY`
-  right.
+- Video: every F18A mode is reachable (`VMODE`, `VREG`), but the kernel only *draws* for you in the glyph modes
+  (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite
+  library, no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.
 - No sound API beyond the console's sound lists.
 - No heap, no text-editing engine, no menus: those are applications (Press has an editor built on the
   ancestor of this kernel; see FROM-PRESS.md).

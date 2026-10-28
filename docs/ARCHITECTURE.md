@@ -15,7 +15,7 @@ change when it must change. Application authors need only the [programmer's guid
 | `macros.a99` | (included everywhere) | `.enter .leave .push .pop .intsvc .callmod` |
 | `build/.../appcfg.a99`, `appname.a99`, `appmsg.a99` | (generated) | the application's numbers, name, refusal screens and bank table |
 
-The kernel is about 3.6K of its 8K bank: there is room for roughly 4.5K more services before the bank is full.
+The kernel is about 4.4K of its 8K bank: there is room for roughly 3.7K more services before the bank is full.
 
 ## 2. The cartridge image
 
@@ -88,6 +88,7 @@ the halves differ).
 | `>2080-209F` | `SCHEME`, `TXTBUF` | current scheme; 16 bytes for number formatting |
 | `>20A0-20BF` | `MCENT` ... `PREVPG`, `GPUBUF`, `NODMA` | module system words, the DMA mailbox as built |
 | `>20C0-20E7` | `POOLBM` ... `FREECT` | the page pool's bitmap (32 bytes), range, free count |
+| `>20E8-20F5` | `VMNUM`, `VMOPT`, `TXCOLS`, `TXROWS`, `TXCELLS`, `TXATTR`, `NAMBAS` | the video mode and the text routines' geometry (set by `VMODE`) |
 | `>2100-21BF` | `FHOT` ... `FPAB` | the file service's state: scratchpad save (96), device name, saved words, the PAB (64) |
 | `>21C0-21FF` | | free for the kernel's growth |
 | `>2200-22FF` | `MODRAM` | scratch for the running module |
@@ -117,7 +118,14 @@ data bank, `>12` up modules and data, then your pool from `PGFREE`.
 
 ### VRAM
 
-As in the guide's part 5.
+The standard map and Graphics II's are in VIDEO-MODES.md part 3 (and the guide's part 5). All modes but Graphics II share one layout, designed so that enhanced colour planes, sprites and the file service fit together:
+names `>0000`, GPU `>0960`, Graphics I colours `>09C0`, attributes `>0A00`, sprite attributes `>1400`, patterns `>1800` (planes at +`>800`), sprite patterns `>3000` (planes at +`>200`), file service `>3600-37D7`.
+
+### VMODE
+
+`VMODE` unlocks (if needed), blanks the display, writes VR0-VR7 from `MODTAB` (eight words a mode), the mode-independent registers from `VMCONS`, VR49-VR51 from the options, computes `TXCOLS` and the rest,
+calls `VMTAB` (fills the tables for the mode, loads the glyphs from the data bank through slot B, clears the sprite table, installs the GPU program, loads the colour scheme with `LDSCHM`), then turns the display on
+and sets `VR1CPY`. `LDSCHM` additionally copies the scheme's entry 2 to entry 1 when tile enhanced colour is on. The boot calls it as `T80INI` (Text 80, 30 rows, attribute per position).
 
 ## 7. The keyboard in detail
 

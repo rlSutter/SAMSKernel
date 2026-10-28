@@ -31,7 +31,7 @@ list for people changing the kernel.
 - A module cannot call another's routines (they are not mapped): `MODCALL` (mapping in, calling, mapping back) or `GOMOD`
   (switching).
 - Modules share state only through slot A addresses agreed in a shared file.
-- A module may not reuse a kernel label.
+- A module may not reuse a name `kernel.equ` exports: the routines in `kernel/public.txt` and the equates in `kdefs.a99`. Every other kernel label is private (`lkbuild.py` filters `kernel.equ`), so adding an internal label to the kernel cannot break an application.
 
 ## The VDP and the keyboard
 
@@ -39,7 +39,9 @@ list for people changing the kernel.
 - `KPOLL`, `KIDLE`, `KPFR` may write VR1 (a key turns the display back on): call them between VDP transfers only.
 - `VSHIFT` waits for the GPU; no VRAM access overlaps a DMA.
 - Never write an F18A register the program does not use; `F18OFF` restores what the kernel changes. Check before unlocking.
-- `VR1CPY` must hold the current mode's VR1 with the display bit set.
+- `VR1CPY` must hold the current mode's VR1 with the display bit set (`VMODE` sets it).
+- Anything that changes an F18A register `F18OFF` does not restore must be added to `F18OFF`'s list (`OFFREG`).
+- A routine added to the kernel that an application may call goes in `kernel/public.txt` and has a header comment.
 
 ## Assembly
 

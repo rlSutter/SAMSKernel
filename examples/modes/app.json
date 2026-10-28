@@ -1,0 +1,7 @@
+{
+  "name": "VIDEO MODES",
+  "min_pages": 128,
+  "modules": [
+    {"name": "modes", "source": "modes.a99"}
+  ]
+}

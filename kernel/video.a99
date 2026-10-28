@@ -1,10 +1,16 @@
 *======================================================================
-* video.a99 - Text 80 at 30 rows: set up once at boot (T80INI), the colour
-* schemes (LDSCHM, SETSCH) and the F18A's DMA row mover (VSHIFT).  The
-* kernel includes it; the loader does not.
+* video.a99 - the F18A's display modes: VMODE sets any of them (Text 80,
+* Text 40, Graphics I, Graphics II, Multicolor; 24 or 30 rows; enhanced
+* colour for tiles and sprites), T80INI is the boot mode (Text 80, 30 rows,
+* attribute per position), the colour schemes (LDSCHM, SETSCH), register
+* access (VREG) and the DMA row mover (VSHIFT).  The kernel includes it;
+* the loader does not.  docs/VIDEO-MODES.md is the guide.
 *======================================================================
 
-* LDSCHM - load colour scheme SCHEME (0-4) into palette entries 0-15.
+* LDSCHM - load colour scheme SCHEME (0-4) into palette entries 0-15.  In
+* an enhanced colour mode (tiles) entry 1 is then made the text colour
+* (the scheme's entry 2), so that attribute 0 shows text on the page: with
+* a one-plane pattern, pixel colour 1 is entry 1 and colour 0 entry 0.
 * Maps the data bank into slot B and puts back what was there.  Uses
 * R0-R4, R7, R12.
 LDSCHM .enter
@@ -18,31 +24,283 @@ LDSCHM .enter
        CLR  R0
        LI   R2,16
        BL   @F18PAL
-       .pop R0                 slot B back, as it was
+       MOV  @VMOPT,R0          enhanced colour for tiles?
+       ANDI R0,>000C
+       JEQ  LDS1
+       MOV  @SCHEME,R1         entry 1 := the scheme's entry 2
+       SLA  R1,5
+       AI   R1,DSCHEM+4
+       LI   R0,1
+       LI   R2,1
+       BL   @F18PAL
+LDS1   .pop R0                 slot B back, as it was
        BL   @SETPB
        .leave
        RT
 
-* Text 80 register list: (>80|reg)<<8 | value, terminated by 0.  The
-* addresses follow js99er's F18A (the reference emulator): name table at
-* (VR2 AND >0F) * >400, attributes at VR3 * >40, patterns at (VR4 AND 7)
-* * >800.  VR51 = 0 stops sprite processing (with 30 rows the F18A does
-* not stop at a >D0 terminator).
-T80REG DATA >8004              VR0: M4 = Text 80
-       DATA >81B0              VR1: 16K, display off while we set up, interrupts, M1
-       DATA >8200              VR2: name table >0000
-       DATA >8360              VR3: position attributes >1800
-       DATA >8402              VR4: patterns >1000
-       DATA >8500              VR5: sprite attributes (sprites stopped)
-       DATA >8600              VR6: sprite patterns
-       DATA >8721              VR7: text role 2 on role 1; backdrop role 1
-       DATA >B140              VR49: 30 rows, no enhanced colour
-       DATA >B202              VR50: attributes per position
-       DATA >B300              VR51: stop sprite 0 = no sprites
-       DATA >8F00              VR15: status register 0
-       DATA 0
+* SETSCH - make colour scheme R0 (0-4) the current one and load it.  The
+* screen is not rewritten: every cell's attribute names roles, and the
+* palette is what changed.  Uses R0-R4, R7, R12.
+SETSCH .enter
+       MOV  R0,@SCHEME
+       BL   @LDSCHM
+       .leave
+       RT
 
-* VSHIFT - move R2 rows of 80 bytes in VRAM from R0 to R1 with the F18A's
+* VREG - write F18A register R0 (0-63) with the byte in the high half of R1.
+* The F18A must be unlocked (the loader did it; VMODE keeps it so).  Uses
+* R0, R1.  Leaf in effect (it tail-calls VDPWR).
+VREG   SRL  R1,8                the value, as the low byte
+       SWPB R0
+       ORI  R0,>8000           >80 | the register number, in the high byte
+       SOC  R1,R0
+       B    @VDPWR
+
+* VMODE - set the display mode.  R0 = the base mode (VMT80 text 80, VMT40
+* text 40, VMGM1 graphics I, VMGM2 graphics II, VMMC multicolor), R1 = the
+* options added together (VO30 30 rows, VOPOS an attribute per position,
+* VOTE1-3 tile enhanced colour, VOSE1-3 sprite enhanced colour, VOSPR sprites
+* on, VOS16 16 x 16 sprites, VOSMG magnified).  Sets every register the
+* modes use (tile layer 2, the bitmap layer, scrolling and palette selects
+* off), the VRAM tables to a blank screen in the colours of the current
+* scheme, the glyph set in the pattern table of the text-like modes, and
+* the text routines' variables (TXCOLS TXROWS TXCELLS TXATTR NAMBAS).  The
+* display is off while it works.  The VRAM map is in kdefs.a99.  Not every
+* combination exists: enhanced colour tiles apply to Text 80, Text 40 and
+* Graphics I; Graphics II and Multicolor ignore VOPOS and VOTE1-3, and
+* Graphics II has no 30-row form.  Uses R0-R9, R12 and what PAGEB uses; slot B
+* is left as it was.
+VMODE  .enter
+       MOV  R0,@VMNUM
+       MOV  R1,@VMOPT
+       BL   @F18UNL            (nothing if unlocked already)
+       LI   R0,>81A0           VR1: display off while we work
+       BL   @VDPWR
+       MOV  @VMNUM,R0          options a mode cannot use are dropped
+       CI   R0,VMGM2
+       JL   VM1
+       MOV  @VMOPT,R1          Graphics II and Multicolor: no VOPOS, no tile ECM
+       ANDI R1,>FFF1
+       MOV  R1,@VMOPT
+       CI   R0,VMGM2
+       JNE  VM1
+       MOV  @VMOPT,R1          Graphics II: no 30 rows
+       ANDI R1,>FFFE
+       MOV  R1,@VMOPT
+VM1    MOV  @VMNUM,R2          VR0-VR7 from MODTAB: 8 words a mode
+       SLA  R2,4
+       AI   R2,MODTAB
+       LI   R3,8
+VM2    MOV  *R2+,R0
+       BL   @VDPWR
+       DEC  R3
+       JNE  VM2
+       MOV  @VMNUM,R0          Graphics I with enhanced colour: its colour
+       CI   R0,VMGM1           table is the attribute table
+       JNE  VM3
+       MOV  @VMOPT,R1
+       ANDI R1,>000C
+       JEQ  VM3
+       LI   R0,>8328           VR3 = ATRTAB / 64
+       BL   @VDPWR
+VM3    LI   R2,VMCONS          the registers that do not depend on the mode
+VM3A   MOV  *R2+,R0
+       JEQ  VM4
+       BL   @VDPWR
+       JMP  VM3A
+VM4    MOV  @VMOPT,R1          VR49: 30 rows, tile ECM, sprite ECM
+       MOV  R1,R2
+       ANDI R2,>0001
+       SLA  R2,6               30 rows: bit 6
+       MOV  R1,R3
+       ANDI R3,>000C
+       SLA  R3,2               tile ECM: bits 5-4
+       SOC  R3,R2
+       MOV  R1,R3
+       ANDI R3,>0030
+       SRL  R3,4               sprite ECM: bits 1-0
+       SOC  R3,R2
+       ORI  R2,>B100
+       MOV  R2,R0
+       BL   @VDPWR
+       MOV  @VMOPT,R0          VR50: attribute per position
+       ANDI R0,>0002
+       ORI  R0,>B200
+       BL   @VDPWR
+       LI   R0,>B300           VR51: sprites on = 32, off = stopped
+       MOV  @VMOPT,R1
+       ANDI R1,>0040
+       JEQ  VM5
+       LI   R0,>B320
+VM5    BL   @VDPWR
+       MOV  @VMNUM,R1          the geometry the text routines use
+       SLA  R1,1
+       MOV  @COLTAB(R1),@TXCOLS
+       LI   R0,24
+       MOV  @VMOPT,R1
+       ANDI R1,>0001
+       JEQ  VM6
+       LI   R0,30
+VM6    MOV  R0,@TXROWS
+       MOV  @TXCOLS,R2
+       MPY  R0,R2              R2:R3 = columns * rows
+       MOV  R3,@TXCELLS
+       LI   R0,NAMTAB
+       MOV  @VMNUM,R1
+       CI   R1,VMGM2
+       JNE  VM7
+       LI   R0,NAMGM2
+VM7    MOV  R0,@NAMBAS
+       CLR  R2                 TXATTR: an attribute table in use?
+       MOV  @VMNUM,R0
+       MOV  @VMOPT,R1
+       CI   R0,VMT40
+       JH   VM7A
+       ANDI R1,>000E           Text 80 / 40: a position attribute or ECM
+       JEQ  VM7B
+       SETO R2
+       JMP  VM7B
+VM7A   CI   R0,VMGM1           Graphics I: ECM only
+       JNE  VM7B
+       ANDI R1,>000C
+       JEQ  VM7B
+       SETO R2
+VM7B   MOV  R2,@TXATTR
+       BL   @VMTAB             the tables, the glyphs, the palette
+       MOV  @VMNUM,R1          last: display on, with the sprite size bits
+       SLA  R1,1
+       MOV  @VR1TAB(R1),R2
+       MOV  @VMOPT,R1
+       ANDI R1,>0080           16 x 16 sprites: VR1 bit 1
+       JEQ  VM8
+       ORI  R2,>0002
+VM8    MOV  @VMOPT,R1
+       ANDI R1,>0100           magnified: bit 0
+       JEQ  VM9
+       ORI  R2,>0001
+VM9    MOV  R2,R0
+       ORI  R0,>8100
+       BL   @VDPWR
+       SWPB R2
+       MOVB R2,@VR1CPY         the console's copy, used when it blanks the screen
+       .leave
+       RT
+
+* VMTAB - the VRAM tables for the mode VMODE has just set up: blank screen,
+* the font, the sprite attribute table cleared, the GPU program, the palette.
+* Uses R0-R9.
+VMTAB  .enter
+       MOV  @VMNUM,R0
+       CI   R0,VMGM2
+       JEQ  VT2                Graphics II
+       CI   R0,VMMC
+       JEQ  VT3                Multicolor
+* text-like: Text 80, Text 40, Graphics I
+       MOV  @NAMBAS,R0         the name table: spaces
+       LI   R1,>2000
+       MOV  @TXCELLS,R2
+       BL   @VFILL
+       MOV  @TXATTR,@TXATTR
+       JEQ  VT1A
+       LI   R1,(RTEXT*16+RBG)*256   the attributes: text on the page,
+       MOV  @VMOPT,R0               or 0 (palette pair 0) in ECM
+       ANDI R0,>000C
+       JEQ  VT1
+       CLR  R1
+VT1    LI   R0,ATRTAB
+       MOV  @TXCELLS,R2
+       BL   @VFILL
+VT1A   MOV  @VMNUM,R0          Graphics I's own colour table: text on the page
+       CI   R0,VMGM1
+       JNE  VT1B
+       LI   R0,GM1CT
+       LI   R1,(RTEXT*16+RBG)*256
+       LI   R2,32
+       BL   @VFILL
+VT1B   MOV  @CURPB,R0          the glyphs, from the data bank
+       .push R0
+       LI   R0,PGDATA
+       BL   @PAGEB
+       LI   R0,PATTAB
+       LI   R1,DGLYPH
+       LI   R2,2048
+       BL   @VMBW
+       .pop R0
+       BL   @SETPB
+       MOV  @VMOPT,R0          planes 1 and 2 of the pattern table, blank
+       ANDI R0,>000C           for the enhanced colour modes that use them
+       CI   R0,>0008
+       JL   VT4
+       LI   R0,PATTAB+>800
+       CLR  R1
+       LI   R2,2048
+       BL   @VFILL
+       MOV  @VMOPT,R0
+       ANDI R0,>000C
+       CI   R0,>000C
+       JNE  VT4
+       LI   R0,PATTAB+>1000
+       CLR  R1
+       LI   R2,2048
+       BL   @VFILL
+       JMP  VT4
+VT2    LI   R0,GM2PT           Graphics II: patterns blank ...
+       CLR  R1
+       LI   R2,6144
+       BL   @VFILL
+       LI   R0,GM2CT           ... colours text on the page ...
+       LI   R1,(RTEXT*16+RBG)*256
+       LI   R2,6144
+       BL   @VFILL
+       LI   R0,NAMGM2          ... names 0-255 three times
+       BL   @VWAD
+       CLR  R1
+       LI   R2,768
+VT2A   MOVB R1,@VDPWD
+       AI   R1,>0100
+       DEC  R2
+       JNE  VT2A
+       JMP  VT4
+VT3    MOV  @NAMBAS,R0         Multicolor: names and the colour blocks blank
+       CLR  R1
+       MOV  @TXCELLS,R2
+       BL   @VFILL
+       LI   R0,PATTAB
+       CLR  R1
+       LI   R2,2048
+       BL   @VFILL
+VT4    LI   R0,SATAB           no sprites: the attribute table clear
+       MOV  @VMNUM,R1
+       CI   R1,VMGM2
+       JNE  VT5
+       LI   R0,GM2SAT
+VT5    CLR  R1
+       LI   R2,256
+       BL   @VFILL
+       LI   R0,GPUAD           the GPU's program
+       LI   R1,GPUPRG
+       LI   R2,GPUEND-GPUPRG
+       BL   @VMBW
+       BL   @LDSCHM            the colour scheme
+       .leave
+       RT
+
+* the base registers of each mode: VR0 to VR7, (>80|reg)<<8 | value; the
+* display is off here, on at the end of VMODE (VR1TAB)
+MODTAB DATA >8004,>81B0,>8200,>8328,>8403,>8528,>8606,>8721      Text 80
+       DATA >8000,>81B0,>8200,>8328,>8403,>8528,>8606,>8721      Text 40
+       DATA >8000,>81A0,>8200,>8327,>8403,>8528,>8606,>8721      Graphics I
+       DATA >8002,>81A0,>8206,>83FF,>8403,>8538,>8607,>8721      Graphics II
+       DATA >8000,>81A8,>8200,>8300,>8403,>8528,>8606,>8721      Multicolor
+VR1TAB DATA >00F0,>00F0,>00E0,>00E0,>00E8
+COLTAB DATA 80,40,32,32,32
+* VR10, VR11, VR19, VR24-VR31 and VR47-VR48 to their power-up values; tile layer
+* 2 and the bitmap layer off, no scroll, the plane offsets VOTE and VOSE use
+* (tiles >800 apart, sprites >200 apart), VR15 on status register 0
+VMCONS DATA >8A00,>8B00,>9300,>9800,>9900,>9A00,>9B00,>9C00
+       DATA >9D80,>9E00,>9F00,>AF00,>B001,>8F00,0
+
+* VSHIFT - move R2 rows of TXCOLS bytes in VRAM from R0 to R1 with the F18A's
 * DMA engine, started by its GPU: R3 = 0 to copy forwards (from the first
 * bytes), 2 backwards (from the last bytes; R0 and R1 then point at the
 * last byte of each block), as overlapping moves need.  Waits until the
@@ -51,11 +309,12 @@ VSHIFT .enter
        LI   R4,GPUBUF          the mailbox: source, destination, width,
        MOV  R0,*R4+            height, stride, flags
        MOV  R1,*R4+
-       LI   R0,>5000           width 80 ...
+       MOV  @TXCOLS,R0         width: the mode's columns ...
+       SWPB R0
        MOVB R0,*R4+
        SWPB R2                 ... height R2 rows ...
        MOVB R2,*R4+
-       MOVB R0,*R4+            ... stride 80
+       MOVB R0,*R4+            ... stride: the same
        SWPB R3
        MOVB R3,*R4+            direction; copy
        LI   R0,GPUMB
@@ -76,66 +335,24 @@ VSH1   MOVB @VDPSTA,R0
        RT
 
 
-* SETSCH - make colour scheme R0 (0-4) the current one and load it.  The
-* screen is not rewritten: every cell's attribute names roles, and the
-* palette is what changed.  Uses R0-R3, R12 (and what LDSCHM uses).
-SETSCH .enter
-       MOV  R0,@SCHEME
-       BL   @LDSCHM
-       .leave
-       RT
 
-* T80INI - the F18A in Text 80 at 30 rows with per-position colour:
-* registers, both tables cleared (spaces in the normal text colours), the
-* glyph set and colour scheme 0 from the data bank, the GPU program, the
-* DMA engine tested, display on.  Called once by KSTART before the first
-* module runs.  The F18A must already be unlocked (the loader did it;
-* F18UNL is lock-safe).  Slot B is left as it was.  Uses R0-R4, R12.
+* T80INI - the boot mode: Text 80, 30 rows, an attribute per position
+* (VMODE with VMDEF), and the F18A's DMA engine tested.  Called once by
+* KSTART before the first module runs.  Uses what VMODE and DMATST use.
 T80INI .enter
-       BL   @F18UNL            (does nothing if already unlocked)
-       LI   R1,T80REG
-T8I1   MOV  *R1+,R0            next (>80|reg)<<8 | value
-       JEQ  T8I2
-       BL   @VDPWR
-       JMP  T8I1
-T8I2   LI   R0,NAMTAB          the name table: spaces
-       LI   R1,>2000
-       LI   R2,COLS*ROWS
-       BL   @VFILL
-       LI   R0,ATRTAB          the attributes: text on page background
-       LI   R1,(RTEXT*16+RBG)*256
-       LI   R2,COLS*ROWS
-       BL   @VFILL
-       MOV  @CURPB,R0          slot B as it is now ...
-       .push R0
-       LI   R0,PGDATA          ... the data bank in
-       BL   @PAGEB
-       LI   R0,PATTAB          256 glyphs
-       LI   R1,DGLYPH
-       LI   R2,2048
-       BL   @VMBW
-       CLR  @SCHEME
-       BL   @LDSCHM            colour scheme 0
-       .pop R0                 slot B back
-       BL   @SETPB
-       LI   R0,GPUAD           the GPU's program into VRAM
-       LI   R1,GPUPRG
-       LI   R2,GPUEND-GPUPRG
-       BL   @VMBW
+       LI   R0,VMT80
+       LI   R1,VMDEF
+       BL   @VMODE
        BL   @DMATST            does this F18A's GPU have the DMA engine?
-       LI   R0,>81F0           VR1: 16K, display on, interrupts, text mode
-       BL   @VDPWR
-       LI   R0,>F000           the console's copy, used when it blanks the
-       MOVB R0,@VR1CPY         screen: keeps the text mode bits
        .leave
        RT
 
 * DMATST - test the F18A's DMA engine once: 80 bytes of a pattern at
-* VRAM >3000 are copied by VSHIFT to >3080 and read back.  NODMA = 0 if
+* VRAM >1500 are copied by VSHIFT to >1580 and read back.  NODMA = 0 if
 * they arrived, else non-zero (an F18A whose firmware has no DMA: the
 * application then redraws rows instead of moving them).  Uses R0-R4.
 DMATST .enter
-       LI   R0,>3000           the pattern: 0, 1, 2 ... 79
+       LI   R0,>1500           the pattern: 0, 1, 2 ... 79
        BL   @VWAD
        CLR  R1
        LI   R2,80
@@ -143,16 +360,16 @@ DT1    MOVB R1,@VDPWD          a pattern byte
        AI   R1,>0100           the next value
        DEC  R2
        JNE  DT1
-       LI   R0,>3080           the destination: zeros
+       LI   R0,>1580           the destination: zeros
        CLR  R1
        LI   R2,80              80 bytes
        BL   @VFILL             zeroed
-       LI   R0,>3000           from ...
-       LI   R1,>3080           ... to
+       LI   R0,>1500           from ...
+       LI   R1,>1580           ... to
        LI   R2,1               one row of 80
        CLR  R3                 forwards
        BL   @VSHIFT            the GPU copies it
-       LI   R0,>3080           did it arrive?
+       LI   R0,>1580           did it arrive?
        BL   @VRAD              read it back
        CLR  R1                 the first value expected
        LI   R2,80              80 bytes

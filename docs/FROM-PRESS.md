@@ -14,7 +14,7 @@ changed**; nothing here has been tried against it.
 | `amsinit.a99`, `f18det.a99`, `f18a.a99`, `vdp.a99` | same names | `vdp.a99` split: primitives stay, Text 80 set-up and colour schemes go to `video.a99`; `VSBR` added |
 | `pager.a99` | `pager.a99` | `MAPE`, `MAPF` (Press's `TMAPE`/`TMAPF` without the text iterator's `CLR R15`), `SETPB` |
 | `vdp.a99`'s `LDSCHM` | `video.a99` | restores slot B per window with `SETPB`, not as a consecutive pair |
-| `t80ini.a99` (module 3) | `video.a99` `T80INI` | now called by the kernel before the first module; the `KIDLE` calls dropped; slot B saved and restored |
+| `t80ini.a99` (module 3) | `video.a99` `VMODE`, `T80INI` | the boot mode is `VMODE` (any F18A mode, with options); `T80INI` = `VMODE` + the DMA test; called by the kernel before the first module; the `KIDLE` calls dropped; slot B saved and restored |
 | `m3title.a99` (title screen) | (not kernel) | application-specific |
 | `kernel.a99` `KSTART`/`KEXIT` | `kernel.a99` | boot module chosen by `PGBOOT`; `GOMOD` switching; `>83FC` set |
 | `keys.a99` | `keys.a99` | `KINIT`, `KFLUSH`, `KWAIT` added; `KIDLE` (was in `layout.a99`) and `KPFR` (was in `tengine.a99`) moved in |
@@ -38,7 +38,12 @@ changed**; nothing here has been tried against it.
 | `POOLBM`, `FREECT` | `>2300`, `>2320` | `>20C0`, `>20E4` |
 | file service state | `>3800-38FF` | `>2100-21BF` |
 | stack | `>3E20-3EFF` (R10 from `>3F00`) | `>3F00-3FFF` (R10 from `>4000`) |
-| the hot variables, key buffer, key codes, colour roles, geometry | | unchanged |
+| the hot variables, key buffer, key codes, colour roles | | unchanged |
+| patterns `PATTAB` | `>1000` | `>1800` |
+| attributes `ATRTAB` | `>1800` | `>0A00` |
+| GPU mailbox / program | `>2800` / `>2810` | `>0960` / `>0970` |
+
+(The VRAM map moved in 1.1 so that every F18A mode, enhanced colour planes included, fits one layout: part 3 of VIDEO-MODES.md. Press itself still uses its own.)
 
 ## What stayed in Press
 

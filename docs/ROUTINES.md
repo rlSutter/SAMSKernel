@@ -78,7 +78,7 @@ load palette entries. R0 = first palette index (0-63), R1 = table of words >0RGB
 
 ### `F18OFF`
 
-put back every F18A register Press changes, as at power-up, before the console's reset (which sets only VR0-VR7): no 30 rows, no position attributes, the stop-sprite register at its default, status register 0, and the sixteen standard colours.  Lantern learned this the hard way: the TI title is wrong otherwise.
+put back every F18A register the kernel (VMODE, VREG) can change, as at power-up, before the console's reset (which sets only VR0-VR7): no 30 rows, no enhanced colour, no position attributes, no second tile layer, no bitmap layer, no scroll, the stop-sprite register at its default, status register 0, and the sixteen standard colours.  Lantern learned this the hard way: the TI title is wrong otherwise.
 
 ## F18A detection (f18det.a99, loader only)
 
@@ -142,23 +142,35 @@ put slot B back as R0 says, (page for >E000 << 8) | page for >F000: a CURPB valu
 
 ### `LDSCHM`
 
-load colour scheme SCHEME (0-4) into palette entries 0-15. Maps the data bank into slot B and puts back what was there.  Uses R0-R4, R7, R12.
-
-### `VSHIFT`
-
-move R2 rows of 80 bytes in VRAM from R0 to R1 with the F18A's DMA engine, started by its GPU: R3 = 0 to copy forwards (from the first bytes), 2 backwards (from the last bytes; R0 and R1 then point at the last byte of each block), as overlapping moves need.  Waits until the GPU is idle again.  Uses R0-R4.
+load colour scheme SCHEME (0-4) into palette entries 0-15.  In an enhanced colour mode (tiles) entry 1 is then made the text colour (the scheme's entry 2), so that attribute 0 shows text on the page: with a one-plane pattern, pixel colour 1 is entry 1 and colour 0 entry 0. Maps the data bank into slot B and puts back what was there.  Uses R0-R4, R7, R12.
 
 ### `SETSCH`
 
-make colour scheme R0 (0-4) the current one and load it.  The screen is not rewritten: every cell's attribute names roles, and the palette is what changed.  Uses R0-R3, R12 (and what LDSCHM uses).
+make colour scheme R0 (0-4) the current one and load it.  The screen is not rewritten: every cell's attribute names roles, and the palette is what changed.  Uses R0-R4, R7, R12.
+
+### `VREG`
+
+write F18A register R0 (0-63) with the byte in the high half of R1. The F18A must be unlocked (the loader did it; VMODE keeps it so).  Uses R0, R1.  Leaf in effect (it tail-calls VDPWR).
+
+### `VMODE`
+
+set the display mode.  R0 = the base mode (VMT80 text 80, VMT40 text 40, VMGM1 graphics I, VMGM2 graphics II, VMMC multicolor), R1 = the options added together (VO30 30 rows, VOPOS an attribute per position, VOTE1-3 tile enhanced colour, VOSE1-3 sprite enhanced colour, VOSPR sprites on, VOS16 16 x 16 sprites, VOSMG magnified).  Sets every register the modes use (tile layer 2, the bitmap layer, scrolling and palette selects off), the VRAM tables to a blank screen in the colours of the current scheme, the glyph set in the pattern table of the text-like modes, and the text routines' variables (TXCOLS TXROWS TXCELLS TXATTR NAMBAS).  The display is off while it works.  The VRAM map is in kdefs.a99.  Not every combination exists: enhanced colour tiles apply to Text 80, Text 40 and Graphics I; Graphics II and Multicolor ignore VOPOS and VOTE1-3, and Graphics II has no 30-row form.  Uses R0-R9, R12 and what PAGEB uses; slot B is left as it was.
+
+### `VMTAB` *(internal)*
+
+the VRAM tables for the mode VMODE has just set up: blank screen, the font, the sprite attribute table cleared, the GPU program, the palette. Uses R0-R9.
+
+### `VSHIFT`
+
+move R2 rows of TXCOLS bytes in VRAM from R0 to R1 with the F18A's DMA engine, started by its GPU: R3 = 0 to copy forwards (from the first bytes), 2 backwards (from the last bytes; R0 and R1 then point at the last byte of each block), as overlapping moves need.  Waits until the GPU is idle again.  Uses R0-R4.
 
 ### `T80INI`
 
-the F18A in Text 80 at 30 rows with per-position colour: registers, both tables cleared (spaces in the normal text colours), the glyph set and colour scheme 0 from the data bank, the GPU program, the DMA engine tested, display on.  Called once by KSTART before the first module runs.  The F18A must already be unlocked (the loader did it; F18UNL is lock-safe).  Slot B is left as it was.  Uses R0-R4, R12.
+the boot mode: Text 80, 30 rows, an attribute per position (VMODE with VMDEF), and the F18A's DMA engine tested.  Called once by KSTART before the first module runs.  Uses what VMODE and DMATST use.
 
 ### `DMATST` *(internal)*
 
-test the F18A's DMA engine once: 80 bytes of a pattern at VRAM >3000 are copied by VSHIFT to >3080 and read back.  NODMA = 0 if they arrived, else non-zero (an F18A whose firmware has no DMA: the application then redraws rows instead of moving them).  Uses R0-R4.
+test the F18A's DMA engine once: 80 bytes of a pattern at VRAM >1500 are copied by VSHIFT to >1580 and read back.  NODMA = 0 if they arrived, else non-zero (an F18A whose firmware has no DMA: the application then redraws rows instead of moving them).  Uses R0-R4.
 
 ### `GPUPRG` *(internal)*
 
@@ -232,7 +244,7 @@ glyph R1 (high byte) at position R0 with attribute R2. Uses R0-R2, R6.
 
 the low byte of R1 as two hex digits at R0, attribute R2. Uses R0-R7.
 
-### `HEXD` *(internal)*
+### `HEXD`
 
 the low nibble of R4 as a hex digit at *R3+ (R3 moves on one). Leaf.  Uses R3, R4.
 
@@ -242,11 +254,11 @@ the word R1 as four hex digits at R0, attribute R2.  Uses R0-R7.
 
 ### `CLS`
 
-clear the screen: every glyph a space and every attribute R1 (high byte; usually (RTEXT*16+RBG)*256).  Uses R0-R2.
+clear the screen: every glyph a space and (where the mode has an attribute table) every attribute R1 (high byte; usually (RTEXT*16+RBG)*256).  Uses R0-R2.
 
 ### `BOX`
 
-a single-line frame in glyphs 1-6 (the UI glyphs: docs/GLYPHS.md): R0 = the top-left cell's position (row * 80 + column), R1 = interior width, R2 = interior height, R3 = attribute (high byte).  The interior is left alone.  Uses R0-R9.
+a single-line frame in glyphs 1-6 (the UI glyphs: docs/GLYPHS.md): R0 = the top-left cell's position (row * columns + column), R1 = interior width, R2 = interior height, R3 = attribute (high byte).  The interior is left alone.  Uses R0-R9.
 
 ### `BXCEL` *(internal)*
 
@@ -306,7 +318,7 @@ close the file.  R0 = 0 or the error.  Uses R0-R9.
 
 delete the file named by R2 (DSR opcode 7).  R0 = 0 or the error.  Uses R0-R9.
 
-### `FCALL` *(internal)*
+### `FCALL`
 
 call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it uses kept and put back, >8356 at the name length. R0 = 0, the error, or >FF.  Uses R0-R9.
 
@@ -314,7 +326,7 @@ call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it
 
 number n of a catalog record: R1 = the record's address (as FREAD left it after opening "DSK1." as FIN+FINTL, record length 38), R2 = n.  R0 = the integer.  Record 0 is the disk (name, 0, its size in sectors, sectors free); every other record is a file (name, type, size in sectors, record length; a type is 1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX, 4 INT/VAR, 5 program, negative for a protected file) and an empty name ends the catalog.  Numbers are 8-byte radix-100 floats after the name; this reads small integers only (under 10,000), as catalogs hold.  The name is the length-prefixed string at the record's start.  Uses R0-R5. Leaf.
 
-### `DSRLNK` *(internal)*
+### `DSRLNK`
 
 find the device named in the PAB and call its DSR (from The Lantern Coast).  >8356 -> the PAB's name length byte.  R0 = 0, the DSR's error 1-7, or >FF (no card has that device).  The console's own DSRLNK is not used: it needs the GPL environment the kernel does not keep.
 

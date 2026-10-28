@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""guide_pdf.py - build docs/PROGRAMMERS-GUIDE.pdf from docs/PROGRAMMERS-GUIDE.md.
+"""guide_pdf.py - build docs/PROGRAMMERS-GUIDE.pdf and docs/VIDEO-MODES.pdf from their Markdown.
 
-    python3 tools/guide_pdf.py
+    python3 tools/guide_pdf.py [guide|video]       (no argument: both)
 
 Needs pandoc, wkhtmltopdf, and the Python packages pypdf and reportlab (page
 numbers, bookmarks, document properties are added afterwards: the unpatched
@@ -18,6 +18,7 @@ h2 { font-family: "DejaVu Sans", sans-serif; font-size: 14pt; margin: 1.4em 0 .4
 h3 { font-family: "DejaVu Sans", sans-serif; font-size: 11.5pt; margin: 1.2em 0 .3em; page-break-after: avoid; }
 p.subtitle { font-family: "DejaVu Sans", sans-serif; font-size: 14pt; color: #555; margin: 0 0 .3in; }
 p.meta { font-family: "DejaVu Sans", sans-serif; font-size: 10pt; color: #555; }
+img { max-width: 100%; }
 code, pre { font-family: "DejaVu Sans Mono", monospace; font-size: 8.6pt; }
 code { background: #f0f2f6; padding: 0 2px; border-radius: 2px; }
 pre { background: #f5f6f9; border: 1px solid #d5d9e2; border-left: 3px solid #23498a; padding: 7px 9px; white-space: pre-wrap; word-wrap: break-word; page-break-inside: avoid; line-height: 1.3; }
@@ -28,6 +29,7 @@ th { background: #23498a; color: #fff; text-align: left; font-family: "DejaVu Sa
 th, td { border: 1px solid #c8cdd8; padding: 4px 6px; vertical-align: top; }
 tr:nth-child(even) td { background: #f7f8fb; }
 td code { font-size: 8.4pt; white-space: nowrap; }
+th code { background: none; color: #fff; }
 nav#TOC { page-break-after: always; }
 nav#TOC ul { list-style: none; padding-left: 1.2em; }
 nav#TOC > ul { padding-left: 0; }
@@ -40,21 +42,29 @@ HEAD = '''<h1 class="title">Lantern Kernel</h1>
 <p class="meta">Version %s &middot; %s<br>For a TI-99/4A with an F18A video card and a SAMS memory card<br>MIT License, &copy; 2026 Rebecca Sutter</p>
 '''
 
-def main():
+DOCS = {
+    'guide': ('PROGRAMMERS-GUIDE', "# Lantern Kernel: the programmer's guide", "The programmer's guide: writing TI-99/4A applications in assembly", "Lantern Kernel programmer's guide"),
+    'video': ('VIDEO-MODES', "# Lantern Kernel: the F18A's display modes", "The F18A's display modes: every mode and option, with pictures", "Lantern Kernel video modes"),
+}
+
+def build(key):
+    base, h1, subtitle, footer = DOCS[key]
     from pypdf import PdfReader, PdfWriter
     from reportlab.pdfgen import canvas
     from reportlab.lib.pagesizes import letter
     ver = open(os.path.join(ROOT, 'VERSION')).read().strip()
     date = '28 October 2026'
-    md = open(os.path.join(ROOT, 'docs', 'PROGRAMMERS-GUIDE.md'), encoding='utf-8').read()
+    md = open(os.path.join(ROOT, 'docs', base + '.md'), encoding='utf-8').read()
     md = re.sub(r'\[([^\]]+)\]\((?:[A-Z\-]+\.md)\)', r'\1', md)
-    md = md.replace("# Lantern Kernel: the programmer's guide", '', 1)
+    md = md.replace(h1, '', 1)
     tmp = tempfile.mkdtemp()
     open(os.path.join(tmp, 'g.md'), 'w', encoding='utf-8').write(md)
     open(os.path.join(tmp, 's.css'), 'w').write(CSS)
-    open(os.path.join(tmp, 'h.html'), 'w').write(HEAD % (ver, date))
+    open(os.path.join(tmp, 'h.html'), 'w').write(HEAD.replace("The programmer's guide: writing TI-99/4A applications in assembly", subtitle) % (ver, date))
+    import shutil
+    shutil.copytree(os.path.join(ROOT, 'docs', 'images'), os.path.join(tmp, 'images'))
     subprocess.check_call(['pandoc', 'g.md', '-f', 'gfm', '-t', 'html5', '-s', '--toc', '--toc-depth=2', '--metadata',
-                           "pagetitle=Lantern Kernel: the programmer's guide", '-c', 's.css', '-B', 'h.html', '-o', 'g.html'], cwd=tmp)
+                           'pagetitle=' + footer, '-c', 's.css', '-B', 'h.html', '-o', 'g.html'], cwd=tmp)
     h = open(os.path.join(tmp, 'g.html'), encoding='utf-8').read()
     h = re.sub(r'<header id="title-block-header">.*?</header>', '', h, flags=re.S)
     h = h.replace('<nav id="TOC" role="doc-toc">', '<nav id="TOC" role="doc-toc"><h1 style="page-break-before:always;margin-top:0">Contents</h1>')
@@ -69,7 +79,7 @@ def main():
         if i:
             buf = io.BytesIO(); c = canvas.Canvas(buf, pagesize=letter)
             c.setFont('Helvetica', 8); c.setFillGray(0.4)
-            c.drawCentredString(306, 28, "Lantern Kernel programmer's guide  -  %d" % (i + 1)); c.save(); buf.seek(0)
+            c.drawCentredString(306, 28, footer + "  -  %d" % (i + 1)); c.save(); buf.seek(0)
             p.merge_page(PdfReader(buf).pages[0])
         w.add_page(p)
     w.add_outline_item('Title', 0); w.add_outline_item('Contents', 1)
@@ -83,12 +93,17 @@ def main():
         cur = pg
         if len(m.group(1)) == 2: parent = w.add_outline_item(m.group(2).replace('`', ''), pg)
         else: w.add_outline_item(m.group(2).replace('`', ''), pg, parent=parent)
-    w.add_metadata({'/Title': "Lantern Kernel: the programmer's guide", '/Author': 'Rebecca Sutter',
-                    '/Subject': 'Writing TI-99/4A applications in TMS9900 assembly on the Lantern Kernel, version ' + ver})
+    w.add_metadata({'/Title': footer, '/Author': 'Rebecca Sutter',
+                    '/Subject': subtitle + ', version ' + ver})
     w.page_mode = '/UseOutlines'
-    out = os.path.join(ROOT, 'docs', 'PROGRAMMERS-GUIDE.pdf')
+    out = os.path.join(ROOT, 'docs', base + '.pdf')
     w.write(out)
     print('wrote %s: %d pages, %d headings not found for bookmarks' % (out, len(src.pages), miss))
+
+def main():
+    which = sys.argv[1:] or ['guide', 'video']
+    for k in which:
+        build(k)
 
 if __name__ == '__main__':
     main()

@@ -1,10 +1,18 @@
 *======================================================================
-* text.a99 - writing text on the 80 x 30 screen
+* text.a99 - writing text on the screen (Text 80, Text 40, Graphics I)
 *
-* A screen position is row * 80 + column (0-2399).  Each cell has a
-* name-table byte (the glyph) and an attribute byte (foreground role << 4
-* | background role).  Attributes are passed in the high byte.
+* A screen position is row * columns + column.  Each cell has a name-table
+* byte (the glyph) and, in the modes that have one, an attribute byte
+* (foreground role << 4 | background role).  Attributes are passed in the
+* high byte.
 *======================================================================
+
+* The text routines follow the video mode (VMODE sets TXCOLS, TXROWS,
+* TXCELLS, TXATTR, NAMBAS): a position is row * TXCOLS + column, and in a
+* mode with no attribute table (Graphics I without ECM, Text with the colours
+* of VR7) the attribute is ignored.  In the enhanced colour modes the
+* "attribute" is the ECM attribute byte (docs/VIDEO-MODES.md).  They are for
+* the modes whose names are glyphs: Text 80, Text 40 and Graphics I.
 
 * PUTS - length-prefixed string at R1 to position R0, attribute R2.
 * Uses R0-R7.
@@ -16,8 +24,10 @@ PUTS   .enter
        SWPB R2                 length
        JEQ  PS9
        MOV  R2,R7
-       AI   R0,NAMTAB
+       A    @NAMBAS,R0
        BL   @VMBW              the glyphs
+       MOV  @TXATTR,@TXATTR    a mode with no attribute table: done
+       JEQ  PS9
        MOV  R6,R0
        AI   R0,ATRTAB
        MOV  R5,R1
@@ -28,9 +38,12 @@ PS9    .leave
 
 * FILLA - attribute R1 (high byte) over R2 cells from position R0.
 * FILLN - glyph R1 (high byte) over R2 cells from position R0.  Leaves.
-FILLA  AI   R0,ATRTAB
+FILLA  MOV  @TXATTR,@TXATTR    a mode with no attribute table: nothing to do
+       JNE  FLA1
+       RT
+FLA1   AI   R0,ATRTAB
        B    @VFILL
-FILLN  AI   R0,NAMTAB
+FILLN  A    @NAMBAS,R0
        B    @VFILL
 
 * DECW - R1 as an unsigned decimal number at R0, attribute R2, no leading
@@ -67,13 +80,15 @@ DW1    CLR  R4                 R4:R5 / 10
 * Uses R0-R2, R6.
 PUTC   .enter
        MOV  R0,R6
-       AI   R0,NAMTAB
+       A    @NAMBAS,R0
        BL   @VSBW
+       MOV  @TXATTR,@TXATTR
+       JEQ  PC9
        MOV  R6,R0
        AI   R0,ATRTAB
        MOV  R2,R1
        BL   @VSBW
-       .leave
+PC9    .leave
        RT
 
 * HEX2 - the low byte of R1 as two hex digits at R0, attribute R2.
@@ -123,24 +138,27 @@ HEX4   .enter
        .leave
        RT
 
-* CLS - clear the screen: every glyph a space and every attribute R1
-* (high byte; usually (RTEXT*16+RBG)*256).  Uses R0-R2.
+* CLS - clear the screen: every glyph a space and (where the mode has an
+* attribute table) every attribute R1 (high byte; usually
+* (RTEXT*16+RBG)*256).  Uses R0-R2.
 CLS    .enter
        MOV  R1,R2
        .push R2
-       LI   R0,NAMTAB
+       MOV  @NAMBAS,R0
        LI   R1,>2000
-       LI   R2,COLS*ROWS
+       MOV  @TXCELLS,R2
        BL   @VFILL
        .pop R1
+       MOV  @TXATTR,@TXATTR
+       JEQ  CLS9
        LI   R0,ATRTAB
-       LI   R2,COLS*ROWS
+       MOV  @TXCELLS,R2
        BL   @VFILL
-       .leave
+CLS9   .leave
        RT
 
 * BOX - a single-line frame in glyphs 1-6 (the UI glyphs: docs/GLYPHS.md):
-* R0 = the top-left cell's position (row * 80 + column), R1 = interior
+* R0 = the top-left cell's position (row * columns + column), R1 = interior
 * width, R2 = interior height, R3 = attribute (high byte).  The interior
 * is left alone.  Uses R0-R9.
 BOX    .enter
@@ -165,7 +183,7 @@ BOX    .enter
        MOV  R4,R9
 BX2    MOV  R8,R8
        JEQ  BX3
-       AI   R9,COLS
+       A    @TXCOLS,R9
        MOV  R9,R0
        LI   R1,>0200
        BL   @BXCEL
@@ -176,9 +194,9 @@ BX2    MOV  R8,R8
        BL   @BXCEL
        DEC  R8
        JMP  BX2
-BX3    MOV  R6,R0              the bottom edge: top + (height + 1) * 80
+BX3    MOV  R6,R0              the bottom edge: top + (height + 1) * columns
        INC  R0
-       LI   R1,COLS
+       MOV  @TXCOLS,R1
        MPY  R1,R0              R0:R1 = the product
        A    R4,R1
        MOV  R1,R9

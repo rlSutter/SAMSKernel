@@ -51,28 +51,31 @@ F18P1  MOVB *R1+,@VDPWD        0R byte
        .leave
        RT
 
-* F18OFF - put back every F18A register Press changes, as at power-up,
-* before the console's reset (which sets only VR0-VR7): no 30 rows, no
-* position attributes, the stop-sprite register at its default, status
+* F18OFF - put back every F18A register the kernel (VMODE, VREG) can change,
+* as at power-up, before the console's reset (which sets only VR0-VR7): no
+* 30 rows, no enhanced colour, no position attributes, no second tile layer,
+* no bitmap layer, no scroll, the stop-sprite register at its default, status
 * register 0, and the sixteen standard colours.  Lantern learned this the
 * hard way: the TI title is wrong otherwise.
 F18OFF .enter
        MOV  @F18FLG,R0
-       JEQ  FO9
-       LI   R0,>B100           VR49 = 0: 24 rows, no enhanced colour
+       JEQ  FOF9
+       LI   R2,OFFREG          every register VMODE and VREG can have changed
+FOF1    MOV  *R2+,R0
+       JEQ  FOF2
        BL   @VDPWR
-       LI   R0,>B200           VR50 = 0: attributes by name, not position
-       BL   @VDPWR
-       LI   R0,>B320           VR51 = 32: no stop sprite (the power-up value)
-       BL   @VDPWR
-       LI   R0,>8F00           VR15 = 0: status register 0
-       BL   @VDPWR
-       CLR  R0                 the standard sixteen colours
+       JMP  FOF1
+FOF2    CLR  R0                 the standard sixteen colours
        LI   R1,STDPAL
        LI   R2,16
        BL   @F18PAL            (leaves VR47 = 0)
-FO9    .leave
+FOF9    .leave
        RT
+* VR10, VR11, VR19, VR24-VR31 (tile layer 2, interrupt line, palette selects,
+* scrolling, page and plane sizes, sprite limit, bitmap layer), VR48 = 1,
+* VR49 = 0 (24 rows, normal colour), VR50 = 0, VR51 = 32 (no stop sprite), VR15 = 0
+OFFREG DATA >8A00,>8B00,>9300,>9800,>9900,>9A00,>9B00,>9C00
+       DATA >9D00,>9E00,>9F00,>B001,>B100,>B200,>B320,>8F00,0
 
 * the F18A's power-up palette entries 0-15: the 9918A's colours
 STDPAL DATA >0000,>0000,>02C3,>05D6,>054F,>076F,>0D54,>04EF

@@ -32,36 +32,54 @@ refusal code is a leaf that needs no expansion RAM, because with no memory card 
 Then slot A and the kernel's scratchpad variables are cleared (real RAM powers up random), the
 banks are copied into SAMS and the kernel starts.
 
-## Video: Text 80 at 30 rows
+## Video: the F18A's modes
+
+The boot mode is Text 80 at 30 rows with an attribute per position; `VMODE` sets any other (VIDEO-MODES.md is the reference, with pictures of each). The registers of the boot mode:
 
 | Register | Value | Meaning |
 | --- | --- | --- |
 | VR0 | `>04` | M4: Text 80 (with VR1's M1) |
 | VR1 | `>F0` | 16K, display on, interrupts on, M1 |
 | VR2 | `>00` | name table at `>0000` (unlocked F18A: (VR2 AND `>0F`) x `>400`) |
-| VR3 | `>60` | position-attribute table at `>1800` (VR3 x `>40`) |
-| VR4 | `>02` | pattern table at `>1000` ((VR4 AND 7) x `>800`) |
-| VR7 | `>21` | backdrop and border: role 1 |
+| VR3 | `>28` | position-attribute table at `>0A00` (VR3 x `>40`) |
+| VR4 | `>03` | pattern table at `>1800` ((VR4 AND 7) x `>800`) |
+| VR5 | `>28` | sprite attribute table at `>1400` (VR5 x `>80`) |
+| VR6 | `>06` | sprite patterns at `>3000` ((VR6 AND 7) x `>800`) |
+| VR7 | `>21` | text colours (role 2 on role 1) and the backdrop (role 1) |
+| VR29 | `>80` | extra pattern planes `>800` apart for tiles, `>200` apart for sprites |
 | VR49 | `>40` | 30 rows; no enhanced colour |
 | VR50 | `>02` | attributes per position |
 | VR51 | `>00` | stop sprite 0: no sprites. With 30 rows the F18A ignores the `>D0` sprite-list terminator, and an unlocked F18A draws sprites in text modes, so they are stopped this way |
 
 Each cell's attribute byte names the foreground (high nibble) and background (low nibble) palette
-entry. Entry 0 is transparent; the border is 16 pixels each side, drawn in the backdrop colour.
+entry. Entry 0 draws nothing (the backdrop shows); the border is 16 pixels each side in Text 80, 8 in Text 40, drawn in the backdrop colour.
 
-**Quit** (`F18OFF`, then `BLWP @>0000`): VR49, VR50 and VR51 back to their power-up values (0, 0, 32),
-VR15 to 0, palette entries 0-15 to the standard colours, SAMS mapping off. The console's reset sets
-only VR0-VR7, so without this the TI title screen comes up wrong.
+**The modes, as the registers select them** (js99er's F18A emulation, from the F18A documentation):
+
+| Mode | VR0 | VR1 bits | Notes |
+| --- | --- | --- | --- |
+| Graphics I | `>00` | M1 = M2 = 0 | |
+| Text 40 | `>00` | M1 (`>10`) | |
+| Text 80 | `>04` | M1 | VR0 bit 2 |
+| Multicolor | `>00` | M2 (`>08`) | |
+| Graphics II (bitmap) | `>02` | M1 = M2 = 0 | VR0 bit 1 (M3); VR3 bit 7 / VR4 bit 2 pick the tables, their low bits mask the thirds |
+
+Enhanced colour for tiles is VR49 bits 5-4, for sprites bits 1-0; VR50 bit 1 puts the attribute table per position; VR49 bit 6 is 30 rows, bit 7 tile layer 2, bit 2 sprite linking, bit 3 real sprite Y.
+The F18A accepts registers 8-63 only when unlocked (below); a locked F18A masks writes above 7 when Text 80 is off.
+
+**Quit** (`F18OFF`, then `BLWP @>0000`): every register `VMODE` and `VREG` can change goes back to its power-up value (VR10, VR11, VR19, VR24-VR31 to 0, VR48 to 1, VR49 and VR50 to 0, VR51 to 32), VR15 to 0, palette entries 0-15 to the standard
+colours, SAMS mapping off. The console's reset sets only VR0-VR7, so without this the TI title screen comes up wrong.
 
 **Unlocking.** The F18A stays unlocked through a console reset, and any write to VR57 while it is
 unlocked locks it again. On a stock 9918A the unlock write lands on VR1 and blanks the screen; the
 kernel never gets that far because the loader has refused a machine without an F18A.
 
 **Palette.** 64 entries of 12 bits (`>0RGB`), written through VR47 (`>C0` + index: palette data mode
-with auto-increment, two data-port writes per entry). The kernel uses 0-15.
+with auto-increment, two data-port writes per entry). The kernel loads 0-15 (the colour scheme); VR24 and the attribute
+bytes select which entries each layer uses.
 
-**DMA and the GPU.** `VSHIFT` writes an 8-byte mailbox to VRAM `>2800`, points the GPU at its program at
-`>2810` (VR54/55), and waits on status register 2 bit 7. The kernel tests the DMA engine once at boot
+**DMA and the GPU.** `VSHIFT` writes an 8-byte mailbox to VRAM `>0960`, points the GPU at its program at
+`>0970` (VR54/55), and waits on status register 2 bit 7. The kernel tests the DMA engine once at boot
 (`DMATST`: copy 80 bytes, read them back) and sets `NODMA` if the copy did not arrive.
 
 ## Colour roles and schemes

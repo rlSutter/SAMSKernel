@@ -190,6 +190,33 @@ def write_cfg(app, bdir, banks, pgfree):
     open(os.path.join(bdir, 'appmsg.a99'), 'w').write('\n'.join(msg) + '\n')
 
 
+def export_public(ksrc, bdir, equ):
+    """Rewrite kernel.equ so that it exports only what an application may use: the
+    equates (kdefs.a99 and the generated appcfg.a99) and the routines in
+    kernel/public.txt.  Every other kernel label stays private, so the kernel can
+    add routines without colliding with the labels of an application's modules."""
+    keep = set()
+    for f in (os.path.join(ksrc, 'kdefs.a99'), os.path.join(bdir, 'appcfg.a99')):
+        for line in open(f, encoding='latin-1'):
+            m = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\b', line, re.I)
+            if m: keep.add(m.group(1).lower())
+    for line in open(os.path.join(ksrc, 'public.txt')):
+        if not line.startswith('#'):
+            keep.update(n.lower() for n in line.split())
+    lines = open(equ).read().split('\n')
+    out, i, total = [], 0, 0
+    while i + 1 < len(lines):
+        if lines[i].endswith(':') and 'equ' in lines[i + 1]:
+            total += 1
+            if lines[i][:-1].lower() in keep:
+                out += [lines[i], lines[i + 1]]
+            i += 2
+        else:
+            i += 1
+    open(equ, 'w').write('\n'.join(out) + '\n')
+    return total, len(out) // 2
+
+
 def main():
     args = sys.argv[1:]
     if not args or args[0].startswith('-'):
@@ -224,6 +251,7 @@ def main():
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), incs,
                  os.path.join(bdir, 'kernel.lst'), equ)
+    export_public(ksrc, bdir, equ)
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), incs,
                  os.path.join(bdir, 'loader.lst'))
     ds = os.path.join(appdir, 'databank.a99')
