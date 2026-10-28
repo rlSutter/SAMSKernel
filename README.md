@@ -45,7 +45,7 @@ TI_CONSOLE_ROM=/path/to/console-rom TIFDC_ROM=/path/to/disk-controller-rom pytho
 
 The tests run the examples in `tools/sim9900.py`, a headless TMS9900 + F18A + SAMS + keyboard + stand-in disk simulator. With `TI_CONSOLE_ROM` set to your
 own copy of the 8K console ROM (a raw dump, or an EA5 image), it runs TI's real interrupt routine; with `TIFDC_ROM` set to the 8K disk controller ROM (the two 4K EPROM images joined, low half first) the file service and the
-disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc.py`). The ROMs are TI's: they are not, and must not be, part of this repository.
+disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc.py`). The console and disk controller ROMs are TI's: they are not, and must not be, part of this repository. The one ROM that is here is the CF7+ DSR (`roms/`, see `roms/README.md`); no test uses it yet.
 
 ## Status
 
