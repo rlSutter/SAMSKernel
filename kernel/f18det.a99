@@ -1,0 +1,45 @@
+*======================================================================
+* f18det.a99 - the F18A (or PICO9918) detected and its version read (the loader only)
+*======================================================================
+
+* F18DET - after F18UNL, select status register 1 and read the ID.
+* Bits 7-5 = 111 identify an F18A, or an F18A-compatible PICO9918, whose
+* ID is >E8 (bit 3, its emulation marker; bits 1-0 are live status, so
+* masked off).  Returns R0 = 1 if found, else 0; VDPPIC = 1 for a PICO9918.
+* Restores VR15 = 0 and VR7 (which a real 9918A would have hit).
+F18DET .enter
+       LI   R0,>8F01           VR15 = 1: status register 1
+       BL   @VDPWR
+       MOVB @VDPSTA,R1         ID byte: 111xxxxx on an F18A
+       LI   R0,>8F00           back to status register 0
+       BL   @VDPWR
+       LI   R0,>8701           VR7 backdrop black (9918A aliased VR15 onto VR7)
+       BL   @VDPWR
+       CLR  @VDPPIC
+       MOV  R1,R2              a PICO9918? >E8 with the live bits 1-0 masked
+       ANDI R2,>F800
+       CI   R2,>E800
+       JNE  F18D0
+       INC  @VDPPIC
+F18D0  CLR  R0
+       ANDI R1,>E000           top three bits of the ID
+       CI   R1,>E000           all set = F18A (or a PICO9918)
+       JNE  F18D1
+       INC  R0
+F18D1  MOV  R0,@F18FLG         remembered for palette / ECM / sprite colour choices
+       .leave
+       RT
+* F18RDV - the firmware version from status register 14 (e.g. >19 for
+* 1.9) into F18VER as a word.  Only after F18UNL found an F18A.
+F18RDV .enter
+       LI   R0,>8F0E           VR15 = 14: status register 14
+       BL   @VDPWR
+       CLR  R1
+       MOVB @VDPSTA,R1         the version byte
+       SWPB R1
+       MOV  R1,@F18VER
+       LI   R0,>8F00           back to status register 0
+       BL   @VDPWR
+       .leave
+       RT
+

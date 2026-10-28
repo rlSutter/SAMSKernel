@@ -1,0 +1,230 @@
+*======================================================================
+* loader.a99 - cartridge bank 0 (>6000->7FFF): the machine checked, the
+* cartridge copied into SAMS, the kernel started.
+*
+* The checks, in order:
+*   1. a SAMS / AMS mapper answers;
+*   2. it has PGMIN pages or more (appcfg.a99; 128 = 512K);
+*   3. every page from PGDATA up holds what is written to it;
+*   4. an F18A (or a PICO9918) answers (lock-safe unlock).
+* A failed check shows a refusal screen in 40-column text with the console's
+* own font (the stock VDP can show that much) and waits for FCTN = (the
+* console ISR's QUIT) to go back to the title.
+*
+* The copy: bank 1 (the kernel) goes to >A000 (pages >0A-0B); every other
+* bank listed in BANKTB (appcfg's appmsg.a99: bank number, destination
+* page) goes to its page pair through slot B.  The bank copier runs from
+* scratchpad because selecting another bank makes this code disappear from
+* >6000.
+*
+* The refusal messages and BANKTB are written by tools/lkbuild.py.
+*======================================================================
+       COPY "kdefs.a99"
+
+       AORG >6000
+       BYTE >AA,>01,>01,>00    header: valid, version, programs, reserved
+       DATA >0000              power-up list
+       DATA PRGLST             program list
+       DATA >0000              DSR list
+       DATA >0000              subprogram list
+       DATA >0000,>0000
+PRGLST DATA >0000              next program: none
+       DATA START
+       COPY "appname.a99"      BYTE n, TEXT '...' : the name the console's menu shows
+       EVEN
+
+* START - the cartridge's program: the four checks, then the copy.  Never
+* returns: it ends by branching to the kernel, or in REFUSE.
+START  LIMI 0
+       LWPI WS
+       BL   @AMSDET            R0 = 1 if a mapper answered (leaf)
+       MOV  R0,R0
+       JNE  ST1
+       LI   R1,MSGSAM          no memory card: refuse
+       B    @REFUSE
+ST1    LI   R1,>8340           the kernel's scratchpad variables start clean
+       LI   R2,>20             >8340->837F, in words
+ST1A   CLR  *R1+
+       DEC  R2
+       JNE  ST1A
+       BL   @AMSINI            identity map, mapping on (leaf)
+       BL   @AMSSIZ            R0 = 32, 64, 128 or 256 pages
+       MOV  R0,@NPAGES
+       CI   R0,PGMIN
+       JHE  ST2
+       LI   R1,MSGSAM          too small: refuse
+       B    @REFUSE
+* Slot A RAM exists now: clear it (power-up RAM is random; after a Quit
+* the last session's state is still there) and give the stack a home.
+ST2    LI   R1,>2000
+       LI   R2,>0800           >2000->3FFF, in words
+ST2A   CLR  *R1+
+       DEC  R2
+       JNE  ST2A
+       LI   R10,STKTOP
+       MOV  @NPAGES,R0
+       BL   @AMSTST            every page from PGDATA up (destructive: nothing loaded yet)
+       MOV  R0,R0
+       JEQ  ST3
+       MOV  R0,@BADPG
+       LI   R1,MSGBAD
+       B    @REFUSE
+ST3    BL   @F18UNL            lock-safe: unlocks only if not unlocked
+       BL   @F18DET            R0 = 1 for an F18A
+       MOV  R0,R0
+       JNE  ST4
+       LI   R1,MSGF18
+       B    @REFUSE
+ST4    BL   @F18RDV
+* relocate the bank copier into scratchpad
+       LI   R1,CPBK
+       LI   R2,SCRTCH
+       LI   R3,(CPBKE-CPBK)/2
+ST5    MOV  *R1+,*R2+
+       DEC  R3
+       JNE  ST5
+       LI   R1,CBANK0+2        bank 1 (the kernel) -> >A000
+       LI   R2,>A000
+       BL   @SCRTCH
+* the other banks: BANKTB lists (bank number, SAMS page), ended by 0
+       LI   R8,BANKTB
+ST6    MOV  *R8+,R1            the bank number
+       JEQ  ST7                0: the list's end
+       SLA  R1,1               its select address: >6000 + 2n
+       AI   R1,CBANK0
+       MOV  *R8+,R0            the page pair it goes to
+       MOV  R1,R9              (PAGEB uses R0-R4, R7: R1 kept in R9)
+       BL   @PAGEB
+       MOV  R9,R1
+       LI   R2,>E000
+       BL   @SCRTCH
+       JMP  ST6
+ST7    LI   R0,PGLOWB          slot B back to its default pair
+       BL   @PAGEB
+       B    @>A000             the kernel (KSTART)
+
+* CPBK - copy the 8K bank selected by writing *R1 to R2.
+* Position independent; uses R3, R4; never touches R11.
+CPBK   CLR  *R1                writing in the bank window selects that bank
+       LI   R3,CBANK0
+       LI   R4,>1000           8K = >1000 words
+CPL    MOV  *R3+,*R2+
+       DEC  R4
+       JNE  CPL
+       CLR  @CBANK0            back to bank 0 before returning into it
+       RT
+CPBKE
+
+* REFUSE - show the message list at R1 in 40-column text and wait for
+* FCTN = .  No stack and no expansion RAM are assumed (there may be no
+* memory card at all): a leaf, using only registers, scratchpad and VRAM.
+* Message list: BYTE row, then a length-prefixed line, centred; row >FF ends.
+* A line of length 2 holding '>' '?' shows the failing page in hex.
+REFUSE MOV  R1,R9              the message list
+       LI   R1,REFREG          40-column text, white on dark blue
+RF1    MOV  *R1+,R0
+       JEQ  RF2
+       SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       JMP  RF1
+RF2    LI   R0,>0800+(32*8)    the console font into patterns 32-95
+       SWPB R0                 the VRAM address, low byte ...
+       MOVB R0,@VDPWA
+       SWPB R0
+       ORI  R0,>4000           (a write)
+       MOVB R0,@VDPWA          ... then high
+       LI   R0,>06B4           console GROM: 7-byte glyphs for 32-95
+       MOVB R0,@GRMWA          the GROM address, high ...
+       SWPB R0
+       MOVB R0,@GRMWA          ... low
+       LI   R2,64              64 characters
+RF3    LI   R3,7               7 rows each
+RF4    MOVB @GRMRD,@VDPWD      a row
+       DEC  R3
+       JNE  RF4
+       CLR  R0
+       MOVB R0,@VDPWD          the 8th row blank
+       DEC  R2                 the next character
+       JNE  RF3
+       CLR  R0                 the name table (960 cells): spaces
+       MOVB R0,@VDPWA          VRAM >0000 ...
+       LI   R0,>4000
+       MOVB R0,@VDPWA          ... for writing
+       LI   R0,>2000           a space
+       LI   R2,960             960 cells
+RF5    MOVB R0,@VDPWD
+       DEC  R2
+       JNE  RF5
+RF6    CLR  R3                 next line: its row
+       MOVB *R9+,R3
+       CI   R3,>FF00
+       JEQ  RF9
+       SWPB R3
+       LI   R4,40              row * 40
+       MPY  R3,R4              R4:R5 = product
+       CLR  R2
+       MOVB *R9+,R2
+       SWPB R2                 length
+       LI   R6,40              centred: + (40 - length) / 2
+       S    R2,R6
+       SRL  R6,1
+       A    R6,R5
+       SWPB R5                 the write address
+       MOVB R5,@VDPWA
+       SWPB R5
+       ORI  R5,>4000
+       MOVB R5,@VDPWA
+       CI   R2,2               '>?' : the failing page (byte compares:
+       JNE  RF7                the text may sit at an odd address)
+       CB   *R9,@QPAGE         the bad-page marker?
+       JNE  RF7
+       CB   @1(R9),@QPAGE+1
+       JNE  RF7
+       INCT R9                 past it
+       LI   R0,>3E00           '>'
+       MOVB R0,@VDPWD
+       MOV  @BADPG,R4          the page found bad
+       SRL  R4,4               the high digit
+       BL   @RFHEX
+       MOV  @BADPG,R4          and the low
+       BL   @RFHEX
+       JMP  RF6
+RF7    MOVB *R9+,@VDPWD        an ordinary character
+       DEC  R2
+       JNE  RF7
+       JMP  RF6
+RF9    CLR  R0                 the console ISR may act on QUIT now
+       MOVB R0,@ISRFLG
+RF10   LIMI 2
+       LIMI 0
+       JMP  RF10
+* RFHEX - low nibble of R4 as a hex digit to the VDP.  Leaf (called from
+* REFUSE, which keeps nothing in R11).
+RFHEX  ANDI R4,>000F
+       AI   R4,>30
+       CI   R4,>3A
+       JL   RFH1
+       AI   R4,7
+RFH1   SWPB R4
+       MOVB R4,@VDPWD
+       RT
+QPAGE  TEXT '>?'
+
+REFREG DATA >8000              VR0: no M4 (40 columns)
+       DATA >81F0              VR1: 16K, display on, interrupts, text mode
+       DATA >8200              VR2: name table >0000
+       DATA >8401              VR4: patterns >0800
+       DATA >87F4              VR7: white on dark blue
+       DATA 0
+
+       COPY "appmsg.a99"       MSGSAM, MSGF18, MSGBAD and BANKTB (written by the build)
+BADPG  EQU  >8370              the failing page, for the message (scratchpad)
+
+       COPY "vdp.a99"
+       COPY "f18a.a99"
+       COPY "pager.a99"
+       COPY "amsinit.a99"
+       COPY "f18det.a99"
+       END

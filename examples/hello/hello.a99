@@ -1,0 +1,65 @@
+*======================================================================
+* hello.a99 - the smallest Lantern Kernel application: one module that
+* prints a line, echoes what is typed, and quits on FCTN =.
+*======================================================================
+       COPY "kernel.equ"      the kernel's symbols (routines, variables, equates)
+       COPY "macros.a99"      .enter, .leave, .push, .pop, .callmod
+
+ATEXT  EQU  (RTEXT*16+RBG)*256        text on the page background
+ABAR   EQU  (RBARFG*16+RBARBG)*256    the status bar's colours
+
+CURPOS EQU  APPRAM+0                   where the next typed character goes
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0         the entry table: INIT, TICK, REDRAW, reserved
+
+* INIT - the module has been switched to: draw the screen.
+INIT   .enter
+       BL   @REDRAW
+       .leave
+       RT
+
+* REDRAW - the whole screen.
+REDRAW .enter
+       LI   R1,ATEXT
+       BL   @CLS                       every cell a space in the text colours
+       CLR  R0                         the top row as a bar
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,TITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,HELLO
+       LI   R2,ATEXT
+       BL   @PUTS
+       LI   R0,4*COLS+2
+       MOV  R0,@CURPOS
+       .leave
+       RT
+
+* TICK - once a frame; R0 = the key typed (high byte) or 0.
+TICK   .enter
+       MOV  R0,R0
+       JEQ  TK9                        no key
+       CI   R0,KQUIT*256               FCTN = ?
+       JNE  TK1
+       SETO @QUITF                     ask the kernel to quit
+       JMP  TK9
+TK1    CI   R0,>2000                   a printable character (space to ~)?
+       JL   TK9
+       CI   R0,>7F00
+       JHE  TK9
+       MOV  R0,R1                      echo it
+       MOV  @CURPOS,R0
+       LI   R2,ATEXT
+       BL   @PUTC
+       INC  @CURPOS
+TK9    .leave
+       RT
+
+TITLE  STRI 'Hello, Lantern Kernel'
+HELLO  STRI 'Type something; FCTN = quits.'
+       EVEN

@@ -1,0 +1,79 @@
+*======================================================================
+* f18a.a99 - F18A extended VDP driver (unlock, detect and palette from
+* The Lantern Coast; version read and the power-up restore added for
+* Press 2.0)
+*======================================================================
+
+* F18UNL - unlock the F18A extended registers, unless they are unlocked
+* already.  An F18A stays unlocked through the console's reset (a Quit), and
+* ANY write to VR57 while unlocked locks it again: an unlock sequence sent
+* then locks it, the game falls back to plain colours and the title breaks.
+* So first ask: select status register 1 and read the ID (twice: on a locked
+* F18A or a 9918A the write lands on VR7 and the reads return status
+* register 0, the first of which clears its flags).  Only if no F18A answers,
+* write >1C to VR57 twice.  On a stock 9918A that lands on VR1 (blanking the
+* screen), so F18UNL must be followed by a full register init (VDPINI).
+F18UNL .enter
+       LI   R0,>8F01           status register 1 ...
+       BL   @VDPWR
+       MOVB @VDPSTA,R1
+       MOVB @VDPSTA,R1
+       LI   R0,>8F00           ... and back to 0
+       BL   @VDPWR
+       ANDI R1,>E000           bits 7-5 = 111: an F18A, already unlocked
+       CI   R1,>E000
+       JEQ  FU9
+       LI   R0,>B91C           VR57 (>80|>39) = >1C, written twice
+       BL   @VDPWR
+       LI   R0,>B91C
+       BL   @VDPWR
+FU9    .leave
+       RT
+
+* F18PAL - load palette entries.
+*   R0 = first palette index (0-63), R1 = table of words >0RGB,
+*   R2 = entry count
+* VR47 = >C0 | index puts the data port into palette mode with
+* auto-increment; each entry is two data-port writes (0R, GB).
+F18PAL .enter
+       MOV  R2,R3              entry counter
+       ORI  R0,>00C0           DPM=1, auto-increment=1, plus the start index
+       SWPB R0
+       MOVB R0,@VDPWA          data: >C0|index
+       LI   R0,>AF00           VR47
+       MOVB R0,@VDPWA          data byte of the register write
+F18P1  MOVB *R1+,@VDPWD        0R byte
+       MOVB *R1+,@VDPWD        GB byte
+       DEC  R3
+       JNE  F18P1
+       LI   R0,>AF00           VR47 = 0: leave palette mode
+       BL   @VDPWR
+       .leave
+       RT
+
+* F18OFF - put back every F18A register Press changes, as at power-up,
+* before the console's reset (which sets only VR0-VR7): no 30 rows, no
+* position attributes, the stop-sprite register at its default, status
+* register 0, and the sixteen standard colours.  Lantern learned this the
+* hard way: the TI title is wrong otherwise.
+F18OFF .enter
+       MOV  @F18FLG,R0
+       JEQ  FO9
+       LI   R0,>B100           VR49 = 0: 24 rows, no enhanced colour
+       BL   @VDPWR
+       LI   R0,>B200           VR50 = 0: attributes by name, not position
+       BL   @VDPWR
+       LI   R0,>B320           VR51 = 32: no stop sprite (the power-up value)
+       BL   @VDPWR
+       LI   R0,>8F00           VR15 = 0: status register 0
+       BL   @VDPWR
+       CLR  R0                 the standard sixteen colours
+       LI   R1,STDPAL
+       LI   R2,16
+       BL   @F18PAL            (leaves VR47 = 0)
+FO9    .leave
+       RT
+
+* the F18A's power-up palette entries 0-15: the 9918A's colours
+STDPAL DATA >0000,>0000,>02C3,>05D6,>054F,>076F,>0D54,>04EF
+       DATA >0F54,>0F76,>0DC3,>0ED6,>02B2,>0C5C,>0CCC,>0FFF

@@ -1,0 +1,181 @@
+*======================================================================
+* video.a99 - Text 80 at 30 rows: set up once at boot (T80INI), the colour
+* schemes (LDSCHM, SETSCH) and the F18A's DMA row mover (VSHIFT).  The
+* kernel includes it; the loader does not.
+*======================================================================
+
+* LDSCHM - load colour scheme SCHEME (0-4) into palette entries 0-15.
+* Maps the data bank into slot B and puts back what was there.  Uses
+* R0-R4, R7, R12.
+LDSCHM .enter
+       MOV  @CURPB,R0
+       .push R0
+       LI   R0,PGDATA
+       BL   @PAGEB
+       MOV  @SCHEME,R1         scheme * 32 bytes
+       SLA  R1,5
+       AI   R1,DSCHEM
+       CLR  R0
+       LI   R2,16
+       BL   @F18PAL
+       .pop R0                 slot B back, as it was
+       BL   @SETPB
+       .leave
+       RT
+
+* Text 80 register list: (>80|reg)<<8 | value, terminated by 0.  The
+* addresses follow js99er's F18A (the reference emulator): name table at
+* (VR2 AND >0F) * >400, attributes at VR3 * >40, patterns at (VR4 AND 7)
+* * >800.  VR51 = 0 stops sprite processing (with 30 rows the F18A does
+* not stop at a >D0 terminator).
+T80REG DATA >8004              VR0: M4 = Text 80
+       DATA >81B0              VR1: 16K, display off while we set up, interrupts, M1
+       DATA >8200              VR2: name table >0000
+       DATA >8360              VR3: position attributes >1800
+       DATA >8402              VR4: patterns >1000
+       DATA >8500              VR5: sprite attributes (sprites stopped)
+       DATA >8600              VR6: sprite patterns
+       DATA >8721              VR7: text role 2 on role 1; backdrop role 1
+       DATA >B140              VR49: 30 rows, no enhanced colour
+       DATA >B202              VR50: attributes per position
+       DATA >B300              VR51: stop sprite 0 = no sprites
+       DATA >8F00              VR15: status register 0
+       DATA 0
+
+* VSHIFT - move R2 rows of 80 bytes in VRAM from R0 to R1 with the F18A's
+* DMA engine, started by its GPU: R3 = 0 to copy forwards (from the first
+* bytes), 2 backwards (from the last bytes; R0 and R1 then point at the
+* last byte of each block), as overlapping moves need.  Waits until the
+* GPU is idle again.  Uses R0-R4.
+VSHIFT .enter
+       LI   R4,GPUBUF          the mailbox: source, destination, width,
+       MOV  R0,*R4+            height, stride, flags
+       MOV  R1,*R4+
+       LI   R0,>5000           width 80 ...
+       MOVB R0,*R4+
+       SWPB R2                 ... height R2 rows ...
+       MOVB R2,*R4+
+       MOVB R0,*R4+            ... stride 80
+       SWPB R3
+       MOVB R3,*R4+            direction; copy
+       LI   R0,GPUMB
+       LI   R1,GPUBUF
+       LI   R2,8
+       BL   @VMBW
+       LI   R0,>B600+(GPUAD/256)   VR54, VR55: the GPU's address; writing
+       BL   @VDPWR                 VR55 starts it
+       LI   R0,>B700+(GPUAD-((GPUAD/256)*256))
+       BL   @VDPWR
+       LI   R0,>8F02           status register 2: bit 7 = the GPU running
+       BL   @VDPWR
+VSH1   MOVB @VDPSTA,R0
+       JLT  VSH1
+       LI   R0,>8F00
+       BL   @VDPWR
+       .leave
+       RT
+
+
+* SETSCH - make colour scheme R0 (0-4) the current one and load it.  The
+* screen is not rewritten: every cell's attribute names roles, and the
+* palette is what changed.  Uses R0-R3, R12 (and what LDSCHM uses).
+SETSCH .enter
+       MOV  R0,@SCHEME
+       BL   @LDSCHM
+       .leave
+       RT
+
+* T80INI - the F18A in Text 80 at 30 rows with per-position colour:
+* registers, both tables cleared (spaces in the normal text colours), the
+* glyph set and colour scheme 0 from the data bank, the GPU program, the
+* DMA engine tested, display on.  Called once by KSTART before the first
+* module runs.  The F18A must already be unlocked (the loader did it;
+* F18UNL is lock-safe).  Slot B is left as it was.  Uses R0-R4, R12.
+T80INI .enter
+       BL   @F18UNL            (does nothing if already unlocked)
+       LI   R1,T80REG
+T8I1   MOV  *R1+,R0            next (>80|reg)<<8 | value
+       JEQ  T8I2
+       BL   @VDPWR
+       JMP  T8I1
+T8I2   LI   R0,NAMTAB          the name table: spaces
+       LI   R1,>2000
+       LI   R2,COLS*ROWS
+       BL   @VFILL
+       LI   R0,ATRTAB          the attributes: text on page background
+       LI   R1,(RTEXT*16+RBG)*256
+       LI   R2,COLS*ROWS
+       BL   @VFILL
+       MOV  @CURPB,R0          slot B as it is now ...
+       .push R0
+       LI   R0,PGDATA          ... the data bank in
+       BL   @PAGEB
+       LI   R0,PATTAB          256 glyphs
+       LI   R1,DGLYPH
+       LI   R2,2048
+       BL   @VMBW
+       CLR  @SCHEME
+       BL   @LDSCHM            colour scheme 0
+       .pop R0                 slot B back
+       BL   @SETPB
+       LI   R0,GPUAD           the GPU's program into VRAM
+       LI   R1,GPUPRG
+       LI   R2,GPUEND-GPUPRG
+       BL   @VMBW
+       BL   @DMATST            does this F18A's GPU have the DMA engine?
+       LI   R0,>81F0           VR1: 16K, display on, interrupts, text mode
+       BL   @VDPWR
+       LI   R0,>F000           the console's copy, used when it blanks the
+       MOVB R0,@VR1CPY         screen: keeps the text mode bits
+       .leave
+       RT
+
+* DMATST - test the F18A's DMA engine once: 80 bytes of a pattern at
+* VRAM >3000 are copied by VSHIFT to >3080 and read back.  NODMA = 0 if
+* they arrived, else non-zero (an F18A whose firmware has no DMA: the
+* application then redraws rows instead of moving them).  Uses R0-R4.
+DMATST .enter
+       LI   R0,>3000           the pattern: 0, 1, 2 ... 79
+       BL   @VWAD
+       CLR  R1
+       LI   R2,80
+DT1    MOVB R1,@VDPWD          a pattern byte
+       AI   R1,>0100           the next value
+       DEC  R2
+       JNE  DT1
+       LI   R0,>3080           the destination: zeros
+       CLR  R1
+       LI   R2,80              80 bytes
+       BL   @VFILL             zeroed
+       LI   R0,>3000           from ...
+       LI   R1,>3080           ... to
+       LI   R2,1               one row of 80
+       CLR  R3                 forwards
+       BL   @VSHIFT            the GPU copies it
+       LI   R0,>3080           did it arrive?
+       BL   @VRAD              read it back
+       CLR  R1                 the first value expected
+       LI   R2,80              80 bytes
+       CLR  @NODMA             DMA works, unless ...
+DT2    CB   @VDPRD,R1          the right byte?
+       JNE  DT8
+       AI   R1,>0100           the next value
+       DEC  R2
+       JNE  DT2
+       JMP  DT9
+DT8    SETO @NODMA             no: DMA is not used
+DT9    .leave
+       RT
+
+* GPUPRG - the GPU's program, copied to VRAM at GPUAD by T80INI: the
+* mailbox's 8 bytes into the DMA registers (>8000->8007), then a write to
+* >8008 starts the copy; IDLE until the next start.
+GPUPRG LI   R0,GPUMB
+       LI   R1,>8000
+       MOV  *R0+,*R1+
+       MOV  *R0+,*R1+
+       MOV  *R0+,*R1+
+       MOV  *R0+,*R1+
+       MOVB R0,@>8008
+       IDLE
+GPUEND

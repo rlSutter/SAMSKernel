@@ -1,0 +1,108 @@
+*======================================================================
+* kernel.a99 - the resident kernel (SAMS pages >0A->0B, >A000->BFFF)
+*
+* Entered from the loader once the machine has passed its checks (SAMS of
+* at least PGMIN pages, an F18A) and every bank is in SAMS.  Sets up the
+* console interrupt routine's flags, the keyboard and Text 80, maps the
+* boot module into slot C and runs the main loop: wait for the frame,
+* poll the keyboard, hand the next key to the module's TICK.  A module
+* asks to quit by setting QUITF, or to hand over to another module by
+* GOMOD (module.a99).
+*
+* Module banks (slot C, >C000) start with an entry table:
+*   >C000 INIT     called when the module is switched to
+*   >C002 TICK     called every frame; R0 = next key code (high byte) or 0
+*   >C004 REDRAW   by convention: the whole screen again
+*   >C006 reserved
+* (docs/PROGRAMMERS-GUIDE.md has the whole story.)
+*======================================================================
+       COPY "kdefs.a99"
+
+       AORG >A000
+KSTART LIMI 0
+       LWPI WS
+       LI   R10,STKTOP
+       LI   R0,>5000           the console ISR: no sprite motion, no QUIT
+       MOVB R0,@ISRFLG         (the application handles FCTN = itself)
+       CLR  @SNDDUR            no sound list playing
+       LI   R0,>0100           the console's interrupt routine adds >83FC's
+       MOVB R0,@TMRINC         byte to its frame counter at >8379 each frame
+       BL   @KINIT             the keyboard as at power-up
+       CLR  @QUITF
+       CLR  @NEXTPG
+       CLR  @GOARG
+       CLR  @PREVPG
+       BL   @T80INI            Text 80, the font, colour scheme 0, display on
+* the boot module is the first switch: from "no module" (CURPC = 0)
+       LI   R0,PGBOOT
+       MOV  R0,@NEXTPG
+       JMP  KCHK
+KMAIN  BL   @VSYNC             once per frame
+       BL   @KPOLL
+       BL   @KEYGET            R0 = next code or 0
+       MOV  @>C002,R1          the module's TICK
+       BL   *R1
+KCHK   MOV  @QUITF,R0          a quit asked for?
+       JNE  KEXIT
+       MOV  @NEXTPG,R0         a switch asked for (R0 = the module's page)?
+       JEQ  KMAIN
+       MOV  @CURPC,R2          the module that was running
+       SRL  R2,8
+       MOV  R2,@PREVPG
+       CLR  @NEXTPG
+       BL   @PAGEC             the new module into slot C
+       MOV  @PREVPG,R0         INIT's arguments: the old module's page ...
+       MOV  @GOARG,R1          ... and what GOMOD handed over
+       MOV  @>C000,R2          its INIT
+       BL   *R2
+       JMP  KCHK               (INIT may itself switch or quit)
+
+* KEXIT - quit to the TI title by the console's own reset (BLWP @>0000),
+* as FCTN-QUIT does.  From Lantern's RESTRT: the sound chip silenced, the
+* keys let go (at most a second), every F18A register the kernel changed put
+* back as at power-up (the console's reset sets only VR0-VR7), the memory
+* card's mapping switched off (pages sit in their own windows, as the
+* identity map had them, so this code runs on).
+KEXIT  LIMI 0
+       LI   R0,>9FBF           every voice quiet
+       MOVB R0,@SOUND
+       SWPB R0
+       MOVB R0,@SOUND
+       LI   R0,>DFFF
+       MOVB R0,@SOUND
+       SWPB R0
+       MOVB R0,@SOUND
+       LI   R8,60              (R8: KSCAN uses R1-R4)
+KX1    BL   @VSYNC             a frame
+       BL   @KSCAN             the keyboard
+       LI   R1,KEYMAP          all six columns up?
+       LI   R2,3               3 words: 6 columns
+KX2    C    *R1+,@KXFF         all up (>FF)?
+       JNE  KX3
+       DEC  R2                 the next
+       JNE  KX2
+       JMP  KX4                all let go
+KX3    DEC  R8                 a frame less
+       JNE  KX1                a second not yet up?
+KX4    LIMI 0
+       BL   @F18OFF            the F18A as at power-up
+       LI   R12,AMSCRU         the memory card as at power-up: mapping off
+       SBZ  1
+       SBZ  0
+       CLR  @CBANK0            the cartridge's bank 0 (its header: the console
+*                               finds the program for its menu there; this code
+*                               runs from RAM at >A000, so the switch is safe)
+       BLWP @>0000             the console's own reset
+KXFF   DATA >FFFF
+
+       COPY "vdp.a99"
+       COPY "f18a.a99"
+       COPY "pager.a99"
+       COPY "keys.a99"
+       COPY "text.a99"
+       COPY "video.a99"
+       COPY "modules.a99"
+       COPY "pool.a99"
+       COPY "files.a99"
+KEND
+       END

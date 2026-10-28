@@ -1,0 +1,87 @@
+*======================================================================
+* pool.a99 - a page pool: hand out and take back SAMS pages
+*
+* The kernel keeps a bitmap of up to 256 pages (a bit per page, 1 = free).
+* PINIT says which pages the pool manages (normally everything from
+* PGFREE, the first page the build leaves free, up to NPAGES, or less if
+* the application keeps some pages for itself).  PALLOC gives out the
+* lowest free page, PRELS takes one back.  A page's contents are not
+* touched: the application clears what it needs.  Pages the pool hands
+* out are not mapped anywhere; map them with MAPE, MAPF or MAPPG.
+*======================================================================
+
+* PINIT - the pool manages pages R0 up to (not including) R1; all free.
+* Pages outside the range are never handed out.  Uses R0-R6.  Leaf.
+PINIT  MOV  R11,R6
+       MOV  R0,@POOLLO
+       MOV  R1,@POOLHI
+       LI   R2,POOLBM          clear the bitmap
+       LI   R3,16
+PI1    CLR  *R2+
+       DEC  R3
+       JNE  PI1
+       CLR  @FREECT
+PI2    C    R0,R1              each page of the range: free
+       JHE  PI9
+       BL   @PSET
+       INC  @FREECT
+       INC  R0
+       JMP  PI2
+PI9    B    *R6
+
+* PSET - mark page R0 free in the bitmap.  Leaf (R11 is kept in R3).
+* Uses R2, R3, R4, R5.
+PSET   MOV  R11,R3
+       BL   @PBIT              R2 = the bitmap byte's address, R4 = its mask
+       SOCB R4,*R2
+       B    *R3
+
+* PBIT - R2 = the address of page R0's bitmap byte, R4 = its mask (in the
+* high byte).  Leaf.  Uses R2, R4, R5.
+PBIT   MOV  R0,R2
+       SRL  R2,3               byte = page / 8
+       AI   R2,POOLBM
+       MOV  R0,R5
+       ANDI R5,7               bit = page mod 8
+       LI   R4,>8000
+       MOV  R5,R5
+       JEQ  PB9
+PB1    SRL  R4,1
+       DEC  R5
+       JNE  PB1
+PB9    RT
+
+* PALLOC - the lowest free page: R0 = its number, or 0 if the pool is
+* empty.  The page is marked in use.  Uses R0-R5.  Leaf.
+PALLOC MOV  R11,R3
+       MOV  @FREECT,R0
+       JEQ  PA8                none free
+       MOV  @POOLLO,R0
+PA1    C    R0,@POOLHI
+       JHE  PA8
+       BL   @PBIT
+       MOVB *R2,R5
+       COC  R4,R5              the page's bit set (free)?
+       JEQ  PA2
+       INC  R0
+       JMP  PA1
+PA2    SZCB R4,*R2             in use now
+       DEC  @FREECT
+       B    *R3
+PA8    CLR  R0
+       B    *R3
+
+* PRELS - give page R0 back to the pool (it must have come from it).
+* Releasing a page twice is harmless.  Uses R0-R5.  Leaf.
+PRELS  MOV  R11,R3
+       C    R0,@POOLLO         outside the pool's range: ignored
+       JL   PR9
+       C    R0,@POOLHI
+       JHE  PR9
+       BL   @PBIT
+       MOVB *R2,R5
+       COC  R4,R5              already free?
+       JEQ  PR9
+       SOCB R4,*R2
+       INC  @FREECT
+PR9    B    *R3

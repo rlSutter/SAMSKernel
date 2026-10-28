@@ -1,0 +1,103 @@
+*======================================================================
+* pager.a99 - AMS / SAMS page manager (from The Lantern Coast)
+*
+* Windows are numbered by address nibble: window 2 = >2000, window >E
+* = >E000.  The fixed kernel windows >A->D are mapped once at boot and
+* never touched again.  Slot A = windows 2,3; slot B = windows >E,>F;
+* slot C = windows >C,>D.
+*
+* Rule: code that calls MAPPG/PAGEA/PAGEB/PAGEC must not itself live in
+* the window it is remapping.  Module code (slot C) may page slot B; only
+* the kernel's main loop remaps slot C (a module asks with GOMOD, or
+* calls another with MODCALL, which are the kernel's); nothing remaps
+* slot A (the stack lives there).
+*
+* CURPA, CURPB and CURPC record what each slot holds, as (first page << 8)
+* | second page.  Every routine here keeps them in step, so code that
+* borrows slot B (LDSCHM, a library routine) can save CURPB and put it
+* back with SETPB.  Never write a mapper register by any other route.
+*======================================================================
+
+* PAGEC - map pages R0 and R0+1 into slot C (>C000, >D000): a module.
+* Recorded in CURPC.  Kernel use only (see above).  Uses R0-R4, R7, R12.
+PAGEC  .enter
+       MOV  R0,R4
+       SLA  R4,8
+       MOV  R0,R7
+       INC  R7
+       SOC  R7,R4
+       MOV  R4,@CURPC
+       LI   R1,>C              window >C000
+       BL   @MAPPG
+       MOV  R7,R0
+       LI   R1,>D              window >D000
+       BL   @MAPPG
+       .leave
+       RT
+
+* MAPPG - map one page into one window.
+*   R0 = page (0-255), R1 = window (0-15)
+* Uses R2, R3, R12.  Leaf.  Does not update CURPA/B/C: use it for windows
+* you track yourself; PAGEB, MAPE and MAPF track slot B.
+MAPPG  MOV  R0,R2              build (page<<8)|page: the card latches one byte
+       SLA  R2,8
+       SOC  R0,R2
+       MOV  R1,R3              window number ...
+       SLA  R3,1               ... times two = register offset
+       AI   R3,AMSREG          register address
+       LI   R12,AMSCRU
+       SBO  0
+       MOV  R2,*R3             write the page
+       SBZ  0
+       RT
+
+* PAGEB - map pages R0 and R0+1 into slot B (>E000, >F000), recorded in
+* CURPB.  Uses R0-R4, R7, R12.
+PAGEB  .enter
+       MOV  R0,R4
+       SLA  R4,8
+       MOV  R0,R7
+       INC  R7
+       SOC  R7,R4
+       MOV  R4,@CURPB          remember what slot B holds
+       LI   R1,>E              window >E000
+       BL   @MAPPG
+       MOV  R7,R0
+       LI   R1,>F              window >F000
+       BL   @MAPPG
+       .leave
+       RT
+
+* MAPE / MAPF - map page R0 into window >E000 / >F000 alone, unless CURPB
+* says it is there already; recorded in CURPB.  Leaves.  Use R1-R3, R12
+* (R1 only, when the page is already mapped).
+MAPE   MOV  R0,R1
+       SWPB R1                 the page in the high byte, as CURPB has it
+       CB   R1,@CURPB          already in >E000?
+       JEQ  MAP9
+       MOVB R1,@CURPB
+       LI   R1,>E
+       B    @MAPPG             (MAPPG returns for us)
+MAPF   MOV  R0,R1
+       SWPB R1
+       CB   R1,@CURPB+1        already in >F000?
+       JEQ  MAP9
+       MOVB R1,@CURPB+1        (the low byte of CURPB: window >F000)
+       LI   R1,>F
+       B    @MAPPG
+MAP9   RT
+
+* SETPB - put slot B back as R0 says, (page for >E000 << 8) | page for
+* >F000: a CURPB value saved earlier (the two pages need not be
+* consecutive).  Uses R0-R3, R12.
+SETPB  .enter
+       MOV  R0,@CURPB
+       SRL  R0,8
+       LI   R1,>E
+       BL   @MAPPG
+       MOV  @CURPB,R0
+       ANDI R0,>00FF
+       LI   R1,>F
+       BL   @MAPPG
+       .leave
+       RT

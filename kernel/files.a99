@@ -1,0 +1,353 @@
+*======================================================================
+* files.a99 - the file service: disk (and any other device's) files
+* through the console's DSRs, as a PAB and a record at a time.
+*
+* A program opens a file with FOPEN, reads or writes records with FREAD
+* and FWRITE, and closes it with FCLOSE; FDELETE removes a file.  Every
+* routine returns R0 = 0 when it worked, else the DSR's error code 1-7
+* (the three top bits of the PAB's flag byte: 5 = past the end of the
+* file, 7 = file not found) or >FF when no card answers to the device
+* name.  One file is open at a time (the PAB and its record buffer in VRAM
+* are single); open the next after closing the first.
+*
+* The names are length-prefixed strings ("DSK1.NOTES", a byte 10 first,
+* STRI makes them).  The records are copied between the VRAM buffer and
+* the caller's own buffer (up to 255 bytes), so no caller ever touches the
+* PAB, VRAM >3600-37D7, or the controller's area from >37D8.
+*
+* How the DSR is called (the rules the Lantern Coast learned the hard way):
+*   - in the GPL workspace (>83E0), R12 the card's CRU base, R13 = >9800,
+*     R15 = >8C02, >8356 pointing past the device name's dot, >8354 the
+*     name's length, as the console's own DSRLNK does;
+*   - the scratchpad >8320->837F it may change is saved and put back, but
+*     >8370 (the bottom of the controller's buffers, which it finds through
+*     that word) is kept as the controller's power-up left it, or every
+*     later access on a real TI controller hangs;
+*   - the controller's power-up routine runs once, before its first call;
+*   - R6-R9 are changed by a DSR call (callers keep what they need on the
+*     stack); the error is read from the PAB's own flag byte, on both
+*     returns of the DSR.
+* DSR calls take milliseconds to seconds: poll the keyboard between
+* records (KIDLE) if the user must not be locked out.
+*======================================================================
+
+* FOPEN - open the file named by R2 (a length-prefixed string).
+*   R0 = flags in the high byte (add FIN/FOUT/FUPDT/FAPP, FVAR/FFIXED,
+*        FINTL/FDISP: FIN+FVAR is >1400, a DIS/VAR file for input),
+*   R1 = the record length (0 lets an input file say it; for fixed
+*        files the length they were made with).
+* R0 = 0 or the error.  A name that is only a device and dot ("DSK1.")
+* opens the disk's catalog: FIN+FINTL+FFIXED with record length 38
+* (see FCNUM).  Uses R0-R9 and the DSR's.
+FOPEN  CLR  R3
+FPABOP .enter
+       MOV  R2,@FNMP           the name
+       MOVB *R2,R4             too long for the PAB (53 characters at most)?
+       SRL  R4,8
+       CI   R4,53
+       JH   FOBAD
+       LI   R2,FPAB
+       MOVB R3,*R2+            opcode (R3's high byte: 0 OPEN, 7 DELETE)
+       MOVB R0,*R2+            flags
+       LI   R4,FBUFV
+       MOVB R4,*R2+            buffer address, high byte first
+       SWPB R4
+       MOVB R4,*R2+
+       SWPB R1
+       MOVB R1,*R2+            record length
+       CLR  R1                 (zeros)
+       MOVB R1,*R2+            character count
+       MOVB R1,*R2+            record number
+       MOVB R1,*R2+
+       MOVB R1,*R2+            screen offset
+       MOV  @FNMP,R1           name length and name
+       CLR  R3
+       MOVB *R1,R3             its length ...
+       SWPB R3
+       INC  R3                 ... plus the length byte
+FO1    MOVB *R1+,*R2+          into the PAB
+       DEC  R3
+       JNE  FO1
+       LI   R0,FPABV           the PAB in VRAM
+       LI   R1,FPAB
+       AI   R2,-FPAB           its length
+       BL   @VMBW              copied there
+       BL   @FCALL             call the DSR
+FOOUT  MOV  R0,@FERR
+       .leave
+       RT
+FOBAD  LI   R0,>00FF           a name that cannot be used: no such device
+       JMP  FOOUT
+
+* FREAD - read the next record into the buffer at R1 (up to 255 bytes).
+* R0 = 0, 5 at the end of the file, or the error; R2 = the record's
+* length (also in FLEN).  Uses R0-R9.
+FREAD  .enter
+       MOV  R1,@FNMP           (the destination, kept in FNMP meanwhile)
+       LI   R0,FPABV
+       LI   R1,>0200           opcode 2: READ
+       BL   @VSBW
+       BL   @FCALL
+       CLR  R2
+       MOV  R0,R0
+       JNE  FR9
+       LI   R0,FPABV+5         the PAB's character count
+       BL   @VRAD
+       CLR  R2
+       MOVB @VDPRD,R2
+       SWPB R2
+       MOV  R2,@FLEN
+       JEQ  FR8
+       LI   R0,FBUFV
+       MOV  @FNMP,R1           the destination
+       BL   @VMBR              (VMBR keeps R2? it counts R2 down: reload)
+       MOV  @FLEN,R2
+FR8    CLR  R0
+FR9    MOV  R0,@FERR
+       .leave
+       RT
+
+* FWRITE - write R2 bytes (0-255) from the buffer at R1 as a record.
+* R0 = 0 or the error.  Uses R0-R9.
+FWRITE .enter
+       MOV  R2,@FLEN           (kept)
+       LI   R0,FBUFV           the record buffer in VRAM
+       MOV  R2,R2              nothing to copy?
+       JEQ  FW1
+       BL   @VMBW              the bytes there (R1 is the source)
+FW1    LI   R0,FPABV+5         the PAB's character count
+       MOV  @FLEN,R1
+       SWPB R1                 (a byte)
+       BL   @VSBW
+       LI   R0,FPABV
+       LI   R1,>0300           opcode 3: WRITE
+       BL   @VSBW
+       BL   @FCALL
+       MOV  R0,@FERR
+       .leave
+       RT
+
+* FCLOSE - close the file.  R0 = 0 or the error.  Uses R0-R9.
+FCLOSE .enter
+       LI   R0,FPABV
+       LI   R1,>0100           opcode 1: CLOSE
+       BL   @VSBW
+       BL   @FCALL
+       MOV  R0,@FERR
+       .leave
+       RT
+
+* FDELETE - delete the file named by R2 (DSR opcode 7).  R0 = 0 or the
+* error.  Uses R0-R9.
+FDELETE LI  R3,>0700           opcode 7: DELETE
+       CLR  R0
+       LI   R1,80
+       B    @FPABOP
+
+* FCALL - call the DSR for the PAB at FPABV: the previous error cleared,
+* the scratchpad it uses kept and put back, >8356 at the name length.
+* R0 = 0, the error, or >FF.  Uses R0-R9.
+FCALL  .enter
+       LI   R0,FPABV+1         the previous call's error bits (the top three
+       BL   @VSBR              of the flag byte) cleared first: a DSR that
+       ANDI R1,>1F00           succeeds may leave them as they were, and a
+       LI   R0,FPABV+1         later call would report that old error
+       BL   @VSBW
+       LI   R1,>8320           >8320->837F -> FHOT
+       LI   R2,FHOT
+       LI   R3,48              48 words
+FC1    MOV  *R1+,*R2+          kept
+       DEC  R3
+       JNE  FC1
+       LI   R0,FPABV+9         the PAB's name length byte
+       MOV  R0,@>8356          where DSRLNK finds the name
+       BL   @DSRLNK            find the device and call it
+       MOV  R0,R5              (the result)
+       LI   R1,FHOT            put the scratchpad back
+       LI   R2,>8320
+       LI   R3,48
+FC2    MOV  *R1+,*R2+
+       DEC  R3
+       JNE  FC2
+       LI   R0,>0100           (and the frame counter's increment: a DSR
+       MOVB R0,@TMRINC         works in the GPL workspace, whose R14 it
+*                              is, and VSYNC would wait for ever)
+       MOV  @FD70,@>8370       (but >8370 as the controller left it: the
+       MOV  R5,R0              bottom of its buffers, which it finds through
+*                              it; restoring the old value hangs every later
+*                              access on a real TI controller)
+       .leave
+       RT
+
+* FCNUM - number n of a catalog record: R1 = the record's address (as
+* FREAD left it after opening "DSK1." as FIN+FINTL, record length 38),
+* R2 = n.  R0 = the integer.  Record 0 is the disk (name, 0, its size in
+* sectors, sectors free); every other record is a file (name, type,
+* size in sectors, record length; a type is 1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX,
+* 4 INT/VAR, 5 program, negative for a protected file) and an empty name
+* ends the catalog.  Numbers are 8-byte radix-100 floats after the name;
+* this reads small integers only (under 10,000), as catalogs hold.  The
+* name is the length-prefixed string at the record's start.  Uses R0-R5.
+* Leaf.
+FCNUM  MPY  @FC9,R2            R2:R3 = n * 9 (each number is a length byte and 8 bytes)
+       CLR  R2                 past the name: 1 + its length
+       MOVB *R1,R2
+       SWPB R2
+       INC  R2
+       A    R2,R3
+       A    R1,R3
+       INC  R3                 past the number's own length byte
+       MOV  R3,R5              the number's bytes
+       MOVB *R5+,R2            the first word: exponent and first digit pair
+       SWPB R2
+       MOVB *R5+,R2
+       SWPB R2
+       CLR  R4                 R4: negative?
+       MOV  R2,R2
+       JEQ  FCN8               zero
+       JGT  FCN1
+       NEG  R2                 negative: negate the word
+       SETO R4
+FCN1   MOV  R2,R0
+       SRL  R0,8               the exponent byte
+       ANDI R2,>00FF           the first digit pair
+       CI   R0,>40
+       JEQ  FCN2               exponent >40: the first pair alone
+       MPY  @FC100,R2          R3 = first pair * 100
+       CLR  R0
+       MOVB *R5,R0             plus the second pair
+       SWPB R0
+       A    R3,R0
+       JMP  FCN3
+FCN2   MOV  R2,R0
+FCN3   MOV  R4,R4
+       JEQ  FCN9
+       NEG  R0
+FCN9   RT
+FCN8   CLR  R0
+       RT
+FC9    DATA 9
+FC100  DATA 100
+
+* DSRLNK - find the device named in the PAB and call its DSR (from The
+* Lantern Coast).  >8356 -> the PAB's name length byte.  R0 = 0, the DSR's
+* error 1-7, or >FF (no card has that device).  The console's own DSRLNK
+* is not used: it needs the GPL environment the kernel does not keep.
+DSRLNK .enter
+       MOV  R10,@FSR10
+       MOV  @>8356,R0
+       BL   @VRAD
+       MOVB @VDPRD,R3          full name length
+       SRL  R3,8
+       JNE  $+6                (skip the next if not empty)
+       B    @DLNONE
+       LI   R4,FNAMB           the device name's buffer
+       CLR  R5                 device name length
+DKL1   MOVB @VDPRD,R6          a character of the name
+       CB   R6,@DOT            the '.' ends the device?
+       JEQ  DKL2
+       MOVB R6,*R4+            keep it
+       INC  R5                 one more
+       DEC  R3                 the full length left
+       JNE  DKL1
+DKL2   MOV  R5,R5              a device name at all?
+       JNE  $+6
+       B    @DLNONE
+       MOV  R5,@>8354          its length, for the DSR
+       MOV  R5,R0              past the device and its '.'
+       INC  R0
+       A    R0,@>8356          where the DSR finds the rest of the name
+       LI   R12,>0F00          before the first card
+DLNEXT MOV  R12,R12            a card switched on?
+       JEQ  DLN1
+       SBZ  0                  switch it off
+DLN1   AI   R12,>0100          the next card's CRU base
+       CLR  @>83D0             (no card yet)
+       CI   R12,>2000          past the last (>1F00)?
+       JNE  $+6
+       JMP  DLNONE
+       MOV  R12,@>83D0         this card's CRU base, for the DSR
+       SBO  0                  its ROM on
+       LI   R2,>4000
+       CB   *R2,@HAA           a valid header (>AA)?
+       JNE  DLNEXT
+       LI   R2,>4008           its device list
+DLGO2  MOV  *R2,R2             the next entry
+       JEQ  DLNEXT             the list's end?
+       MOV  R2,@>83D2          (kept, for the DSR)
+       INCT R2
+       MOV  *R2+,R9            its routine's address
+       MOVB *R2+,R6            the name's length
+       SRL  R6,8
+       C    R6,R5              the same length?
+       JNE  DLGO1
+       LI   R6,FNAMB           compare the names
+       MOV  R5,R7
+DLNM1  CB   *R6+,*R2+
+       JNE  DLGO1
+       DEC  R7
+       JNE  DLNM1
+       MOV  R12,@FDCRU         the card holding it
+       MOV  @FDPWR,R0          the controller's power-up, once
+       JNE  DLCALL             done already?
+       SETO @FDPWR             (once)
+       LI   R0,>3FFF           VRAM's top, before the power-up
+       MOV  R0,@>8370
+       MOV  @>8354,@FD54       kept: the power-up may change them
+       MOV  @>8356,@FD56
+       MOV  @>83D0,@FDD0
+       MOV  @>83D2,@FDD2
+       LI   R2,>4004           the card's power-up list
+       MOV  *R2,R2
+       JEQ  DLCALL             none?
+       INCT R2
+       MOV  *R2,@FDENT         its routine
+       LWPI GPLWS              the GPL workspace, as the console's DSRLNK
+       BL   @DLGPL             call it
+       JMP  DLPU1              (the return after it)
+DLPU1  LWPI WS
+       MOV  @>8370,@FD70       the bottom of the controller's buffers
+       MOV  @FD54,@>8354       put back what it may change
+       MOV  @FD56,@>8356
+       MOV  @FDD0,@>83D0
+       MOV  @FDD2,@>83D2
+       MOV  @FDCRU,R12         the card again
+       SBO  0                  its ROM on
+DLCALL MOV  R9,@FDENT          the device's routine
+       LWPI GPLWS              the GPL workspace
+       BL   @DLGPL             call it
+       JMP  DLER0              (no return: an error)
+       LWPI WS                 a return past the JMP: found and run
+       SETO R5                 R5: it ran
+       JMP  DLRD
+DLER0  LWPI WS
+       JMP  DLERR
+DLGO1  MOV  @>83D2,R2          the next entry
+       JMP  DLGO2
+DLERR  CLR  R5                 R5: not run
+DLRD   SBZ  0                  the card's ROM off
+       LI   R0,FPABV+1         the PAB's flag byte
+       BL   @VRAD
+       MOVB @VDPRD,R0          the PAB's flag byte
+       SRL  R0,13              its error bits (top three)
+       JNE  DLOUT              an error: return it
+       MOV  R5,R5              ran?
+       JNE  DLOUT
+       INC  R0                 no error but not run: 1
+       JMP  DLOUT
+DLNONE LI   R0,>00FF           >FF: no such device
+DLOUT  MOV  @FSR10,R10         our stack back
+       .leave
+       RT
+* DLGPL - (entered after LWPI GPLWS, so R9 R12 R13 R15 here are the GPL
+* workspace's) call the DSR entry in FDENT as the console's GPL would:
+* R12 = the ROM's CRU base, R13 = >9800 (GROM read), R15 = >8C02 (VDP
+* address).  The DSR returns to R11+2 when it handled the call, R11 if not.
+DLGPL  MOV  @FDCRU,R12
+       LI   R13,>9800
+       LI   R15,>8C02
+       MOV  @FDENT,R9
+       B    *R9
+HAA    BYTE >AA
+DOT    BYTE '.'
+       EVEN

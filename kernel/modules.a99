@@ -1,0 +1,55 @@
+*======================================================================
+* modules.a99 - the module system: MODCALL (call into another module and
+* come back), GOMOD (switch to another module).
+*
+* A module is 8K of code in two SAMS pages, mapped into slot C
+* (>C000-DFFF).  Its first words are the entry table:
+*   >C000 INIT     called when the module is switched to (R0 = the
+*                  previous module's first page, 0 at boot; R1 = the
+*                  argument GOMOD gave, 0 at boot)
+*   >C002 TICK     called once a frame; R0 = the next key code (high
+*                  byte) or 0
+*   >C004 REDRAW   by convention: draw the whole screen again (the kernel
+*                  never calls it; a module calls it after something
+*                  covered its screen)
+*   >C006 reserved
+*   >C008 ...      the module's own entries, for MODCALL
+* Only the kernel's main loop remaps slot C, so a module never maps
+* itself: it asks (GOMOD) or it borrows another module for one call
+* (MODCALL).
+*======================================================================
+
+* MODCALL - call entry R1 (the ADDRESS of a word in a module's entry
+* table: >C000 + 2 * the entry's number) of the module in pages R0/R0+1,
+* then map the calling module back.  R0 returns from the call; the other
+* registers are whatever the called routine left, so pass arguments in
+* R2-R9 or in memory.  Calls nest.  A module may not call another's
+* routines directly (they are not mapped): use this.  The .callmod macro
+* (macros.a99) loads R0 and R1 for you.  Uses everything the called
+* routine does.
+MODCALL .enter
+       MOV  @CURPC,R2          the calling module's slot C pages ...
+       .push R2                ... kept
+       MOV  R1,@MCENT          (the entry's address)
+       BL   @PAGEC             map the module
+       MOV  @MCENT,R1
+       MOV  *R1,R1             its entry: the routine's address
+       BL   *R1                call it
+       MOV  R0,@MCRET          its result, kept
+       .pop R0
+       SRL  R0,8               (the page: the high byte)
+       BL   @PAGEC             map the caller back
+       MOV  @MCRET,R0          the result
+       .leave
+       RT
+
+* GOMOD - switch to the module whose first page is R0, handing it R1 as
+* its argument.  Takes effect when the calling TICK returns to the main
+* loop (so the caller finishes its work first, and may still be running
+* in slot C when it calls this).  The target's INIT is called with R0 =
+* the caller's first page and R1 = the argument; PREVPG holds the
+* caller's page afterwards, so a module can go "back" with GOMOD PREVPG.
+* Leaf.  Uses nothing.
+GOMOD  MOV  R0,@NEXTPG
+       MOV  R1,@GOARG
+       RT

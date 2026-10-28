@@ -1,0 +1,34 @@
+*======================================================================
+* shared.a99 - what the two modules agree on: their colours and the
+* variables they share in slot A.  Included by both.  (Modules share
+* state only through slot A addresses fixed like this.)
+*======================================================================
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ASEL   EQU  (RSELFG*16+RSELBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+* the browser's variables (APPRAM, so they survive a trip through the viewer)
+NFILES EQU  APPRAM+0           files found in the catalog (at most MAXF)
+SEL    EQU  APPRAM+2           the selected one
+DISKSZ EQU  APPRAM+4           the disk's sectors
+DISKFR EQU  APPRAM+6           ... free
+MSGNO  EQU  APPRAM+8           the message to show (0: none)
+EPTR   EQU  APPRAM+10          work: the entry being filled
+DNAME  EQU  APPRAM+16          the disk's name, length-prefixed (11 bytes)
+ENTS   EQU  APPRAM+32          the files: MAXF entries of 16 bytes
+*                              +0 name (length-prefixed, 10 characters at most)
+*                              +12 type (1 DIS/FIX 2 DIS/VAR 3 INT/FIX 4 INT/VAR 5 program)
+*                              +14 size in sectors
+MAXF   EQU  20
+RECBUF EQU  ENTS+(MAXF*16)     a catalog record (38 bytes)
+EEND   EQU  RECBUF+40
+* the viewer's variables, above the browser's
+VNAME  EQU  EEND               the file name: DSK1.NAME, length-prefixed (20 bytes)
+NLINES EQU  VNAME+20           lines loaded
+TOPLN  EQU  VNAME+22           the line at the top of the screen
+VPAGES EQU  VNAME+24           8 words: the SAMS page of each 51 lines
+LINBUF EQU  VNAME+40           a line as read (80 bytes)
+VWORK  EQU  VNAME+130          scratch words
+LPP    EQU  51                 lines per page: 51 * 80 = 4,080 bytes

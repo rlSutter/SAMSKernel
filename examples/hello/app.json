@@ -1,0 +1,7 @@
+{
+  "name": "HELLO",
+  "min_pages": 128,
+  "modules": [
+    {"name": "hello", "source": "hello.a99"}
+  ]
+}

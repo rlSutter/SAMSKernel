@@ -1,0 +1,9 @@
+{
+  "name": "LK DIAG",
+  "min_pages": 128,
+  "modules": [
+    {"name": "diag",  "source": "diag.a99"},
+    {"name": "tests", "source": "tests.a99"}
+  ],
+  "boot": "diag"
+}

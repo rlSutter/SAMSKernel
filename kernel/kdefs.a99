@@ -1,0 +1,225 @@
+*======================================================================
+* kdefs.a99 - the kernel's definitions: hardware addresses, the memory
+* map (CPU, scratchpad, slot A, SAMS pages, VRAM), key codes, colour
+* roles, screen geometry, file-service constants.
+*
+* Every kernel source, the loader and every module include this file or
+* its export, kernel.equ (a module cannot COPY kdefs.a99: the kernel is
+* assembled first and its symbols, these included, are written to
+* build/kernel.equ).  The application's own numbers (its name, how many
+* SAMS pages it needs, the page of each of its modules) come from
+* appcfg.a99, which tools/lkbuild.py writes from app.json.
+*
+* Lantern Kernel 1.0.  MIT License, (c) 2026 Rebecca Sutter.
+*======================================================================
+
+       COPY "appcfg.a99"
+       COPY "macros.a99"
+
+*----------------------------------------------------------------------
+* Hardware
+*----------------------------------------------------------------------
+* VDP ports
+VDPRD  EQU  >8800            VRAM read data
+VDPSTA EQU  >8802            VDP status register
+VDPWD  EQU  >8C00            VRAM write data
+VDPWA  EQU  >8C02            VRAM / VDP register address
+
+* GROM ports (the loader lifts the console font for its refusal screens)
+GRMRD  EQU  >9800            GROM read data (auto-increments)
+GRMWA  EQU  >9C02            GROM address, high byte first
+
+* Sound
+SOUND  EQU  >8400            TMS9919 sound chip
+
+* AMS / SAMS mapper
+AMSCRU EQU  >1E00            CRU base: bit 0 = registers visible, bit 1 = mapping on
+AMSREG EQU  >4000            mapper registers, one word per 4K window: >4000 + 2*window
+
+* Cartridge bank select (write any value to >6000 + 2*bank)
+CBANK0 EQU  >6000            cart bank 0 select; bank n at >6000 + 2n
+
+* The console's interrupt routine (>0900, workspace >83C0) runs only inside
+* VSYNC, where interrupts are briefly allowed.  It advances the frame
+* counter, plays sound lists, and blanks the screen when its timer wraps
+* (about nine minutes at 60 Hz).  The kernel clears that timer on every key,
+* so the screen blanks after nine idle minutes, as the TI's own programs do.
+ISRTMR EQU  >8379            frame counter kept by the console ISR
+ISRFLG EQU  >83C2            >50 = no sprite motion, no QUIT key
+SNDPTC EQU  >83CC            sound list pointer
+SNDDUR EQU  >83CE            sound list duration counter (0 = finished)
+TMRINC EQU  >83FC            the console ISR adds this byte (R14's high byte in the GPL workspace) to >8379
+*                            every frame: VSYNC needs it non-zero, and a DSR may disturb it
+SNDFLG EQU  >83FD            bit 0 set = the sound list is in VDP RAM
+VR1CPY EQU  >83D4            console's copy of VDP register 1 (written back when it blanks)
+SCRTMO EQU  >83D6            console screen-blank timer (+2 a frame; blanks at 0)
+GPLWS  EQU  >83E0            the GPL workspace: DSRs run in it
+
+*----------------------------------------------------------------------
+* SAMS pages (4K each; identity-mapped at boot, so page n of the fixed
+* windows sits at n<<12).  The kernel owns pages >00-1F's fixed roles;
+* from PGDATA up the build assigns the application's pages (appcfg.a99).
+*----------------------------------------------------------------------
+PGLOWA EQU  >02              slot A (>2000, >3000): state and the stack
+PGKERN EQU  >0A              resident kernel (>A000, >B000)
+PGSLTC EQU  >0C              slot C's default pair (>C000, >D000): modules run here
+PGLOWB EQU  >0E              slot B's default pair (>E000, >F000): data is paged here
+PGDATA EQU  >10              data bank: glyphs, colour schemes (2 pages)
+PGMOD0 EQU  >12              the first page the build gives a module
+* Pages >04-09 are free for the application (the CPU's windows >4000-9FFF are
+* not RAM, so these pages exist only when mapped into slot B or C).  The
+* loader's memory test starts at PGDATA, so they are not tested at boot.
+* Pages >00-01 are the console's windows and are never used.
+
+*----------------------------------------------------------------------
+* Scratchpad (>8300 - >83FF).  R0-R15 live in the workspace, so the
+* console's own variables sit among ours.
+*----------------------------------------------------------------------
+WS     EQU  >8300            the one workspace: R0-R15 (LWPI WS)
+HOT    EQU  >8340            kernel hot variables
+FRAME  EQU  HOT+0            16-bit frame counter (VSYNC and the idle polls add 1)
+CURPA  EQU  HOT+2            pages mapped in slot A (>2000,>3000), (first<<8)|second
+CURPB  EQU  HOT+4            pages mapped in slot B (>E000,>F000)
+CURPC  EQU  HOT+6            pages mapped in slot C (>C000,>D000)
+F18FLG EQU  HOT+8            >0001 if an F18A answered (the loader refuses otherwise)
+F18VER EQU  HOT+10           F18A firmware version (status register 14), e.g. >0019
+NPAGES EQU  HOT+12           SAMS pages present: 32, 64, 128 or 256 (256 = 1M or more)
+QUITF  EQU  HOT+14           non-zero: the application asks to quit to the TI title
+VDPPIC EQU  >8350            non-zero: the F18A is a PICO9918 (DSR calls keep this word)
+SCRTCH EQU  >8380            64 bytes: the loader's relocated bank copier (free afterwards)
+
+*----------------------------------------------------------------------
+* Slot A (>2000 - >3FFF, pages >02-03): the kernel's state first, then
+* the application's.  Nothing remaps slot A.
+*----------------------------------------------------------------------
+KEYMAP EQU  >2000            6 bytes: keyboard columns 0-5 (0 bit = pressed)
+KLAST  EQU  >2006            last chord code produced (word, code in the high byte), for auto-repeat
+KHOLD  EQU  >2008            frames the current chord has been held
+KMODS  EQU  >200A            modifiers of the last code: >80 FCTN, >40 SHIFT, >20 CTRL, >10 ALPHA
+ALOCK  EQU  >200C            >0001 while ALPHA LOCK is down
+KHEAD  EQU  >200E            key buffer: next slot to write (0-63)
+KTAIL  EQU  >2010            key buffer: next slot to read (0-63)
+KCOUNT EQU  >2012            codes taken from the buffer since boot (for tests)
+KCURK  EQU  >2014            the key KDECOD found (column * 8 + row), or -1
+KLKEY  EQU  >2016            the key that produced KLAST, or -1
+KBUF   EQU  >2040            64-byte key buffer (codes, one byte each)
+SCHEME EQU  >2080            current colour scheme (0-4)
+TXTBUF EQU  >2090            16 bytes: number formatting and the hex routines
+MCENT  EQU  >20A0            MODCALL: the entry
+MCRET  EQU  >20A2            MODCALL: R0 from the call
+NEXTPG EQU  >20A4            GOMOD: the module to switch to (first page), 0 = none
+GOARG  EQU  >20A6            GOMOD: the argument handed to its INIT
+PREVPG EQU  >20A8            the module that was running before the last switch (0 at boot)
+GPUBUF EQU  >20B0            8 bytes: the GPU mailbox as built (VSHIFT)
+NODMA  EQU  >20B8            non-zero: the F18A has no DMA engine (T80INI's test)
+POOLBM EQU  >20C0            32 bytes: page-pool bitmap, a bit per page (1 = free)
+POOLLO EQU  >20E0            pool: the first page it manages
+POOLHI EQU  >20E2            pool: the page after its last
+FREECT EQU  >20E4            pool: free pages
+
+* File service (files.a99): >2100->21FF
+FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
+FNAMB  EQU  >2160            8 bytes: the device name for the DSR search
+FSR10  EQU  >2168            R10 across the DSR
+FDCRU  EQU  >216A            CRU base of the ROM that answered
+FDENT  EQU  >216C            what DLGPL calls
+FD54   EQU  >216E            >8354, >8356, >83D0, >83D2 across the power-up
+FD56   EQU  >2170
+FDD0   EQU  >2172
+FDD2   EQU  >2174
+FDPWR  EQU  >2176            non-zero once the controller's power-up has run
+FD70   EQU  >2178            >8370 as the controller's power-up left it
+FERR   EQU  >217A            the last file operation's result
+FLEN   EQU  >217C            the last record's length
+FNMP   EQU  >217E            the name in use (address of a length-prefixed string)
+FPAB   EQU  >2180            64 bytes: the PAB as built
+*                            >21C0->21FF: free for the kernel's growth
+
+MODRAM EQU  >2200            256 bytes of scratch for the running module (not kept across a module switch)
+APPRAM EQU  >2300            the application's RAM: >2300 up to APPTOP
+APPTOP EQU  >3F00            ... and the software stack above it
+STKTOP EQU  >4000            R10 starts here: the first push writes >3FFE (256 bytes: 128 words)
+
+* The data bank (pages PGDATA, mapped at >E000 by LDSCHM and T80INI)
+DGLYPH EQU  >E000            256 glyphs x 8 bytes
+DSCHEM EQU  >E800            5 colour schemes x 16 palette words (>0RGB)
+
+*----------------------------------------------------------------------
+* Key codes (a code is a byte; KEYGET returns it in the high byte)
+*   >20->7E  printable characters
+*   >0D      ENTER (with any modifier but CTRL)
+*   >80->BF  CTRL + key: >80 | (key's unshifted code AND >3F)
+*            (CTRL A = >81 ... CTRL Z = >9A, CTRL 0 = >B0 ... CTRL 9 = >B9)
+*   >C0->FF  FCTN + key with no character: >C0 | (unshifted code AND >3F)
+*            (FCTN E = >C5, FCTN S = >D3, FCTN D = >C4, FCTN X = >D8,
+*             FCTN 1 = >F1 ... FCTN 9 = >F9, FCTN 0 = >F0, FCTN = = >FD)
+*----------------------------------------------------------------------
+KUP    EQU  >C5              FCTN E (up arrow)
+KLEFT  EQU  >D3              FCTN S (left arrow)
+KRIGHT EQU  >C4              FCTN D (right arrow)
+KDOWN  EQU  >D8              FCTN X (down arrow)
+KDEL   EQU  >F1              FCTN 1 (DEL)
+KINS   EQU  >F2              FCTN 2 (INS)
+KERASE EQU  >F3              FCTN 3 (ERASE)
+KCLEAR EQU  >F4              FCTN 4 (CLEAR)
+KBEGIN EQU  >F5              FCTN 5 (BEGIN)
+KPROC  EQU  >F6              FCTN 6 (PROC'D)
+KAID   EQU  >F7              FCTN 7 (AID)
+KREDO  EQU  >F8              FCTN 8 (REDO)
+KBACK  EQU  >F9              FCTN 9 (BACK)
+KQUIT  EQU  >FD              FCTN = (QUIT)
+KENTER EQU  >0D              ENTER
+
+*----------------------------------------------------------------------
+* Colour roles: palette entries 1-15.  A position-attribute byte is
+* (foreground role << 4) | background role; a colour scheme is a palette
+* of 16 words, so changing scheme recolours the whole screen without
+* rewriting a cell.  Entry 0 is transparent (the backdrop shows).
+*----------------------------------------------------------------------
+RBG    EQU  1                page background
+RTEXT  EQU  2                text
+RBOLD  EQU  3                emphasis (bold)
+RITAL  EQU  4                italic
+RBOLIT EQU  5                bold italic
+RSCRPT EQU  6                superscript and subscript
+RDIM   EQU  7                dim: strikethrough, secondary text
+RERROR EQU  8                error
+RSELBG EQU  9                selection background
+RSELFG EQU  10               selection foreground
+RBARBG EQU  11               status bar background
+RBARFG EQU  12               status bar foreground
+RRULER EQU  13               ruler, rules, frames
+RMARK  EQU  14               markers, labels
+RACCNT EQU  15               accent: the cursor
+
+*----------------------------------------------------------------------
+* Screen geometry (Text 80 at 30 rows) and the VRAM map
+*----------------------------------------------------------------------
+COLS   EQU  80
+ROWS   EQU  30
+NAMTAB EQU  >0000            name table, 2,400 bytes (>0000-095F)
+PATTAB EQU  >1000            pattern table, 2,048 bytes (>1000-17FF)
+ATRTAB EQU  >1800            position attributes, 2,400 bytes (>1800-215F)
+GPUMB  EQU  >2800            the GPU's mailbox (8 bytes: a DMA's settings)
+GPUAD  EQU  >2810            the GPU's program
+* free VRAM for the application: >0960-0FFF, >2160-27FF, >2830-35FF;
+* >3600-36FF the file record buffer, >3700-37D7 the PAB, >37D8-3FFF the
+* disk controller's own (nothing else may touch it)
+
+*----------------------------------------------------------------------
+* File service (files.a99)
+*----------------------------------------------------------------------
+FPABV  EQU  >3700            the PAB in VRAM
+FBUFV  EQU  >3600            the record buffer in VRAM (up to 255 bytes)
+* open flags (the PAB's flag byte, high byte of R0): add one from each group
+FDISP  EQU  >0000            DISPLAY records
+FINTL  EQU  >0800            INTERNAL records
+FFIXED EQU  >0000            FIXED-length records
+FVAR   EQU  >1000            VARIABLE-length records
+FUPDT  EQU  >0000            mode: update
+FOUT   EQU  >0200            mode: output (creates the file)
+FIN    EQU  >0400            mode: input
+FAPP   EQU  >0600            mode: append
+* results (R0): 0 = done; 1-7 = the PAB's error code; >FF = no such device
+FEEOF  EQU  5                reading past the end of the file
+FENOFI EQU  7                file not found (input)

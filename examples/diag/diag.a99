@@ -1,0 +1,613 @@
+*======================================================================
+* diag.a99 - the Lantern Kernel diagnostic, module 1 of 2 (the other is
+* tests.a99).  Shows everything the kernel provides on one screen: the
+* 80 x 30 Text 80 screen, every colour role, the whole glyph set, and a
+* key decoder that names each chord with its code and modifiers.  A typing
+* area echoes printable keys.  CTRL 3 cycles the five colour schemes (a
+* palette reload: nothing on the screen is rewritten).  CTRL T switches
+* to the self-test module (it comes back here when a key is pressed).
+* FCTN = quits.
+*
+* A complete small application: read it with docs/PROGRAMMERS-GUIDE.md.
+* It is also the first thing to run on new hardware.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* the module's variables (APPRAM: they survive a switch to another module)
+CURPOS EQU  APPRAM+0           typing cursor (screen position)
+SHALPH EQU  APPRAM+2           ALPHA LOCK state last shown (-1: redraw)
+RULBUF EQU  APPRAM+16          the ruler line, length-prefixed (81 bytes)
+NAMBUF EQU  APPRAM+112         a built string, length-prefixed (40 bytes)
+CHBUF  EQU  APPRAM+160         a short built string (8 bytes)
+
+* attributes (foreground role << 4 | background role, in the high byte)
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AITAL  EQU  (RITAL*16+RBG)*256
+ABOLIT EQU  (RBOLIT*16+RBG)*256
+ASCR   EQU  (RSCRPT*16+RBG)*256
+ADIM   EQU  (RDIM*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+ASEL   EQU  (RSELFG*16+RSELBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ARUL   EQU  (RRULER*16+RBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+ACUR   EQU  (RBG*16+RACCNT)*256
+
+* the typing area: rows 21-27
+TYTOP  EQU  21*80
+TYEND  EQU  28*80
+TYSIZE EQU  7*80
+
+       AORG >C000
+       DATA DGINIT,DGTICK,DGDRAW,0,DGPING     entries 0-3 as always; 4: for MODCALL
+
+* DGPING - entry 4, called by the self-test through MODCALL: returns a
+* number in R0 so the test can see the call happened and came back.
+DGPING LI   R0,>1234
+       RT
+
+* DGINIT - the module has been switched to (at boot, or back from the
+* self-test): the screen drawn.
+DGINIT .enter
+       LI   R0,TYTOP
+       MOV  R0,@CURPOS
+       BL   @DGDRAW
+       .leave
+       RT
+
+* DGDRAW - the whole screen.
+DGDRAW .enter
+       LI   R1,ANORM           a clean screen
+       BL   @CLS
+       CLR  R0                 the status bar
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       CLR  R0
+       LI   R1,SBAR
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R1,S512            SAMS size
+       MOV  @NPAGES,R3
+       CI   R3,256
+       JL   MD1
+       LI   R1,S1M
+MD1    LI   R0,44
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,56              'F18A ' then the version as n.n
+       LI   R1,SF18
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R3,CHBUF
+       LI   R4,>0300
+       MOVB R4,*R3+
+       MOV  @F18VER,R4
+       SRL  R4,4
+       BL   @HEXD
+       LI   R4,>2E00
+       MOVB R4,*R3+
+       MOV  @F18VER,R4
+       BL   @HEXD
+       LI   R0,61
+       LI   R1,CHBUF
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,76
+       LI   R1,SINS
+       LI   R2,ABAR
+       BL   @PUTS
+       SETO @SHALPH            the tick shows ALPHA LOCK
+       BL   @RULER
+       LI   R1,LABELS
+       BL   @PUTLST
+       BL   @GCHART
+       MOV  @CURPOS,R0
+       LI   R1,ACUR
+       LI   R2,1
+       BL   @FILLA
+       .leave
+       RT
+
+* RULER - row 1: margin marks at columns 0 and 79, a digit every ten
+* columns, '+' every five, ticks between.
+RULER  .enter
+       LI   R3,RULBUF
+       LI   R4,>5000           length 80
+       MOVB R4,*R3+
+       CLR  R5                 column
+RU1    CLR  R6
+       MOV  R5,R7
+       LI   R8,10
+       DIV  R8,R6              R6 = column / 10, R7 = column mod 10
+       MOV  R7,R7
+       JNE  RU2
+       AI   R6,>30             a digit
+       JMP  RU4
+RU2    LI   R6,>2B             '+'
+       CI   R7,5
+       JEQ  RU4
+       LI   R6,24              a tick
+RU4    SWPB R6
+       MOVB R6,*R3+
+       INC  R5
+       CI   R5,80
+       JL   RU1
+       LI   R4,>1A00           left margin mark
+       MOVB R4,@RULBUF+1
+       LI   R4,>1B00           right margin mark
+       MOVB R4,@RULBUF+80
+       LI   R0,80
+       LI   R1,RULBUF
+       LI   R2,ARUL
+       BL   @PUTS
+       .leave
+       RT
+
+* PUTLST - a list of (DATA position, attribute; length-prefixed string;
+* EVEN) entries, ended by DATA -1.  Uses R0-R7.
+PUTLST .enter
+PL1    MOV  *R1+,R0
+       CI   R0,-1
+       JEQ  PL9
+       MOV  *R1+,R2
+       .push R1
+       BL   @PUTS
+       .pop R1
+       CLR  R3                 past the string, to the next even address
+       MOVB *R1,R3
+       SWPB R3
+       INC  R3
+       A    R3,R1
+       INC  R1
+       ANDI R1,>FFFE
+       JMP  PL1
+PL9    .leave
+       RT
+
+* GCHART - all 256 glyphs, 32 to a row on rows 7-14, each row labelled
+* with its first code in hex.
+GCHART .enter
+       CLR  R9                 glyph
+GC1    MOV  R9,R5
+       ANDI R5,31
+       JNE  GC2
+       MOV  R9,R1              a new row: '>' and the code
+       SRL  R1,5
+       AI   R1,7
+       LI   R2,80
+       MPY  R1,R2              R3 = row * 80
+       MOV  R3,R0
+       .push R3
+       LI   R1,>3E00
+       LI   R2,AMARK
+       BL   @PUTC
+       .pop R0
+       INC  R0
+       MOV  R9,R1
+       LI   R2,AMARK
+       BL   @HEX2
+GC2    MOV  R9,R1              position: (7 + glyph / 32) * 80 + 6 + 2 * (glyph mod 32)
+       SRL  R1,5
+       AI   R1,7
+       LI   R2,80
+       MPY  R1,R2
+       MOV  R9,R0
+       ANDI R0,31
+       SLA  R0,1
+       A    R3,R0
+       AI   R0,6
+       MOV  R9,R1
+       SWPB R1
+       LI   R2,ANORM
+       BL   @PUTC
+       INC  R9
+       CI   R9,256
+       JL   GC1
+       .leave
+       RT
+
+* DGTICK - every frame.  R0 = the next key code (high byte) or 0.
+DGTICK .enter
+       .push R0
+       BL   @SHOWAL
+       .pop R0
+       MOV  R0,R0
+       JNE  TK0
+       B    @TK9
+TK0    .push R0
+       BL   @SHOWK
+       .pop R0
+       CI   R0,KQUIT*256       FCTN =: quit
+       JNE  TK1
+       SETO @QUITF
+       B    @TK9
+TK1    CI   R0,>B300           CTRL 3: the next colour scheme
+       JNE  TK2
+       INC  @SCHEME
+       MOV  @SCHEME,R1
+       CI   R1,5
+       JL   TK1A
+       CLR  @SCHEME
+TK1A   MOV  @SCHEME,R0
+       BL   @SETSCH
+       B    @TK9
+TK2    CI   R0,>9400           CTRL T: the self-test module
+       JNE  TK2A
+       LI   R0,PG_TESTS
+       CLR  R1
+       BL   @GOMOD
+       B    @TK9
+TK2A   MOV  @CURPOS,R1
+       CI   R0,KUP*256
+       JNE  TK3
+       AI   R1,-80
+       CI   R1,TYTOP
+       JHE  TK8
+       AI   R1,TYSIZE
+       JMP  TK8
+TK3    CI   R0,KDOWN*256
+       JNE  TK4
+       AI   R1,80
+       CI   R1,TYEND
+       JL   TK8
+       AI   R1,-TYSIZE
+       JMP  TK8
+TK4    CI   R0,KLEFT*256
+       JNE  TK5
+       DEC  R1
+       CI   R1,TYTOP
+       JHE  TK8
+       LI   R1,TYEND-1
+       JMP  TK8
+TK5    CI   R0,KRIGHT*256
+       JEQ  TK7
+       CI   R0,KENTER*256      ENTER: the start of the next row
+       JNE  TK6
+       AI   R1,-TYTOP
+       CLR  R2                 R2:R3 = offset; / 80
+       MOV  R1,R3
+       LI   R4,80
+       DIV  R4,R2              R2 = row in the area
+       INC  R2
+       CI   R2,7
+       JL   TK5A
+       CLR  R2
+TK5A   LI   R3,80
+       MPY  R2,R3              R4 = row * 80
+       MOV  R4,R1
+       AI   R1,TYTOP
+       JMP  TK8
+TK6    CI   R0,>F300           FCTN 3 (ERASE): clear the area
+       JNE  TK6A
+       LI   R0,TYTOP
+       LI   R1,>2000
+       LI   R2,TYSIZE
+       BL   @FILLN
+       LI   R0,TYTOP
+       LI   R1,ANORM
+       LI   R2,TYSIZE
+       BL   @FILLA
+       LI   R1,TYTOP
+       JMP  TK8
+TK6A   CI   R0,>2000           printable: into the area, then right
+       JL   TK9
+       CI   R0,>7E00
+       JH   TK9
+       MOV  R0,R1
+       MOV  @CURPOS,R0
+       LI   R2,ANORM
+       BL   @PUTC
+       MOV  @CURPOS,R1
+TK7    INC  R1                 right, wrapping to the area's start
+       CI   R1,TYEND
+       JL   TK8
+       LI   R1,TYTOP
+TK8    BL   @MOVCUR
+TK9    .leave
+       RT
+
+* MOVCUR - the cursor to position R1 (the old cell back to normal).
+MOVCUR .enter
+       .push R1
+       MOV  @CURPOS,R0
+       LI   R1,ANORM
+       LI   R2,1
+       BL   @FILLA
+       .pop R1
+       MOV  R1,@CURPOS
+       MOV  R1,R0
+       LI   R1,ACUR
+       LI   R2,1
+       BL   @FILLA
+       .leave
+       RT
+
+* SHOWAL - ALPHA on the status bar while ALPHA LOCK is down.
+SHOWAL .enter
+       MOV  @ALOCK,R0
+       C    R0,@SHALPH
+       JEQ  SA9
+       MOV  R0,@SHALPH
+       LI   R1,SALPH
+       MOV  R0,R0
+       JNE  SA1
+       LI   R1,SNOAL
+SA1    LI   R0,68
+       LI   R2,ABAR
+       BL   @PUTS
+SA9    .leave
+       RT
+
+* SHOWK - the decoder lines for key R0: its name, code, the modifiers
+* held, and the count of keys received.
+SHOWK  .enter
+       MOV  R0,R9
+       BL   @KNAME
+       LI   R0,17*80+12
+       LI   R1,NAMBUF
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,17*80+39
+       LI   R1,>3E00
+       LI   R2,ANORM
+       BL   @PUTC
+       LI   R0,17*80+40
+       MOV  R9,R1
+       SWPB R1
+       LI   R2,ANORM
+       BL   @HEX2
+       BL   @MODSTR
+       LI   R0,17*80+55
+       LI   R1,NAMBUF
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,18*80+16
+       MOV  @KCOUNT,R1
+       LI   R2,ANORM
+       BL   @DECW
+       .leave
+       RT
+
+* KNAME - the name of key code R9 (high byte) into NAMBUF, padded to 20.
+KNAME  .enter
+       CLR  R0
+       MOVB R0,@NAMBUF
+       MOV  R9,R5
+       SRL  R5,8               the code, 0-255
+       CI   R5,>0D
+       JNE  KN1
+       LI   R1,SENTER
+       BL   @APPS
+       JMP  KN8
+KN1    CI   R5,>8D
+       JNE  KN2
+       LI   R1,SCTRL
+       BL   @APPS
+       LI   R1,SENTER
+       BL   @APPS
+       JMP  KN8
+KN2    CI   R5,>80
+       JHE  KN3
+       CI   R5,>20             a printable character
+       JNE  KN2A
+       LI   R1,SSPACE
+       BL   @APPS
+       JMP  KN8
+KN2A   LI   R1,>2700           'x'
+       BL   @APPC
+       MOV  R9,R1
+       BL   @APPC
+       LI   R1,>2700
+       BL   @APPC
+       JMP  KN8
+KN3    LI   R1,SCTRL           CTRL or FCTN, then the key
+       CI   R5,>C0
+       JL   KN4
+       LI   R1,SFCTN
+KN4    BL   @APPS
+       MOV  R5,R6
+       ANDI R6,>3F
+       CI   R6,>20
+       JNE  KN5
+       LI   R1,SSPACE
+       BL   @APPS
+       JMP  KN8
+KN5    JH   KN6
+       AI   R6,>40             letters
+KN6    MOV  R6,R1
+       SWPB R1
+       BL   @APPC
+       CI   R5,>C0             FCTN: the keycap legend, if it has one
+       JL   KN8
+       LI   R7,LEGEND
+KN7    MOV  *R7+,R1
+       JEQ  KN8
+       MOV  *R7+,R2
+       C    R1,R5
+       JNE  KN7
+       LI   R1,>2000
+       BL   @APPC
+       MOV  R2,R1
+       BL   @APPS
+KN8    CLR  R3                 pad to 20
+       MOVB @NAMBUF,R3
+       CI   R3,>1400
+       JHE  KN9
+       LI   R1,>2000
+       BL   @APPC
+       JMP  KN8
+KN9    .leave
+       RT
+
+* MODSTR - the modifiers of the last key (KMODS) into NAMBUF, padded to 22.
+MODSTR .enter
+       CLR  R0
+       MOVB R0,@NAMBUF
+       MOV  @KMODS,R5
+       MOV  R5,R6
+       ANDI R6,>F000
+       JNE  MS1
+       LI   R1,SNONE
+       BL   @APPS
+MS1    MOV  R5,R6
+       ANDI R6,>8000
+       JEQ  MS2
+       LI   R1,SFCTN
+       BL   @APPS
+MS2    MOV  R5,R6
+       ANDI R6,>4000
+       JEQ  MS3
+       LI   R1,SSHIFT
+       BL   @APPS
+MS3    MOV  R5,R6
+       ANDI R6,>2000
+       JEQ  MS4
+       LI   R1,SCTRL
+       BL   @APPS
+MS4    MOV  R5,R6
+       ANDI R6,>1000
+       JEQ  MS5
+       LI   R1,SALPH
+       BL   @APPS
+MS5    CLR  R3
+       MOVB @NAMBUF,R3
+       CI   R3,>1600
+       JHE  MS9
+       LI   R1,>2000
+       BL   @APPC
+       JMP  MS5
+MS9    .leave
+       RT
+
+* APPC - append character R1 (high byte) to NAMBUF.  Leaf.  Uses R3.
+APPC   CLR  R3
+       MOVB @NAMBUF,R3
+       SWPB R3
+       INC  R3
+       MOVB R1,@NAMBUF(R3)
+       SWPB R3
+       MOVB R3,@NAMBUF
+       RT
+* APPS - append the length-prefixed string at R1 to NAMBUF.  Leaf.
+* Uses R1, R3, R4.
+APPS   CLR  R4
+       MOVB *R1+,R4
+       SWPB R4
+       JEQ  AP9
+AP1    CLR  R3
+       MOVB @NAMBUF,R3
+       SWPB R3
+       INC  R3
+       MOVB *R1+,@NAMBUF(R3)
+       SWPB R3
+       MOVB R3,@NAMBUF
+       DEC  R4
+       JNE  AP1
+AP9    RT
+
+* the keycap legends of the FCTN keys
+LEGEND DATA >F1,SLDEL,>F2,SLINS,>F3,SLERA,>F4,SLCLR,>F5,SLBEG
+       DATA >F6,SLPRO,>F7,SLAID,>F8,SLRDO,>F9,SLBCK,>FD,SLQUI
+       DATA >C5,SLUP,>D3,SLLFT,>C4,SLRGT,>D8,SLDWN,0
+
+SBAR   STRI ' Lantern Kernel   diagnostic'
+S512   STRI 'SAMS 512K'
+S1M    STRI 'SAMS 1M+  '
+SF18   STRI 'F18A '
+SINS   STRI 'INS'
+SALPH  STRI 'ALPHA '
+SNOAL  STRI '      '
+SENTER STRI 'ENTER'
+SSPACE STRI 'SPACE'
+SCTRL  STRI 'CTRL '
+SFCTN  STRI 'FCTN '
+SSHIFT STRI 'SHIFT '
+SNONE  STRI 'none'
+SLDEL  STRI '(DEL)'
+SLINS  STRI '(INS)'
+SLERA  STRI '(ERASE)'
+SLCLR  STRI '(CLEAR)'
+SLBEG  STRI '(BEGIN)'
+SLPRO  STRI '(PROC''D)'
+SLAID  STRI '(AID)'
+SLRDO  STRI '(REDO)'
+SLBCK  STRI '(BACK)'
+SLQUI  STRI '(QUIT)'
+SLUP   STRI '(up)'
+SLLFT  STRI '(left)'
+SLRGT  STRI '(right)'
+SLDWN  STRI '(down)'
+       EVEN
+
+* the labels and samples: DATA position, attribute; string; EVEN
+LABELS DATA 3*80,AMARK
+       STRI 'Character attributes as colour roles (CTRL 3 cycles the five schemes)'
+       EVEN
+       DATA 4*80+2,ANORM
+       STRI 'Normal'
+       EVEN
+       DATA 4*80+10,ABOLD
+       STRI 'Bold'
+       EVEN
+       DATA 4*80+16,AITAL
+       STRI 'Italic'
+       EVEN
+       DATA 4*80+24,ABOLIT
+       STRI 'Bold italic'
+       EVEN
+       DATA 4*80+37,ANORM
+       BYTE 10,181,206,196,197,210,204,201,206,197,196
+       EVEN
+       DATA 4*80+49,ASCR
+       STRI 'Superscript'
+       EVEN
+       DATA 4*80+62,ADIM
+       STRI 'Dim'
+       EVEN
+       DATA 5*80+2,AERR
+       STRI 'Mispelt'
+       EVEN
+       DATA 5*80+11,ASEL
+       STRI 'Selected'
+       EVEN
+       DATA 5*80+21,ACUR
+       STRI 'Cursor'
+       EVEN
+       DATA 5*80+29,ABAR
+       STRI 'Status bar'
+       EVEN
+       DATA 5*80+41,ARUL
+       STRI 'Ruler'
+       EVEN
+       DATA 5*80+48,AMARK
+       STRI 'Marker'
+       EVEN
+       DATA 6*80,AMARK
+       STRI 'Glyphs: 0-31 UI, 32-126 ASCII, 127 Latin-1 mark, 128-222 underlined, 223+ UI'
+       EVEN
+       DATA 16*80,AMARK
+       STRI 'Keyboard: every chord shows its code and modifiers; a held key repeats.'
+       EVEN
+       DATA 17*80+2,AMARK
+       STRI 'Last key'
+       EVEN
+       DATA 17*80+34,AMARK
+       STRI 'Code'
+       EVEN
+       DATA 17*80+45,AMARK
+       STRI 'Modifiers'
+       EVEN
+       DATA 18*80+2,AMARK
+       STRI 'Keys received'
+       EVEN
+       DATA 20*80,AMARK
+       STRI 'Typing area: FCTN E S D X move, FCTN 3 clears, ENTER starts a new line.'
+       EVEN
+       DATA 29*80,AMARK
+       STRI 'Lantern Kernel diagnostic.  CTRL T self-test, CTRL 3 colour scheme, FCTN = quits.'
+       EVEN
+       DATA -1
+       END

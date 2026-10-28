@@ -1,0 +1,117 @@
+*======================================================================
+* vdp.a99 - VDP register and VRAM primitives (from The Lantern Coast)
+* and the frame wait.  The loader and the kernel both include it.
+*
+* Conventions: arguments in R0-R3, R11 is the return link.
+* Routines here are leaves: they never BL further, so R11 is safe.
+* Interrupts are masked (LIMI 0) everywhere but inside VSYNC: an interrupt
+* between the two bytes of a VDP address write would corrupt it.
+*======================================================================
+
+* VDPWR - write a VDP register.
+*   R0 = >RRDD  where RR = >80 | register number, DD = data
+VDPWR  SWPB R0                 swap so the data byte is in the high half
+       MOVB R0,@VDPWA         data byte first
+       SWPB R0
+       MOVB R0,@VDPWA         then >80|reg
+       RT
+
+* VWAD - set VRAM write address.  R0 = address (>0000->3FFF)
+VWAD   SWPB R0                 VDP takes the low address byte first
+       MOVB R0,@VDPWA         low byte
+       SWPB R0
+       ORI  R0,>4000           bit 14 set = write address
+       MOVB R0,@VDPWA         high byte with write bit
+       ANDI R0,>3FFF           hand R0 back as a plain address
+       RT
+
+* VRAD - set VRAM read address.  R0 = address
+VRAD   SWPB R0                 read address: same dance without bit 14
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       RT
+
+* VMBW - block write.  R0 = VRAM address, R1 = source, R2 = byte count
+VMBW   SWPB R0                 inline VWAD (leaf: no BL, R11 untouched)
+       MOVB R0,@VDPWA
+       SWPB R0
+       ORI  R0,>4000
+       MOVB R0,@VDPWA
+VMBW0  CI   R2,16               16 bytes a pass while there are 16 left
+       JL   VMBW1
+       MOVB *R1+,@VDPWD        VDP auto-increments after each data write
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       MOVB *R1+,@VDPWD
+       AI   R2,-16             (no interrupts in here: the console ISR sets the VDP
+       JMP  VMBW0              address to read the music, which would break the copy)
+VMBW1  MOV  R2,R2              the last few, one at a time
+       JEQ  VMBW2
+VMBW3  MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  VMBW3
+VMBW2  RT
+
+* VMBR - block read.  R0 = VRAM address, R1 = dest, R2 = byte count
+VMBR   SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+VMBR1  MOVB @VDPRD,*R1+        read side auto-increments too
+       DEC  R2
+       JNE  VMBR1
+       RT
+
+* VFILL - fill.  R0 = VRAM address, R1 = byte (high), R2 = count
+VFILL  SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       ORI  R0,>4000
+       MOVB R0,@VDPWA
+VFILL1 MOVB R1,@VDPWD          same byte R2 times
+       DEC  R2
+       JNE  VFILL1
+       RT
+
+* VSBW - single byte write.  R0 = VRAM address, R1 = byte (high)
+VSBW   SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       ORI  R0,>4000
+       MOVB R0,@VDPWA
+       MOVB R1,@VDPWD
+       RT
+
+* VSYNC - wait for the next vertical blank.  Interrupts are allowed in
+* only here, long enough for the console ISR to tick its frame counter
+* (and play any sound list); masked everywhere else.  The screen-blank
+* timer is not cleared here but on each key (KPUT), so the console blanks
+* the screen after nine idle minutes.  Adds 1 to FRAME.  Uses R0.
+VSYNC  MOVB @ISRTMR,R0         the console ISR advances >8379 every frame ...
+VSYN1  LIMI 2                  ... while interrupts are allowed in here
+       CB   @ISRTMR,R0
+       JEQ  VSYN1
+       LIMI 0
+       INC  @FRAME
+       RT
+
+* VSBR - single byte read.  R0 = VRAM address; R1 = the byte (high byte).
+VSBR   SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       MOVB @VDPRD,R1
+       RT

@@ -1,0 +1,34 @@
+* macros.a99 - the stack and interrupt-service macros, shared by the loader,
+* the kernel and every module.
+*
+*   .enter    a routine that calls another saves its return address
+*   .leave    ... and takes it back (then RT).  .leave's MOV sets the
+*             flags from R11, so results go in registers, not flags
+*   .push Rn  / .pop Rn   save and restore a register on the software stack
+*   .intsvc   let the console ISR run once (interrupts on, then off)
+*   .callmod PAGE,N   call entry N of the module whose first page is
+*             PAGE (MODCALL: R0 returns); N counts from 0: INIT 0, TICK 1,
+*             REDRAW 2, reserved 3, your own entries from 4
+       .defm enter
+       DECT R10
+       MOV  R11,*R10
+       .endm
+       .defm leave
+       MOV  *R10+,R11
+       .endm
+       .defm push
+       DECT R10
+       MOV  #1,*R10
+       .endm
+       .defm pop
+       MOV  *R10+,#1
+       .endm
+       .defm intsvc
+       LIMI 2
+       LIMI 0
+       .endm
+       .defm callmod
+       LI   R0,#1
+       LI   R1,>C000+(2*#2)
+       BL   @MODCALL
+       .endm

@@ -1,0 +1,25 @@
+*======================================================================
+* databank.a99 - the data bank (cartridge bank 2 -> pages PGDATA),
+* read through slot B at >E000
+*
+* >E000  DGLYPH  256 glyphs x 8 bytes (gen/font.a99, from tools/font.py)
+* >E800  DSCHEM  5 colour schemes x 16 palette entries (>0RGB)
+*
+* A scheme gives a colour to each role (kdefs.a99, "Colour roles"); entry
+* 0 matches the background.  The five follow TI-Writer's Screen Color
+* sequence: blue/white (the default), green/black, green/white, light
+* blue/black, black/white.
+*
+* An application may replace this file with its own (same layout) by
+* putting a databank.a99 in its directory: the build looks there first.
+*======================================================================
+       AORG >E000
+       COPY "font.a99"
+*            bg    bg    text  bold  ital  bolit scrpt dim   error selbg selfg barbg barfg ruler mark  accnt
+SCHEM0 DATA >023A,>023A,>0DDE,>0FFF,>09CF,>0BEF,>0FC7,>089B,>0F77,>0DDE,>023A,>0126,>0EEF,>09AD,>08BE,>0FD4
+SCHEM1 DATA >03A4,>03A4,>0222,>0000,>0036,>0024,>0620,>0575,>0A00,>0111,>03A4,>0173,>0EFE,>0152,>0153,>0FF4
+SCHEM2 DATA >0285,>0285,>0EEE,>0FFF,>0CFF,>0EFF,>0FE8,>09B9,>0F88,>0EEE,>0285,>0142,>0EFE,>0AEB,>0BEC,>0FD4
+SCHEM3 DATA >08BF,>08BF,>0112,>0000,>0139,>0026,>0720,>0468,>0B00,>0112,>08BF,>024A,>0EEF,>0236,>0235,>0F80
+SCHEM4 DATA >0000,>0000,>0CCC,>0FFF,>09CF,>0BEF,>0FC7,>0778,>0F66,>0CCC,>0000,>0333,>0FFF,>0888,>07AC,>0FD4
+DBEND
+       END

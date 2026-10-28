@@ -1,0 +1,283 @@
+*======================================================================
+* browse.a99 - the disk browser's first module: the catalog of DSK1 as
+* a list.  UP and DOWN move, ENTER views a text file (the viewer module,
+* through GOMOD with the file's number as its argument), FCTN = quits.
+*
+* Shows the file service (FOPEN of "DSK1.", FREAD, FCNUM, FCLOSE) and
+* module switching.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "shared.a99"
+
+       AORG >C000
+       DATA BRINIT,BRTICK,BRDRAW,0
+
+* BRINIT - switched to: read the catalog, then draw.
+BRINIT .enter
+       CLR  @MSGNO
+       BL   @BCAT
+       MOV  @SEL,R0            keep the selection inside the list
+       C    R0,@NFILES
+       JL   BI1
+       CLR  @SEL
+BI1    BL   @BRDRAW
+       .leave
+       RT
+
+* BCAT - read the catalog of DSK1 into ENTS.  A failure shows its error
+* in the message line.
+BCAT   .enter
+       CLR  @NFILES
+       CLR  @DISKSZ
+       CLR  @DISKFR
+       CLR  R0
+       MOVB R0,@DNAME
+       LI   R2,SDSK            the device alone: the catalog
+       LI   R0,FIN+FINTL       INTERNAL, FIXED, input
+       LI   R1,38
+       BL   @FOPEN
+       MOV  R0,R0
+       JEQ  BC0
+       MOV  R0,@MSGNO          could not open: the DSR's error
+       AI   R0,100
+       MOV  R0,@MSGNO
+       JMP  BC9
+BC0    LI   R1,RECBUF          the first record describes the disk
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  BCC
+       LI   R1,RECBUF          its name ...
+       LI   R2,DNAME
+       LI   R3,11
+BC0A   MOVB *R1+,*R2+
+       DEC  R3
+       JNE  BC0A
+       LI   R1,RECBUF          ... its size ...
+       LI   R2,1
+       BL   @FCNUM
+       MOV  R0,@DISKSZ
+       LI   R1,RECBUF          ... and the sectors free
+       LI   R2,2
+       BL   @FCNUM
+       MOV  R0,@DISKFR
+BC1    LI   R1,RECBUF          each file
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  BCC
+       MOVB @RECBUF,R0         an empty name ends the catalog
+       JEQ  BCC
+       MOV  @NFILES,R0
+       CI   R0,MAXF
+       JHE  BCC
+       SLA  R0,4               the entry: ENTS + n * 16
+       AI   R0,ENTS
+       MOV  R0,@EPTR
+       LI   R1,RECBUF          the name, 10 characters at most
+       CLR  R3
+       MOVB *R1,R3
+       SWPB R3
+       CI   R3,10
+       JLE  BC2
+       LI   R3,10
+BC2    MOV  @EPTR,R2
+       MOV  R3,R4
+       SWPB R4
+       MOVB R4,*R2+            its length
+       LI   R1,RECBUF+1
+BC3    MOVB *R1+,*R2+
+       DEC  R3
+       JNE  BC3
+       LI   R1,RECBUF          the type (negative: protected)
+       CLR  R2
+       BL   @FCNUM
+       ABS  R0
+       MOV  @EPTR,R2
+       MOV  R0,@12(R2)
+       LI   R1,RECBUF          the size
+       LI   R2,1
+       BL   @FCNUM
+       MOV  @EPTR,R2
+       MOV  R0,@14(R2)
+       INC  @NFILES
+       JMP  BC1
+BCC    BL   @FCLOSE
+BC9    .leave
+       RT
+
+* BRDRAW - the whole screen.
+BRDRAW .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2        the disk: name, size, free
+       LI   R1,DNAME
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,2*COLS+16
+       MOV  @DISKSZ,R1
+       LI   R2,AMARK
+       BL   @DECW
+       LI   R0,2*COLS+21
+       LI   R1,SSECT
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,2*COLS+34
+       MOV  @DISKFR,R1
+       LI   R2,AMARK
+       BL   @DECW
+       LI   R0,2*COLS+39
+       LI   R1,SFREE
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,4*COLS+2        the column heads
+       LI   R1,SHEAD
+       LI   R2,AMARK
+       BL   @PUTS
+       CLR  R9                 the files (R9: not changed by the routines below)
+BD1    C    R9,@NFILES
+       JHE  BD9
+       MOV  R9,R0
+       BL   @BRROW
+       INC  R9
+       JMP  BD1
+BD9    BL   @BRMSG
+       LI   R0,29*COLS+2
+       LI   R1,SKEYS
+       LI   R2,AMARK
+       BL   @PUTS
+       .leave
+       RT
+
+* BRROW - file R0's row: name, type, size; highlighted if selected.
+BRROW  .enter
+       MOV  R0,R9
+       LI   R4,ANORM           the attribute: selected or not
+       C    R0,@SEL
+       JNE  BW1
+       LI   R4,ASEL
+BW1    MOV  R4,@VWORK          (kept: PUTS changes R0-R7)
+       MOV  R9,R0
+       SLA  R0,4
+       AI   R0,ENTS
+       MOV  R0,@VWORK+2        the entry
+       MOV  R9,R1              the row: 5 + n
+       AI   R1,5
+       LI   R2,COLS
+       MPY  R1,R2              R3 = the row's first cell
+       MOV  R3,@VWORK+4
+       MOV  R3,R0              the whole row in the attribute
+       MOV  @VWORK,R1
+       LI   R2,COLS
+       BL   @FILLA
+       MOV  @VWORK+4,R0        name
+       AI   R0,2
+       MOV  @VWORK+2,R1
+       MOV  @VWORK,R2
+       BL   @PUTS
+       MOV  @VWORK+2,R1        type: its name from the table
+       MOV  @12(R1),R1
+       CI   R1,5
+       JLE  BW2
+       CLR  R1
+BW2    SLA  R1,1
+       AI   R1,STYPES
+       MOV  *R1,R1
+       MOV  @VWORK+4,R0
+       AI   R0,16
+       MOV  @VWORK,R2
+       BL   @PUTS
+       MOV  @VWORK+2,R1        size
+       MOV  @14(R1),R1
+       MOV  @VWORK+4,R0
+       AI   R0,28
+       MOV  @VWORK,R2
+       BL   @DECW
+       .leave
+       RT
+
+* BRMSG - the message line (row 27), if there is one.
+BRMSG  .enter
+       LI   R0,27*COLS+2
+       LI   R1,ANORM
+       LI   R2,70
+       BL   @FILLA
+       MOV  @MSGNO,R1
+       JEQ  BM9
+       LI   R2,SNOTXT          1: not a text file
+       CI   R1,1
+       JEQ  BM1
+       LI   R2,SNOCAT          the catalog could not be read: 100 + the error
+BM1    MOV  R2,R1
+       LI   R0,27*COLS+2
+       LI   R2,AERR
+       BL   @PUTS
+BM9    .leave
+       RT
+
+* BRTICK - a key.
+BRTICK .enter
+       MOV  R0,R0
+       JEQ  BT9
+       CI   R0,KQUIT*256
+       JNE  BT1
+       SETO @QUITF
+       JMP  BT9
+BT1    CLR  @MSGNO
+       CI   R0,KUP*256
+       JNE  BT2
+       MOV  @SEL,R1
+       JEQ  BT8
+       DEC  @SEL
+       JMP  BT8
+BT2    CI   R0,KDOWN*256
+       JNE  BT3
+       MOV  @SEL,R1
+       INC  R1
+       C    R1,@NFILES
+       JHE  BT8
+       INC  @SEL
+       JMP  BT8
+BT3    CI   R0,KENTER*256
+       JNE  BT9
+       MOV  @NFILES,R1         a file selected?
+       JEQ  BT9
+       MOV  @SEL,R1            DIS/VAR (type 2) only
+       SLA  R1,4
+       MOV  @ENTS+12(R1),R2
+       CI   R2,2
+       JEQ  BT4
+       LI   R2,1
+       MOV  R2,@MSGNO          1: not a text file
+       JMP  BT8
+BT4    LI   R0,PG_VIEW         the viewer, with the file's number
+       MOV  @SEL,R1
+       BL   @GOMOD
+       JMP  BT9
+BT8    BL   @BRDRAW
+BT9    .leave
+       RT
+
+STITLE STRI ' Disk browser   DSK1'
+SDSK   STRI 'DSK1.'
+SSECT  STRI 'sectors'
+SFREE  STRI 'free'
+SHEAD  STRI 'Name          Type        Sectors'
+SKEYS  STRI 'UP DOWN select   ENTER view a text file   FCTN = quit'
+SNOTXT STRI 'Not a DIS/VAR text file.'
+SNOCAT STRI 'The disk could not be read.'
+STQ    STRI '?'
+STDF   STRI 'DIS/FIX'
+STDV   STRI 'DIS/VAR'
+STIF   STRI 'INT/FIX'
+STIV   STRI 'INT/VAR'
+STPG   STRI 'PROGRAM'
+       EVEN
+STYPES DATA STQ,STDF,STDV,STIF,STIV,STPG

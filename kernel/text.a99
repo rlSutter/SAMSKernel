@@ -1,0 +1,214 @@
+*======================================================================
+* text.a99 - writing text on the 80 x 30 screen
+*
+* A screen position is row * 80 + column (0-2399).  Each cell has a
+* name-table byte (the glyph) and an attribute byte (foreground role << 4
+* | background role).  Attributes are passed in the high byte.
+*======================================================================
+
+* PUTS - length-prefixed string at R1 to position R0, attribute R2.
+* Uses R0-R7.
+PUTS   .enter
+       MOV  R2,R5              attribute
+       MOV  R0,R6              position
+       CLR  R2
+       MOVB *R1+,R2
+       SWPB R2                 length
+       JEQ  PS9
+       MOV  R2,R7
+       AI   R0,NAMTAB
+       BL   @VMBW              the glyphs
+       MOV  R6,R0
+       AI   R0,ATRTAB
+       MOV  R5,R1
+       MOV  R7,R2
+       BL   @VFILL             their attributes
+PS9    .leave
+       RT
+
+* FILLA - attribute R1 (high byte) over R2 cells from position R0.
+* FILLN - glyph R1 (high byte) over R2 cells from position R0.  Leaves.
+FILLA  AI   R0,ATRTAB
+       B    @VFILL
+FILLN  AI   R0,NAMTAB
+       B    @VFILL
+
+* DECW - R1 as an unsigned decimal number at R0, attribute R2, no leading
+* zeros.  Returns R3 = the number of digits.  Uses R0-R8.
+DECW   .enter
+       MOV  R0,R6
+       MOV  R2,R8
+       LI   R3,TXTBUF+6        digits are built backwards from here
+       MOV  R1,R5
+DW1    CLR  R4                 R4:R5 / 10
+       LI   R7,10
+       DIV  R7,R4              R4 = quotient, R5 = remainder
+       AI   R5,>30
+       SWPB R5
+       MOVB R5,*R3
+       DEC  R3
+       MOV  R4,R5
+       JNE  DW1
+       LI   R1,TXTBUF+6        length = digits written
+       S    R3,R1
+       MOV  R1,R4
+       SWPB R1
+       MOVB R1,*R3             the length byte just before the digits
+       MOV  R3,R1
+       MOV  R6,R0
+       MOV  R8,R2
+       .push R4
+       BL   @PUTS
+       .pop R3
+       .leave
+       RT
+
+* PUTC - glyph R1 (high byte) at position R0 with attribute R2.
+* Uses R0-R2, R6.
+PUTC   .enter
+       MOV  R0,R6
+       AI   R0,NAMTAB
+       BL   @VSBW
+       MOV  R6,R0
+       AI   R0,ATRTAB
+       MOV  R2,R1
+       BL   @VSBW
+       .leave
+       RT
+
+* HEX2 - the low byte of R1 as two hex digits at R0, attribute R2.
+* Uses R0-R7.
+HEX2   .enter
+       LI   R3,TXTBUF
+       LI   R4,>0200           length 2
+       MOVB R4,*R3+
+       MOV  R1,R4
+       SRL  R4,4
+       BL   @HEXD
+       MOV  R1,R4
+       BL   @HEXD
+       LI   R1,TXTBUF
+       BL   @PUTS
+       .leave
+       RT
+* HEXD - the low nibble of R4 as a hex digit at *R3+ (R3 moves on one).
+* Leaf.  Uses R3, R4.
+HEXD   ANDI R4,>000F
+       AI   R4,>30
+       CI   R4,>3A
+       JL   HXD1
+       AI   R4,7               A-F
+HXD1   SWPB R4
+       MOVB R4,*R3+
+       RT
+
+* HEX4 - the word R1 as four hex digits at R0, attribute R2.  Uses R0-R7.
+HEX4   .enter
+       LI   R3,TXTBUF
+       LI   R4,>0400           length 4
+       MOVB R4,*R3+
+       MOV  R1,R4
+       SRL  R4,12
+       BL   @HEXD
+       MOV  R1,R4
+       SRL  R4,8
+       BL   @HEXD
+       MOV  R1,R4
+       SRL  R4,4
+       BL   @HEXD
+       MOV  R1,R4
+       BL   @HEXD
+       LI   R1,TXTBUF
+       BL   @PUTS
+       .leave
+       RT
+
+* CLS - clear the screen: every glyph a space and every attribute R1
+* (high byte; usually (RTEXT*16+RBG)*256).  Uses R0-R2.
+CLS    .enter
+       MOV  R1,R2
+       .push R2
+       LI   R0,NAMTAB
+       LI   R1,>2000
+       LI   R2,COLS*ROWS
+       BL   @VFILL
+       .pop R1
+       LI   R0,ATRTAB
+       LI   R2,COLS*ROWS
+       BL   @VFILL
+       .leave
+       RT
+
+* BOX - a single-line frame in glyphs 1-6 (the UI glyphs: docs/GLYPHS.md):
+* R0 = the top-left cell's position (row * 80 + column), R1 = interior
+* width, R2 = interior height, R3 = attribute (high byte).  The interior
+* is left alone.  Uses R0-R9.
+BOX    .enter
+       MOV  R0,R4              top-left cell
+       MOV  R1,R5              interior width
+       MOV  R2,R6              interior height
+       MOV  R3,R7              attribute
+       MOV  R4,R0              the top edge: corner, run, corner
+       LI   R1,>0300
+       BL   @BXCEL
+       MOV  R4,R0
+       INC  R0
+       LI   R1,>0100
+       MOV  R5,R2
+       BL   @BXRUN
+       MOV  R4,R0
+       A    R5,R0
+       INC  R0
+       LI   R1,>0400
+       BL   @BXCEL
+       MOV  R6,R8              the sides: R8 rows left, R9 the row's first cell
+       MOV  R4,R9
+BX2    MOV  R8,R8
+       JEQ  BX3
+       AI   R9,COLS
+       MOV  R9,R0
+       LI   R1,>0200
+       BL   @BXCEL
+       MOV  R9,R0
+       A    R5,R0
+       INC  R0
+       LI   R1,>0200
+       BL   @BXCEL
+       DEC  R8
+       JMP  BX2
+BX3    MOV  R6,R0              the bottom edge: top + (height + 1) * 80
+       INC  R0
+       LI   R1,COLS
+       MPY  R1,R0              R0:R1 = the product
+       A    R4,R1
+       MOV  R1,R9
+       MOV  R9,R0
+       LI   R1,>0500
+       BL   @BXCEL
+       MOV  R9,R0
+       INC  R0
+       LI   R1,>0100
+       MOV  R5,R2
+       BL   @BXRUN
+       MOV  R9,R0
+       A    R5,R0
+       INC  R0
+       LI   R1,>0600
+       BL   @BXCEL
+       .leave
+       RT
+* BXCEL - one cell; BXRUN - R2 cells: glyph R1 (high byte) from position
+* R0, attribute R7.  Use R0-R2.
+BXCEL  LI   R2,1
+BXRUN  .enter
+       MOV  R2,R2
+       JEQ  BXR9
+       .push R0
+       .push R2
+       BL   @FILLN
+       .pop R2
+       .pop R0
+       MOV  R7,R1
+       BL   @FILLA
+BXR9   .leave
+       RT

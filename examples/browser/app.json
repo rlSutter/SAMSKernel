@@ -1,0 +1,9 @@
+{
+  "name": "DISK BROWSER",
+  "min_pages": 128,
+  "modules": [
+    {"name": "browse", "source": "browse.a99"},
+    {"name": "view",   "source": "view.a99"}
+  ],
+  "boot": "browse"
+}

@@ -1,0 +1,527 @@
+*======================================================================
+* tests.a99 - the Lantern Kernel self-test, module 2 of 2 (diag.a99 is
+* the other; CTRL T there switches here).
+*
+* Runs each check of the kernel's services once and shows PASS or FAIL
+* with a detail.  The checks are the ones an application depends on:
+*   hardware    the card's size, the F18A and its DMA engine
+*   paging      MAPE, MAPF, SETPB, MAPPG: pages hold what is written
+*   pool        PINIT, PALLOC, PRELS
+*   modules     MODCALL into another module and back
+*   keyboard    KFLUSH
+*   screen      PUTS, DECW, HEX4 read back from VRAM; BOX; VSHIFT
+*   files       FOPEN, FWRITE, FCLOSE, FREAD, FDELETE through a real DSR
+* The results are words at MODRAM: the count, then 1 (pass) or 0 (fail)
+* for each, so a test harness can read them without the screen.  Any key
+* returns to the diagnostic.  The file check needs a disk drive 1; with
+* none it fails with the DSR's error code, which is the answer too.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+TSCNT  EQU  MODRAM+0           the number of checks run
+TSRES  EQU  MODRAM+2           one word each: 1 pass, 0 fail (up to 15)
+TSIDX  EQU  MODRAM+34          the check being run
+TSDET  EQU  MODRAM+36          a detail for the line: a number (0: none)
+TSERR  EQU  MODRAM+38          scratch
+TSPOS  EQU  MODRAM+40          the line's first cell
+TSPASS EQU  MODRAM+42          the result being shown
+TSBUF  EQU  MODRAM+64          a record to write (32 bytes)
+TSBUF2 EQU  MODRAM+96          a record read back (32 bytes)
+TSSAVE EQU  MODRAM+128         scratch words
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+AOK    EQU  (RBOLD*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+
+       AORG >C000
+       DATA TSINIT,TSTICK,0,0
+
+* TSINIT - run every check, showing each line as it finishes.
+TSINIT .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,29*COLS+2
+       LI   R1,SKEY
+       LI   R2,AMARK
+       BL   @PUTS
+       CLR  @TSCNT
+       CLR  @TSIDX
+TI1    MOV  @TSIDX,R1          the next check: its table entry is 4 bytes
+       SLA  R1,2
+       AI   R1,TABLE
+       MOV  *R1,R1             its routine (0 ends the table)
+       JEQ  TI9
+       CLR  @TSDET
+       BL   *R1                R0 = 1 pass, 0 fail
+       BL   @SHOW
+       BL   @KIDLE             (a key typed meanwhile is kept)
+       INC  @TSIDX
+       JMP  TI1
+TI9    BL   @SUMMRY
+       .leave
+       RT
+
+* TSTICK - a key: back to the module that sent us here.
+TSTICK .enter
+       MOV  R0,R0
+       JEQ  TT9
+       MOV  @PREVPG,R0
+       CLR  R1
+       BL   @GOMOD
+TT9    .leave
+       RT
+
+* SHOW - record R0 as the result of check TSIDX and write its line (row
+* 3 + index): the name, PASS or FAIL, and the detail number if any.
+SHOW   .enter
+       MOV  R0,@TSPASS
+       MOV  @TSIDX,R3
+       SLA  R3,1
+       MOV  R0,@TSRES(R3)
+       INC  @TSCNT
+       MOV  @TSIDX,R1          the row's first cell
+       AI   R1,3
+       LI   R2,COLS
+       MPY  R1,R2              R3 = row * 80
+       MOV  R3,@TSPOS
+       MOV  R3,R0              the name, at column 2
+       AI   R0,2
+       MOV  @TSIDX,R1
+       SLA  R1,2
+       AI   R1,TABLE+2
+       MOV  *R1,R1
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @TSPOS,R0          the verdict, at column 40
+       AI   R0,40
+       LI   R1,SPASS
+       LI   R2,AOK
+       MOV  @TSPASS,R3
+       JNE  SH1
+       LI   R1,SFAIL
+       LI   R2,AERR
+SH1    BL   @PUTS
+       MOV  @TSDET,R1          the detail, at column 47
+       JEQ  SH9
+       MOV  @TSPOS,R0
+       AI   R0,47
+       LI   R2,ANORM
+       BL   @DECW
+SH9    .leave
+       RT
+
+* SUMMRY - "Passed n of m" under the list.
+SUMMRY .enter
+       CLR  R3                 passes
+       CLR  R4
+SM1    C    R4,@TSCNT
+       JHE  SM2
+       MOV  R4,R5
+       SLA  R5,1
+       A    @TSRES(R5),R3
+       INC  R4
+       JMP  SM1
+SM2    MOV  R3,@TSSAVE
+       MOV  @TSCNT,R1          the row: 4 + count
+       AI   R1,4
+       LI   R2,COLS
+       MPY  R1,R2              R3 = row * 80
+       MOV  R3,@TSSAVE+2
+       AI   R3,2
+       MOV  R3,R0
+       LI   R1,SPASSD
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @TSSAVE+2,R0
+       AI   R0,9
+       MOV  @TSSAVE,R1
+       LI   R2,AOK
+       C    R1,@TSCNT
+       JEQ  SM3
+       LI   R2,AERR
+SM3    BL   @DECW
+       MOV  @TSSAVE+2,R0
+       AI   R0,13
+       LI   R1,SOF
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @TSSAVE+2,R0
+       AI   R0,16
+       MOV  @TSCNT,R1
+       LI   R2,ANORM
+       BL   @DECW
+       .leave
+       RT
+
+* TSCMP - compare R3 bytes at R1 and R2: EQ if they are the same.  Leaf.
+* Uses R1-R4.
+TSCMP  MOVB *R1+,R4
+       CB   R4,*R2+
+       JNE  TSC9
+       DEC  R3
+       JNE  TSCMP
+TSC9   RT
+
+*----------------------------------------------------------------------
+* the checks: each returns R0 = 1 (pass) or 0 (fail), and may leave a
+* detail number in TSDET
+*----------------------------------------------------------------------
+
+* CKHW - the card is big enough, an F18A answered, its DMA works.  The
+* detail is the number of SAMS pages found.
+CKHW   MOV  @NPAGES,R1
+       MOV  R1,@TSDET
+       CI   R1,PGMIN
+       JL   CHW0
+       MOV  @F18FLG,R0
+       JEQ  CHW0
+       MOV  @NODMA,R0
+       JNE  CHW0
+       LI   R0,1
+       RT
+CHW0   CLR  R0
+       RT
+
+* CKPAGE - two pages written through slot B hold their contents when
+* other pages have been in between; CURPB follows; SETPB puts it back.
+CKPAGE .enter
+       MOV  @CURPB,@TSSAVE     slot B as it is now
+       LI   R0,>30
+       BL   @MAPE
+       LI   R0,>31
+       BL   @MAPF
+       LI   R1,>A5A5
+       MOV  R1,@>E000
+       LI   R1,>5A5A
+       MOV  R1,@>F000
+       LI   R0,>32             other pages in between
+       BL   @MAPE
+       LI   R0,>33
+       BL   @MAPF
+       LI   R1,>1111
+       MOV  R1,@>E000
+       LI   R1,>2222
+       MOV  R1,@>F000
+       LI   R0,>30
+       BL   @MAPE
+       LI   R0,>31
+       BL   @MAPF
+       LI   R1,>A5A5
+       C    @>E000,R1
+       JNE  CPG0
+       LI   R1,>5A5A
+       C    @>F000,R1
+       JNE  CPG0
+       MOV  @CURPB,R1          CURPB records both pages
+       CI   R1,>3031
+       JNE  CPG0
+       MOV  @TSSAVE,R0         SETPB: slot B as it was
+       BL   @SETPB
+       MOV  @CURPB,R1
+       C    R1,@TSSAVE
+       JNE  CPG0
+       LI   R0,1
+       JMP  CPG9
+CPG0   MOV  @TSSAVE,R0
+       BL   @SETPB
+       CLR  R0
+CPG9   .leave
+       RT
+
+* CKPOOL - PINIT, PALLOC in order, empty at the end, PRELS (twice, and a
+* page outside the range), PALLOC gets the page back.
+CKPOOL .enter
+       LI   R0,>30
+       LI   R1,>38
+       BL   @PINIT
+       MOV  @FREECT,R0
+       CI   R0,8
+       JNE  CPL0
+       CLR  @TSSAVE
+CPL1   BL   @PALLOC
+       MOV  @TSSAVE,R1
+       AI   R1,>30
+       C    R0,R1
+       JNE  CPL0
+       INC  @TSSAVE
+       MOV  @TSSAVE,R1
+       CI   R1,8
+       JL   CPL1
+       BL   @PALLOC            nothing left: 0
+       MOV  R0,R0
+       JNE  CPL0
+       MOV  @FREECT,R0
+       JNE  CPL0
+       LI   R0,>34
+       BL   @PRELS
+       LI   R0,>34
+       BL   @PRELS             a second release changes nothing
+       LI   R0,>20
+       BL   @PRELS             a page outside the pool is ignored
+       MOV  @FREECT,R0
+       CI   R0,1
+       JNE  CPL0
+       BL   @PALLOC
+       CI   R0,>34
+       JNE  CPL0
+       LI   R0,1
+       JMP  CPL9
+CPL0   CLR  R0
+CPL9   .leave
+       RT
+
+* CKMOD - MODCALL into the diagnostic module (entry 4 returns >1234) and
+* back: the result arrives, and slot C holds this module again.
+CKMOD  .enter
+       MOV  @CURPC,@TSSAVE
+       .callmod PG_DIAG,4
+       CI   R0,>1234
+       JNE  CMD0
+       MOV  @CURPC,R1
+       C    R1,@TSSAVE
+       JNE  CMD0
+       LI   R0,1
+       JMP  CMD9
+CMD0   CLR  R0
+CMD9   .leave
+       RT
+
+* CKKEY - KFLUSH empties the buffer.
+CKKEY  .enter
+       BL   @KFLUSH
+       BL   @KEYGET
+       MOV  R0,R0
+       JNE  CKY0
+       LI   R0,1
+       JMP  CKY9
+CKY0   CLR  R0
+CKY9   .leave
+       RT
+
+* CKSCRN - DECW and HEX4 written to the screen read back from VRAM (row
+* 20); BOX's four corners (rows 22-25).
+CKSCRN .enter
+       LI   R0,20*COLS+60
+       LI   R1,12345
+       LI   R2,ANORM
+       BL   @DECW
+       CI   R3,5               five digits
+       JNE  CSC0
+       LI   R0,20*COLS+60
+       LI   R1,TSBUF2
+       LI   R2,5
+       BL   @VMBR
+       LI   R1,TSBUF2
+       LI   R2,S12345
+       LI   R3,5
+       BL   @TSCMP
+       JNE  CSC0
+       LI   R0,20*COLS+66
+       LI   R1,>BEEF
+       LI   R2,ANORM
+       BL   @HEX4
+       LI   R0,20*COLS+66
+       LI   R1,TSBUF2
+       LI   R2,4
+       BL   @VMBR
+       LI   R1,TSBUF2
+       LI   R2,SBEEF
+       LI   R3,4
+       BL   @TSCMP
+       JNE  CSC0
+       LI   R0,22*COLS+60      a frame 5 wide, 2 high
+       LI   R1,5
+       LI   R2,2
+       LI   R3,AMARK
+       BL   @BOX
+       LI   R0,22*COLS+60      top left
+       BL   @VSBR
+       CI   R1,>0300
+       JNE  CSC0
+       LI   R0,22*COLS+66      top right
+       BL   @VSBR
+       CI   R1,>0400
+       JNE  CSC0
+       LI   R0,25*COLS+60      bottom left
+       BL   @VSBR
+       CI   R1,>0500
+       JNE  CSC0
+       LI   R0,25*COLS+66      bottom right
+       BL   @VSBR
+       CI   R1,>0600
+       JNE  CSC0
+       LI   R0,1
+       JMP  CSC9
+CSC0   CLR  R0
+CSC9   .leave
+       RT
+
+* CKDMA - VSHIFT copies row 20 (where CKSCRN wrote 12345 at column 60)
+* onto row 21.  Skipped (passes) on an F18A with no DMA engine.
+CKDMA  .enter
+       MOV  @NODMA,R0
+       JNE  CDM1
+       LI   R0,20*COLS
+       LI   R1,21*COLS
+       LI   R2,1
+       CLR  R3
+       BL   @VSHIFT
+       LI   R0,21*COLS+60
+       LI   R1,TSBUF2
+       LI   R2,5
+       BL   @VMBR
+       LI   R1,TSBUF2
+       LI   R2,S12345
+       LI   R3,5
+       BL   @TSCMP
+       JNE  CDM0
+CDM1   LI   R0,1
+       JMP  CDM9
+CDM0   CLR  R0
+CDM9   .leave
+       RT
+
+* MKREC - the record for TSERR (0-2) into TSBUF: 'LANTERN KERNEL n'.
+* R2 = its length.  Leaf.  Uses R1-R3.
+MKREC  LI   R1,SREC
+       LI   R2,TSBUF
+       LI   R3,16
+MK1    MOVB *R1+,*R2+
+       DEC  R3
+       JNE  MK1
+       MOV  @TSERR,R3
+       AI   R3,>31
+       SWPB R3
+       MOVB R3,@TSBUF+15
+       LI   R2,16
+       RT
+
+* CKFILE - write three records to DSK1.LKTEST (DIS/VAR 80), close, open
+* again, read them back and compare, see the end of file (error 5),
+* close, delete, and see that the file is gone (error 7 on opening it).
+* A failure's detail is step * 100 + the DSR's error code.
+CKFILE .enter
+       LI   R2,FNAME           1: open for output
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       LI   R1,100
+       MOV  R0,R0
+       JNE  CFF
+       CLR  @TSERR
+CF2    BL   @MKREC             2: write record TSERR
+       LI   R1,TSBUF
+       BL   @FWRITE
+       LI   R1,200
+       MOV  R0,R0
+       JNE  CFF
+       INC  @TSERR
+       MOV  @TSERR,R1
+       CI   R1,3
+       JL   CF2
+       BL   @FCLOSE            3: close
+       LI   R1,300
+       MOV  R0,R0
+       JNE  CFF
+       LI   R2,FNAME           4: open for input
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       LI   R1,400
+       MOV  R0,R0
+       JNE  CFF
+       CLR  @TSERR
+CF3    LI   R1,TSBUF2          5: read record TSERR
+       BL   @FREAD
+       MOV  R2,@TSSAVE         (the length)
+       LI   R1,500
+       MOV  R0,R0
+       JNE  CFF
+       LI   R1,600             6: the right length and bytes
+       CLR  R0
+       MOV  @TSSAVE,R2
+       CI   R2,16
+       JNE  CFF
+       BL   @MKREC
+       LI   R1,TSBUF
+       LI   R2,TSBUF2
+       LI   R3,16
+       BL   @TSCMP
+       JEQ  CF4
+       LI   R1,600
+       CLR  R0
+       JMP  CFF
+CF4    INC  @TSERR
+       MOV  @TSERR,R1
+       CI   R1,3
+       JL   CF3
+       LI   R1,TSBUF2          7: the fourth read: end of file
+       BL   @FREAD
+       LI   R1,700
+       CI   R0,FEEOF
+       JNE  CFF
+       BL   @FCLOSE            8: close
+       LI   R1,800
+       MOV  R0,R0
+       JNE  CFF
+       LI   R2,FNAME           9: delete
+       BL   @FDELETE
+       LI   R1,900
+       MOV  R0,R0
+       JNE  CFF
+       LI   R2,FNAME           10: it is gone
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       CI   R0,FENOFI
+       JEQ  CFOK
+       LI   R1,1000
+       CLR  R0
+       JMP  CFF
+CFOK   LI   R0,1
+       JMP  CF9
+CFF    A    R0,R1              the detail: the step and the error
+       MOV  R1,@TSDET
+       CLR  R0
+CF9    .leave
+       RT
+
+SPASS  STRI 'PASS'
+SFAIL  STRI 'FAIL'
+STITLE STRI ' Lantern Kernel   self-test'
+SKEY   STRI 'Press any key to return to the diagnostic.'
+SPASSD STRI 'Passed'
+SOF    STRI 'of'
+S12345 TEXT '12345'
+SBEEF  TEXT 'BEEF'
+SREC   TEXT 'LANTERN KERNEL 0'
+FNAME  STRI 'DSK1.LKTEST'
+N1     STRI 'Hardware: SAMS, F18A, DMA'
+N2     STRI 'Paging: MAPE, MAPF, SETPB'
+N3     STRI 'Page pool: PINIT, PALLOC, PRELS'
+N4     STRI 'MODCALL into another module'
+N5     STRI 'Keyboard: KFLUSH, KEYGET'
+N6     STRI 'Screen: DECW, HEX4, BOX'
+N7     STRI 'DMA row move: VSHIFT'
+N8     STRI 'Files: DSK1 write, read, delete'
+       EVEN
+TABLE  DATA CKHW,N1
+       DATA CKPAGE,N2
+       DATA CKPOOL,N3
+       DATA CKMOD,N4
+       DATA CKKEY,N5
+       DATA CKSCRN,N6
+       DATA CKDMA,N7
+       DATA CKFILE,N8
+       DATA 0,0
