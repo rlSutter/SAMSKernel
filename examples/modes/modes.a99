@@ -706,9 +706,10 @@ SEB    MOV  R7,R3
 *----------------------------------------------------------------------
 * data
 *----------------------------------------------------------------------
-T1     BYTE 79
-       TEXT 'Text 80, 30 rows, colour per position    1-9 0 A-E pick '
+T1     BYTE T1E-T1B
+T1B    TEXT 'Text 80, 30 rows, colour per position    1-9 0 A-E pick '
        TEXT 'a screen   FCTN = quits'
+T1E
 T2     STRI 'Text 80, 24 rows, colours of VR7 (the attributes are ignored)'
 T3     STRI 'Text 40, 24 rows, colours of VR7'
 T4     STRI 'Text 40, 30 rows, colour per position'

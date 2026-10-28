@@ -78,8 +78,12 @@ def fix_line(line):
             cur += ch
             if len(cur) >= 56: chunks.append(cur); cur = ''
         if cur: chunks.append(cur)
-        out = [lab + 'BYTE %d' % len(raw)]
-        out += ['       TEXT \'' + c.replace("'", "''") + '\'' for c in chunks]
+        # the length is the difference of two labels, so editing the text later cannot leave it stale
+        base = label if label else 'S%04d' % (abs(hash(operand)) % 10000)
+        out = [lab + 'BYTE %sE-%sB' % (base, base)]
+        out += [('%sB' % base).ljust(7) + 'TEXT \'' + chunks[0].replace("'", "''") + '\'']
+        out += ['       TEXT \'' + c.replace("'", "''") + '\'' for c in chunks[1:]]
+        out += ['%sE' % base]
         return out
     if up in ('DATA', 'BYTE'):
         items = operand.split(',')

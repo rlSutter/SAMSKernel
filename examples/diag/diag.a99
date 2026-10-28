@@ -546,9 +546,10 @@ SLDWN  STRI '(down)'
 
 * the labels and samples: DATA position, attribute; string; EVEN
 LABELS DATA 3*80,AMARK
-       BYTE 69
-       TEXT 'Character attributes as colour roles (CTRL 3 cycles the '
+       BYTE T1E-T1B
+T1B    TEXT 'Character attributes as colour roles (CTRL 3 cycles the '
        TEXT 'five schemes)'
+T1E
        EVEN
        DATA 4*80+2,ANORM
        STRI 'Normal'
@@ -590,14 +591,16 @@ LABELS DATA 3*80,AMARK
        STRI 'Marker'
        EVEN
        DATA 6*80,AMARK
-       BYTE 76
-       TEXT 'Glyphs: 0-31 UI, 32-126 ASCII, 127 Latin-1 mark, 128-222'
+       BYTE T2E-T2B
+T2B    TEXT 'Glyphs: 0-31 UI, 32-126 ASCII, 127 Latin-1 mark, 128-222'
        TEXT ' underlined, 223+ UI'
+T2E
        EVEN
        DATA 16*80,AMARK
-       BYTE 71
-       TEXT 'Keyboard: every chord shows its code and modifiers; a he'
+       BYTE T3E-T3B
+T3B    TEXT 'Keyboard: every chord shows its code and modifiers; a he'
        TEXT 'ld key repeats.'
+T3E
        EVEN
        DATA 17*80+2,AMARK
        STRI 'Last key'
@@ -612,14 +615,16 @@ LABELS DATA 3*80,AMARK
        STRI 'Keys received'
        EVEN
        DATA 20*80,AMARK
-       BYTE 71
-       TEXT 'Typing area: FCTN E S D X move, FCTN 3 clears, ENTER sta'
+       BYTE T4E-T4B
+T4B    TEXT 'Typing area: FCTN E S D X move, FCTN 3 clears, ENTER sta'
        TEXT 'rts a new line.'
+T4E
        EVEN
        DATA 29*80,AMARK
-       BYTE 81
-       TEXT 'SAMS Kernel diagnostic.  CTRL T self-test, CTRL 3 col'
+       BYTE T5E-T5B
+T5B    TEXT 'SAMS Kernel diagnostic.  CTRL T self-test, CTRL 3 col'
        TEXT 'our scheme, FCTN = quits.'
+T5E
        EVEN
        DATA -1
        END

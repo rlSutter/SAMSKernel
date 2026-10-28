@@ -148,6 +148,19 @@ def browser():
     m, cpu, halt = sim9900.run(c, keys='<F-x><F-x><ENTER><WAIT 200><F-9><WAIT 100>', frames=900, setup=setup)
     check('Disk browser' in lines(m)[0], 'BACK returns to the browser (PREVPG)')
 
+def rom_music():
+    import skmusic
+    p = os.environ.get('TI_CONSOLE_ROM')
+    if not p or not os.path.exists(p):
+        return
+    c = build('music')
+    skm, _ = skmusic.compile_file(os.path.join(ROOT, 'examples', 'music', 'songs', 'scale.mml'))
+    exp = [0x9F, 0xBF, 0xDF, 0xFF] + [b for f, b in skmusic.decode(skm)[0]]
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>2<WAIT 150>', frames=260, rom=p)
+    got = [b for (src, i, b) in m.chip_log if src == 'cpu']
+    check(got[:len(exp)] == exp and not [1 for (src, i, b) in m.chip_log if src == 'isr'],
+          'music under the real ISR: the same bytes, and the console routine writes none of its own')
+
 def rom():
     p = os.environ.get('TI_CONSOLE_ROM')
     if not p or not os.path.exists(p):
@@ -160,6 +173,7 @@ def rom():
             check(m.rw(0x2200) == 8 and all(m.rw(0x2202 + 2 * i) == 1 for i in range(8)), 'the self-test passes under the real ISR')
         else:
             check(lines(m)[4].startswith('  ab'), 'typing works under the real ISR')
+    rom_music()
 
 def realdsr():
     rp = os.environ.get('TIFDC_ROM') or os.path.join(ROOT, 'tools', 'tifdc_dsr.bin')
