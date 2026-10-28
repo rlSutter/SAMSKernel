@@ -549,8 +549,14 @@ DONE   BL   @FCLOSE
 ```
 
 Writing is the same with `FOUT+FVAR` and `FWRITE`. **Results** (R0): 0 worked; 1-7 the DSR's
-error (5 beyond the end of the file, 7 file not found, 2 wrong attributes, ...); `>FF` no card
-has that device, or the name was longer than 53 characters.
+error (5 beyond the end of the file, 2 bad open attributes, 7 a file error, ...); `>FF` no card
+has that device, or the name was longer than 53 characters. Two behaviours seen with TI's own disk
+controller (run in the simulator against its real DSR) that the stand-in disk does not show:
+
+- **After the read that reports 5 (end of file) the file is already closed**; `FCLOSE` then answers 7.
+  Treat 5 as "done" and ignore `FCLOSE`'s result after it (call it anyway: other devices may need it).
+- **Opening a file that does not exist for input answers 2**, where the stand-in says 7. Do not tell
+  "missing" from other open failures by the exact code; any non-zero result means "could not open".
 
 **The catalog.** Opening a name that is only a device and a dot (`DSK1.`) as `FIN+FINTL`
 (INTERNAL, FIXED) with record length 38 reads the disk's catalog: the first record
@@ -695,7 +701,9 @@ settle; check the cursor and the data, not only the first key. `tests/test_kerne
 
 **The simulator is not the machine.** It models the TMS9900, the VDP and the F18A's text modes and
 DMA, the SAMS card, the keyboard matrix and a stand-in disk controller. It does not model timing, and its
-stand-in disk is kinder than a real controller. Test on js99er and on real hardware before you
+stand-in disk is kinder than a real controller (see the two differences in part 9). **Real disk controller:**
+with `TIFDC_ROM=path` to the controller's 8K ROM (join the two 4K EPROM images, low half first) tests can give the machine
+a `tifdc.TIFDC(image=...)` in `setup` (see the `realdsr` group): TI's own DSR then runs on an emulated WD1771 and a 90K disk image, as in js99er. Test on js99er and on real hardware before you
 believe it (part 14). **Real console ROM:** if you have your own copy of the TI console ROM
 (8K, raw or as an EA5 image) set `TI_CONSOLE_ROM=path` (or pass `rom=`): the simulator then runs TI's real
 interrupt routine instead of a model of it, which catches mistakes in how a program treats the

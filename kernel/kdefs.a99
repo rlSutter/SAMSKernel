@@ -222,4 +222,5 @@ FIN    EQU  >0400            mode: input
 FAPP   EQU  >0600            mode: append
 * results (R0): 0 = done; 1-7 = the PAB's error code; >FF = no such device
 FEEOF  EQU  5                reading past the end of the file
-FENOFI EQU  7                file not found (input)
+FENOFI EQU  7                a file error (the stand-in disk's answer for a missing input file;
+*                            TI's own controller answers 2 there, and 7 for a close after end of file)

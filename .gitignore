@@ -2,3 +2,5 @@ build/
 gen/
 __pycache__/
 *.pyc
+
+tools/tifdc_dsr.bin

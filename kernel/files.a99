@@ -170,8 +170,9 @@ FC2    MOV  *R1+,*R2+
        DEC  R3
        JNE  FC2
        LI   R0,>0100           (and the frame counter's increment: a DSR
-       MOVB R0,@TMRINC         works in the GPL workspace, whose R14 it
-*                              is, and VSYNC would wait for ever)
+       MOVB R0,@TMRINC         works in the GPL workspace, whose R14 it is;
+*                              TI's controller was not seen to change it, but
+*                              VSYNC would wait for ever if one did)
        MOV  @FD70,@>8370       (but >8370 as the controller left it: the
        MOV  R5,R0              bottom of its buffers, which it finds through
 *                              it; restoring the old value hangs every later

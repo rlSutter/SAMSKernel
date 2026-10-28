@@ -39,17 +39,18 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 ## Tests
 
 ```
-python3 tests/test_kernel.py            boot refusal ram keys quit modules files browser rom
-TI_CONSOLE_ROM=/path/to/your/console-rom python3 tests/test_kernel.py rom
+python3 tests/test_kernel.py            boot refusal ram keys quit modules files browser rom realdsr
+TI_CONSOLE_ROM=/path/to/console-rom TIFDC_ROM=/path/to/disk-controller-rom python3 tests/test_kernel.py rom realdsr
 ```
 
 The tests run the examples in `tools/sim9900.py`, a headless TMS9900 + F18A + SAMS + keyboard + stand-in disk simulator. With `TI_CONSOLE_ROM` set to your
-own copy of the 8K console ROM (a raw dump, or an EA5 image), it runs TI's real interrupt routine. The ROM is TI's: it is not, and must not be, part of
-this repository.
+own copy of the 8K console ROM (a raw dump, or an EA5 image), it runs TI's real interrupt routine; with `TIFDC_ROM` set to the 8K disk controller ROM (the two 4K EPROM images joined, low half first) the file service and the
+disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc.py`). The ROMs are TI's: they are not, and must not be, part of this repository.
 
 ## Status
 
-Version 1.0.0. All test groups pass in the simulator. **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast
-have; `GOMOD`, the page pool, `FCNUM`, the table-driven loader and the packaging are new. Run `examples/diag` and press CTRL T on the first real machine.
+Version 1.0.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have; `GOMOD`, the page pool, `FCNUM`, the
+table-driven loader and the packaging are new. Run `examples/diag` and press CTRL T on the first real machine.
 
 MIT License, (c) 2026 Rebecca Sutter.

@@ -3,12 +3,15 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: boot refusal ram keys quit modules files browser rom
+Groups: boot refusal ram keys quit modules files browser rom realdsr
 Builds the examples first (tools/lkbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
 an EA5 image); without it the group is skipped.  The ROM is TI's code and
-is never part of this repository.
+is never part of this repository.  The 'realdsr' group runs the file service and
+the disk browser against TI's own disk controller DSR (tools/tifdc.py, a WD1771 on a
+disk image): it needs the controller's 8K ROM, at tools/tifdc_dsr.bin or named by
+TIFDC_ROM (join the two 4K EPROM images, low half first); skipped without it.
 """
 import glob, os, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -158,8 +161,38 @@ def rom():
         else:
             check(lines(m)[4].startswith('  ab'), 'typing works under the real ISR')
 
+def realdsr():
+    rp = os.environ.get('TIFDC_ROM') or os.path.join(ROOT, 'tools', 'tifdc_dsr.bin')
+    if not os.path.exists(rp):
+        print('  skip  TI controller ROM not found (tools/tifdc_dsr.bin or TIFDC_ROM)'); return
+    os.environ['TIFDC_ROM'] = rp
+    import tifdc
+    crom = os.environ.get('TI_CONSOLE_ROM')
+    crom = crom if crom and os.path.exists(crom) else None
+    for withrom in ([None, crom] if crom else [None]):
+        tag = 'real console ROM + ' if withrom else ''
+        c = build('diag')
+        img = tifdc.blank_disk()
+        m, cpu, halt = sim9900.run(c, keys='<C-t><WAIT 2500>', frames=3200, rom=withrom,
+                                   setup=lambda m: setattr(m, 'tifdc', tifdc.TIFDC(image=img)))
+        check('PASS' in lines(m)[10] and m.rw(0x2200) == 8 and 'Passed 8   of 8' in lines(m)[12],
+              tag + "TI's controller: the self-test's file check passes (%r)" % lines(m)[10][38:60])
+        check(tifdc.TIFDC(image=img).files() == {}, 'the test file was written, read back and deleted on the disk image')
+    b = build('browser')
+    img = bytearray(open(os.path.join(ROOT, 'tests', 'data', 'pressref.dsk'), 'rb').read())
+    hook = lambda m: setattr(m, 'tifdc', tifdc.TIFDC(image=img))
+    m, cpu, halt = sim9900.run(b, keys='<WAIT 1200>', frames=1800, setup=hook)
+    ln = lines(m)
+    check('PRESSREF' in ln[2] and '358' in ln[2] and '336' in ln[2], "TI's catalog records decoded: the disk, 358 sectors, 336 free")
+    check(ln[5].split()[:3] == ['REFDOC', 'DIS/VAR', '22'], 'the file: REFDOC DIS/VAR 22 sectors')
+    m, cpu, halt = sim9900.run(b, keys='<ENTER><WAIT 1800>', frames=3000, setup=hook)
+    want = tifdc.read_file(img, 'REFDOC')
+    check('DSK1.REFDOC' in lines(m)[0] and 'Notes on a Word Processor' in lines(m)[2]
+          and lines(m)[4].startswith(want[2].decode('latin-1')[:40]),
+          'the viewer shows the real file through the real DSR (lines 1 and 3 match the disk image)')
+
 GROUPS = [('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
-          ('files', files), ('browser', browser), ('rom', rom)]
+          ('files', files), ('browser', browser), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':
     want = sys.argv[1:] or [g for g, _ in GROUPS]

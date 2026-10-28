@@ -171,7 +171,7 @@ assemble the loader, the data bank and the modules; check each fits in 8K; conca
 
 - Hardware: the kernel as packaged has not run on a real TI. The pieces were proven on real hardware inside Press and The Lantern Coast, but
   `GOMOD`, the page pool, `FCNUM` and the loader's table-driven copy are new.
-- Whether a real DSR clears the error bits itself (the file service clears them regardless).
-- Whether the console always leaves `>83FC`'s high byte non-zero (the kernel sets it regardless).
+- Whether a real DSR clears the previous call's error bits itself (the file service clears them regardless; the check is not decisive with TI's controller).
+- Whether the console always leaves `>83FC`'s high byte non-zero (the kernel sets it regardless). TI's disk controller DSR was watched and never wrote it.
 - Sound: only the console's sound-list player is available; no tests exercise it.
 - Cards over 1M, and the PICO9918's quirks beyond what Press found.

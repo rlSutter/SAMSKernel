@@ -409,7 +409,7 @@ MK1    MOVB *R1+,*R2+
 
 * CKFILE - write three records to DSK1.LKTEST (DIS/VAR 80), close, open
 * again, read them back and compare, see the end of file (error 5),
-* close, delete, and see that the file is gone (error 7 on opening it).
+* close, delete, and see that the file is gone (opening it fails).
 * A failure's detail is step * 100 + the DSR's error code.
 CKFILE .enter
        LI   R2,FNAME           1: open for output
@@ -471,22 +471,25 @@ CF4    INC  @TSERR
        LI   R1,700
        CI   R0,FEEOF
        JNE  CFF
-       BL   @FCLOSE            8: close
-       LI   R1,800
-       MOV  R0,R0
+       BL   @FCLOSE            8: close.  TI's own controller has already
+       LI   R1,800             closed the file when the read reported the end
+       MOV  R0,R0              (it then answers 7, a file error), so that is
+       JEQ  CF8                accepted; any other error is not
+       CI   R0,FENOFI
        JNE  CFF
-       LI   R2,FNAME           9: delete
+CF8       LI   R2,FNAME           9: delete
        BL   @FDELETE
        LI   R1,900
        MOV  R0,R0
        JNE  CFF
-       LI   R2,FNAME           10: it is gone
-       LI   R0,FIN+FVAR
+       LI   R2,FNAME           10: it is gone: opening it fails (the stand-in
+       LI   R0,FIN+FVAR        says 7, TI's controller 2: any error will do)
        LI   R1,80
        BL   @FOPEN
-       CI   R0,FENOFI
-       JEQ  CFOK
-       LI   R1,1000
+       MOV  R0,R0
+       JNE  CFOK
+       BL   @FCLOSE
+       LI   R1,1000            (it opened: the delete did not work)
        CLR  R0
        JMP  CFF
 CFOK   LI   R0,1
