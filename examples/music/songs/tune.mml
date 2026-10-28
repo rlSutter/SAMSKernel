@@ -1,0 +1,9 @@
+; "Ode to Joy" (Beethoven, public domain), melody and bass in the three voices and a beat in the noise voice
+V1: t132 o4 l4 e e f g g f e d c c d e e.  l8 d l2 d
+V1: l4 e e f g g f e d c c d e d.  l8 c l2 c
+V2: o3 l2 c g c g c g g g
+V2: c g c g c g g c
+V3: o2 l1 c c c g
+V3: c c g c
+N:  l8 k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r
+N:  k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r  k6 r k4 r k5 r k4 r

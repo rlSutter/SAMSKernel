@@ -1,5 +1,6 @@
 *======================================================================
-* f18det.a99 - the F18A (or PICO9918) detected and its version read (the loader only)
+* f18det.a99 - the F18A (or PICO9918) detected and its version read (the loader
+* only)
 *======================================================================
 
 * F18DET - after F18UNL, select status register 1 and read the ID.
@@ -26,7 +27,8 @@ F18D0  CLR  R0
        CI   R1,>E000           all set = F18A (or a PICO9918)
        JNE  F18D1
        INC  R0
-F18D1  MOV  R0,@F18FLG         remembered for palette / ECM / sprite colour choices
+* remembered for palette / ECM / sprite colour choices
+F18D1  MOV   R0,@F18FLG
        .leave
        RT
 * F18RDV - the firmware version from status register 14 (e.g. >19 for

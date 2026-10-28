@@ -8,9 +8,9 @@
 * assembled first and its symbols, these included, are written to
 * build/kernel.equ).  The application's own numbers (its name, how many
 * SAMS pages it needs, the page of each of its modules) come from
-* appcfg.a99, which tools/lkbuild.py writes from app.json.
+* appcfg.a99, which tools/skbuild.py writes from app.json.
 *
-* Lantern Kernel 1.0.  MIT License, (c) 2026 Rebecca Sutter.
+* SAMS Kernel 1.0.  MIT License, (c) 2026 Rebecca Sutter.
 *======================================================================
 
        COPY "appcfg.a99"
@@ -33,8 +33,10 @@ GRMWA  EQU  >9C02            GROM address, high byte first
 SOUND  EQU  >8400            TMS9919 sound chip
 
 * AMS / SAMS mapper
-AMSCRU EQU  >1E00            CRU base: bit 0 = registers visible, bit 1 = mapping on
-AMSREG EQU  >4000            mapper registers, one word per 4K window: >4000 + 2*window
+* CRU base: bit 0 = registers visible, bit 1 = mapping on
+AMSCRU EQU   >1E00
+* mapper registers, one word per 4K window: >4000 + 2*window
+AMSREG EQU   >4000
 
 * Cartridge bank select (write any value to >6000 + 2*bank)
 CBANK0 EQU  >6000            cart bank 0 select; bank n at >6000 + 2n
@@ -48,11 +50,15 @@ ISRTMR EQU  >8379            frame counter kept by the console ISR
 ISRFLG EQU  >83C2            >50 = no sprite motion, no QUIT key
 SNDPTC EQU  >83CC            sound list pointer
 SNDDUR EQU  >83CE            sound list duration counter (0 = finished)
-TMRINC EQU  >83FC            the console ISR adds this byte (R14's high byte in the GPL workspace) to >8379
-*                            every frame: VSYNC needs it non-zero, and a DSR may disturb it
+* the console ISR adds this byte (R14's high byte in the GPL workspace) to
+* >8379
+TMRINC EQU   >83FC
+* every frame: VSYNC needs it non-zero, and a DSR may disturb it
 SNDFLG EQU  >83FD            bit 0 set = the sound list is in VDP RAM
-VR1CPY EQU  >83D4            console's copy of VDP register 1 (written back when it blanks)
-SCRTMO EQU  >83D6            console screen-blank timer (+2 a frame; blanks at 0)
+* console's copy of VDP register 1 (written back when it blanks)
+VR1CPY EQU   >83D4
+* console screen-blank timer (+2 a frame; blanks at 0)
+SCRTMO EQU   >83D6
 GPLWS  EQU  >83E0            the GPL workspace: DSRs run in it
 
 *----------------------------------------------------------------------
@@ -62,8 +68,10 @@ GPLWS  EQU  >83E0            the GPL workspace: DSRs run in it
 *----------------------------------------------------------------------
 PGLOWA EQU  >02              slot A (>2000, >3000): state and the stack
 PGKERN EQU  >0A              resident kernel (>A000, >B000)
-PGSLTC EQU  >0C              slot C's default pair (>C000, >D000): modules run here
-PGLOWB EQU  >0E              slot B's default pair (>E000, >F000): data is paged here
+* slot C's default pair (>C000, >D000): modules run here
+PGSLTC EQU   >0C
+* slot B's default pair (>E000, >F000): data is paged here
+PGLOWB EQU   >0E
 PGDATA EQU  >10              data bank: glyphs, colour schemes (2 pages)
 PGMOD0 EQU  >12              the first page the build gives a module
 * Pages >04-09 are free for the application (the CPU's windows >4000-9FFF are
@@ -77,25 +85,35 @@ PGMOD0 EQU  >12              the first page the build gives a module
 *----------------------------------------------------------------------
 WS     EQU  >8300            the one workspace: R0-R15 (LWPI WS)
 HOT    EQU  >8340            kernel hot variables
-FRAME  EQU  HOT+0            16-bit frame counter (VSYNC and the idle polls add 1)
-CURPA  EQU  HOT+2            pages mapped in slot A (>2000,>3000), (first<<8)|second
+* 16-bit frame counter (VSYNC and the idle polls add 1)
+FRAME  EQU   HOT+0
+* pages mapped in slot A (>2000,>3000), (first<<8)|second
+CURPA  EQU   HOT+2
 CURPB  EQU  HOT+4            pages mapped in slot B (>E000,>F000)
 CURPC  EQU  HOT+6            pages mapped in slot C (>C000,>D000)
-F18FLG EQU  HOT+8            >0001 if an F18A answered (the loader refuses otherwise)
-F18VER EQU  HOT+10           F18A firmware version (status register 14), e.g. >0019
-NPAGES EQU  HOT+12           SAMS pages present: 32, 64, 128 or 256 (256 = 1M or more)
-QUITF  EQU  HOT+14           non-zero: the application asks to quit to the TI title
-VDPPIC EQU  >8350            non-zero: the F18A is a PICO9918 (DSR calls keep this word)
-SCRTCH EQU  >8380            64 bytes: the loader's relocated bank copier (free afterwards)
+* >0001 if an F18A answered (the loader refuses otherwise)
+F18FLG EQU   HOT+8
+* F18A firmware version (status register 14), e.g. >0019
+F18VER EQU   HOT+10
+* SAMS pages present: 32, 64, 128 or 256 (256 = 1M or more)
+NPAGES EQU   HOT+12
+* non-zero: the application asks to quit to the TI title
+QUITF  EQU   HOT+14
+* non-zero: the F18A is a PICO9918 (DSR calls keep this word)
+VDPPIC EQU   >8350
+* 64 bytes: the loader's relocated bank copier (free afterwards)
+SCRTCH EQU   >8380
 
 *----------------------------------------------------------------------
 * Slot A (>2000 - >3FFF, pages >02-03): the kernel's state first, then
 * the application's.  Nothing remaps slot A.
 *----------------------------------------------------------------------
 KEYMAP EQU  >2000            6 bytes: keyboard columns 0-5 (0 bit = pressed)
-KLAST  EQU  >2006            last chord code produced (word, code in the high byte), for auto-repeat
+* last chord code produced (word, code in the high byte), for auto-repeat
+KLAST  EQU   >2006
 KHOLD  EQU  >2008            frames the current chord has been held
-KMODS  EQU  >200A            modifiers of the last code: >80 FCTN, >40 SHIFT, >20 CTRL, >10 ALPHA
+* modifiers of the last code: >80 FCTN, >40 SHIFT, >20 CTRL, >10 ALPHA
+KMODS  EQU   >200A
 ALOCK  EQU  >200C            >0001 while ALPHA LOCK is down
 KHEAD  EQU  >200E            key buffer: next slot to write (0-63)
 KTAIL  EQU  >2010            key buffer: next slot to read (0-63)
@@ -107,22 +125,40 @@ SCHEME EQU  >2080            current colour scheme (0-4)
 TXTBUF EQU  >2090            16 bytes: number formatting and the hex routines
 MCENT  EQU  >20A0            MODCALL: the entry
 MCRET  EQU  >20A2            MODCALL: R0 from the call
-NEXTPG EQU  >20A4            GOMOD: the module to switch to (first page), 0 = none
+* GOMOD: the module to switch to (first page), 0 = none
+NEXTPG EQU   >20A4
 GOARG  EQU  >20A6            GOMOD: the argument handed to its INIT
-PREVPG EQU  >20A8            the module that was running before the last switch (0 at boot)
+* the module that was running before the last switch (0 at boot)
+PREVPG EQU   >20A8
 GPUBUF EQU  >20B0            8 bytes: the GPU mailbox as built (VSHIFT)
-NODMA  EQU  >20B8            non-zero: the F18A has no DMA engine (T80INI's test)
+* non-zero: the F18A has no DMA engine (T80INI's test)
+NODMA  EQU   >20B8
 VMNUM  EQU  >20E8            the video mode set by VMODE (0-4)
 VMOPT  EQU  >20EA            its options
 TXCOLS EQU  >20EC            columns of the text screen (80, 40 or 32)
 TXROWS EQU  >20EE            rows (24 or 30)
 TXCELLS EQU >20F0            columns x rows
-TXATTR EQU  >20F2            non-zero: this mode has an attribute table the text routines write
-NAMBAS EQU  >20F4            the name table's VRAM address (NAMTAB, or NAMGM2 in Graphics II)
-POOLBM EQU  >20C0            32 bytes: page-pool bitmap, a bit per page (1 = free)
+* non-zero: this mode has an attribute table the text routines write
+TXATTR EQU   >20F2
+* the name table's VRAM address (NAMTAB, or NAMGM2 in Graphics II)
+NAMBAS EQU   >20F4
+* 32 bytes: page-pool bitmap, a bit per page (1 = free)
+POOLBM EQU   >20C0
 POOLLO EQU  >20E0            pool: the first page it manages
 POOLHI EQU  >20E2            pool: the page after its last
 FREECT EQU  >20E4            pool: free pages
+
+* Music player (music.a99): >21C0->21DF
+MUSTAT EQU  >21C0            non-zero: a song is playing
+MUPAUS EQU  >21C2            non-zero: paused
+MUPAGE EQU  >21C4            the song's first SAMS page
+MUPOS  EQU  >21C6            the next command's offset in the song (0-65535)
+MUWAIT EQU  >21C8            frames still to hold the current sound
+MULOOP EQU  >21CA            the loop target's offset (>FFFF: none)
+MULAT  EQU  >21CC            the sound register the last latch byte chose (0-7)
+* 8 bytes: each register's last latch byte (for resuming)
+MUSHL  EQU   >21CE
+MUSHD  EQU  >21D6            8 bytes: each frequency register's last data byte
 
 * File service (files.a99): >2100->21FF
 FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
@@ -138,14 +174,17 @@ FDPWR  EQU  >2176            non-zero once the controller's power-up has run
 FD70   EQU  >2178            >8370 as the controller's power-up left it
 FERR   EQU  >217A            the last file operation's result
 FLEN   EQU  >217C            the last record's length
-FNMP   EQU  >217E            the name in use (address of a length-prefixed string)
+* the name in use (address of a length-prefixed string)
+FNMP   EQU   >217E
 FPAB   EQU  >2180            64 bytes: the PAB as built
-*                            >21C0->21FF: free for the kernel's growth
+*                            >21E0->21FF: free for the kernel's growth
 
-MODRAM EQU  >2200            256 bytes of scratch for the running module (not kept across a module switch)
+* 256 bytes of scratch for the running module (not kept across a module switch)
+MODRAM EQU   >2200
 APPRAM EQU  >2300            the application's RAM: >2300 up to APPTOP
 APPTOP EQU  >3F00            ... and the software stack above it
-STKTOP EQU  >4000            R10 starts here: the first push writes >3FFE (256 bytes: 128 words)
+* R10 starts here: the first push writes >3FFE (256 bytes: 128 words)
+STKTOP EQU   >4000
 
 * The data bank (pages PGDATA, mapped at >E000 by LDSCHM and T80INI)
 DGLYPH EQU  >E000            256 glyphs x 8 bytes
@@ -207,23 +246,29 @@ RACCNT EQU  15               accent: the cursor
 VMT80  EQU  0                Text 80: 80 columns, 6 x 8 glyphs (the boot mode)
 VMT40  EQU  1                Text 40: 40 columns, 6 x 8 glyphs
 VMGM1  EQU  2                Graphics I: 32 columns, 8 x 8 tiles, 256 x 192
-VMGM2  EQU  3                Graphics II (bitmap): 256 x 192, colour per 8 pixels
+* Graphics II (bitmap): 256 x 192, colour per 8 pixels
+VMGM2  EQU   3
 VMMC   EQU  4                Multicolor: 64 x 48 blocks
 VO30   EQU  >0001            30 rows instead of 24 (every mode)
-VOPOS  EQU  >0002            a colour attribute per screen position (Text 80/40; Graphics I with ECM)
-VOTE1  EQU  >0004            enhanced colour mode 1 for tiles: 1 plane, 2 colours of a palette pair
+* a colour attribute per screen position (Text 80/40; Graphics I with ECM)
+VOPOS  EQU   >0002
+* enhanced colour mode 1 for tiles: 1 plane, 2 colours of a palette pair
+VOTE1  EQU   >0004
 VOTE2  EQU  >0008            ... mode 2: 2 planes, 4 colours
-VOTE3  EQU  >000C            ... mode 3: 3 planes, 8 colours   (Text 80/40 and Graphics I only)
+* ... mode 3: 3 planes, 8 colours (Text 80/40 and Graphics I only)
+VOTE3  EQU   >000C
 VOSE1  EQU  >0010            enhanced colour mode 1 for sprites
 VOSE2  EQU  >0020            ... mode 2
 VOSE3  EQU  >0030            ... mode 3
 VOSPR  EQU  >0040            sprites on (VR51 = 32); off leaves them stopped
 VOS16  EQU  >0080            sprites 16 x 16 (else 8 x 8)
 VOSMG  EQU  >0100            sprites magnified x2
-VMDEF  EQU  VO30+VOPOS       the boot mode: Text 80, 30 rows, attribute per position
+* the boot mode: Text 80, 30 rows, attribute per position
+VMDEF  EQU   VO30+VOPOS
 
 * The text routines' geometry: set by VMODE
-COLS   EQU  80               (the boot mode's columns: use TXCOLS in code that must follow the mode)
+* (the boot mode's columns: use TXCOLS in code that must follow the mode)
+COLS   EQU   80
 ROWS   EQU  30
 
 * VRAM.  Every mode but Graphics II uses this one map, laid out so that the
@@ -232,18 +277,24 @@ ROWS   EQU  30
 NAMTAB EQU  >0000            name table (Graphics II: NAMGM2)
 GPUMB  EQU  >0960            the GPU's mailbox (8 bytes: a DMA's settings)
 GPUAD  EQU  >0970            the GPU's program (about 26 bytes)
-GM1CT  EQU  >09C0            Graphics I's colour table (32 bytes; with ECM or VOPOS ATRTAB is used)
+* Graphics I's colour table (32 bytes; with ECM or VOPOS ATRTAB is used)
+GM1CT  EQU   >09C0
 ATRTAB EQU  >0A00            attribute table (2,400 bytes at 80 x 30)
-SATAB  EQU  >1400            sprite attribute table (32 sprites x 4 bytes; links at +>80)
-PATTAB EQU  >1800            pattern table, plane 0 (2,048 bytes); plane 1 at +>800, plane 2 at +>1000
-SPTAB  EQU  >3000            sprite patterns, plane 0 (+>200 per plane: 64 patterns of 8 x 8)
+* sprite attribute table (32 sprites x 4 bytes; links at +>80)
+SATAB  EQU   >1400
+* pattern table, plane 0 (2,048 bytes); plane 1 at +>800, plane 2 at +>1000
+PATTAB EQU   >1800
+* sprite patterns, plane 0 (+>200 per plane: 64 patterns of 8 x 8)
+SPTAB  EQU   >3000
 * Graphics II (the standard bitmap map)
 GM2PT  EQU  >0000            patterns (6,144 bytes)
 NAMGM2 EQU  >1800            names (768 or 960 bytes)
 GM2SAT EQU  >1C00            sprite attribute table
 GM2CT  EQU  >2000            colours (6,144 bytes)
-GM2SPT EQU  >3800            sprite patterns (these overlap the disk controller's area >37D8-3FFF)
-* free for the application (Text 80, 30 rows): >09E0-09FF, >1500-17FF, and, when no
+* sprite patterns (these overlap the disk controller's area >37D8-3FFF)
+GM2SPT EQU   >3800
+* free for the application (Text 80, 30 rows): >09E0-09FF, >1500-17FF, and,
+* when no
 * sprites / ECM planes are used, >2000-35FF in pieces: see docs/VIDEO-MODES.md
 * >3600-36FF the file record buffer, >3700-37D7 the PAB, >37D8-3FFF the
 * disk controller's own (nothing else may touch it)
@@ -253,7 +304,8 @@ GM2SPT EQU  >3800            sprite patterns (these overlap the disk controller'
 * byte in the high half of R1)
 *----------------------------------------------------------------------
 VR_MODE0 EQU  0              M3 (bit 1: bitmap), M4 (bit 2: with text, Text 80)
-VR_MODE1 EQU  1              16K, display, interrupts, M1 (text), M2 (multicolor), sprite size, magnify
+* 16K, display, interrupts, M1 (text), M2 (multicolor), sprite size, magnify
+VR_MODE1 EQU   1
 VR_NAME  EQU  2              name table, 1K units
 VR_COLOR EQU  3              colour table, 64-byte units
 VR_PATT  EQU  4              pattern table, 2K units
@@ -264,12 +316,16 @@ VR_NAME2 EQU  10             tile layer 2 name table, 1K units
 VR_COLR2 EQU  11             tile layer 2 colour table, 64-byte units
 VR_STAT  EQU  15             status register select
 VR_HINT  EQU  19             horizontal interrupt line (0 = off)
-VR_PALSL EQU  24             palette select: sprites bits 5-4, tile layer 2 bits 3-2, tile layer 1 bits 1-0
+* palette select: sprites bits 5-4, tile layer 2 bits 3-2, tile layer 1 bits
+* 1-0
+VR_PALSL EQU   24
 VR_HS2   EQU  25             tile layer 2 horizontal scroll
 VR_VS2   EQU  26             tile layer 2 vertical scroll
 VR_HS1   EQU  27             tile layer 1 horizontal scroll
 VR_VS1   EQU  28             tile layer 1 vertical scroll
-VR_PAGE  EQU  29             page sizes of the two layers; plane offsets of tiles (bits 3-2) and sprites (7-6)
+* page sizes of the two layers; plane offsets of tiles (bits 3-2) and sprites
+* (7-6)
+VR_PAGE EQU   29
 VR_SPRMX EQU  30             sprites per scan line (0 = the jumper's choice)
 VR_BMPCT EQU  31             bitmap layer control
 VR_BMPAD EQU  32             bitmap layer base, 64-byte units
@@ -279,9 +335,14 @@ VR_BMPW  EQU  35             bitmap layer width (0 = 256)
 VR_BMPH  EQU  36             bitmap layer height
 VR_PALCT EQU  47             palette data port control
 VR_INCR  EQU  48             VRAM address increment (signed)
-VR_ECM   EQU  49             TL2 on (bit 7), 30 rows (6), tile ECM (5-4), real Y (3), linking (2), sprite ECM (1-0)
-VR_FLAGS EQU  50             GPU triggers, tile layer 1 off (4), report max sprites (3), scan lines (2), position attributes (1), TL2 priority (0)
-VR_STOP  EQU  51             stop sprite: sprites at this index and above are not drawn (32 = all drawn)
+* TL2 on (bit 7), 30 rows (6), tile ECM (5-4), real Y (3), linking (2), sprite
+* ECM (1-0)
+VR_ECM EQU   49
+* GPU triggers, tile layer 1 off (4), report max sprites (3), scan lines (2),
+* position attributes (1), TL2 priority (0)
+VR_FLAGS EQU   50
+* stop sprite: sprites at this index and above are not drawn (32 = all drawn)
+VR_STOP EQU   51
 VR_GPUHI EQU  54             GPU start address, high byte
 VR_GPULO EQU  55             ... low byte (writing it starts the GPU)
 VR_GPUCT EQU  56             GPU control
@@ -303,5 +364,6 @@ FIN    EQU  >0400            mode: input
 FAPP   EQU  >0600            mode: append
 * results (R0): 0 = done; 1-7 = the PAB's error code; >FF = no such device
 FEEOF  EQU  5                reading past the end of the file
-FENOFI EQU  7                a file error (the stand-in disk's answer for a missing input file;
-*                            TI's own controller answers 2 there, and 7 for a close after end of file)
+* a file error (the stand-in disk's answer for a missing input file;
+FENOFI EQU   7
+* TI's own controller answers 2 there, and 7 for a close after end of file)

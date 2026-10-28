@@ -20,7 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROMFILE = os.environ.get('TIFDC_ROM', os.path.join(HERE, 'tifdc_dsr.bin'))
 
 
-def blank_disk(name=b'LANTERN', sectors=360):
+def blank_disk(name=b'SAMSKERNEL', sectors=360):
     """A freshly initialised single-sided, single-density disk: the volume
     information block in sector 0 (name, 360 sectors, 9 a track, 'DSK', 40
     tracks, one side, single density, the allocation bitmap with sectors 0

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""newapp.py - start a Lantern Kernel application.
+"""newapp.py - start a SAMS Kernel application.
 
     python3 tools/newapp.py DIR [--name "MY APP"]
 
 Writes DIR/app.json and DIR/main.a99: a one-module application that builds and
 runs (it shows its name, echoes typing and quits on FCTN =).  Then:
 
-    python3 tools/lkbuild.py DIR
+    python3 tools/skbuild.py DIR
     python3 tools/sim9900.py build/DIR/myapp8.bin --keys "<ALPHA>hello"
 """
 import json, os, sys

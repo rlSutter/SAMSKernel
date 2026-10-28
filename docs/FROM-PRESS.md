@@ -1,4 +1,4 @@
-# From Press to the Lantern Kernel
+# From Press to the SAMS Kernel
 
 The kernel is Press 2.0's resident kernel generalised: everything an application needs, nothing that only a word processor does. This note says what
 moved, what was renamed, what was left in Press, and what rebasing Press (or F18Base, TXA) on the kernel would involve. **Press itself has not been
@@ -24,7 +24,7 @@ changed**; nothing here has been tried against it.
 | `m2files.a99` `UOPEN` `UREAD` `UWRITE` `UCLOSE` `UDEL` `UCALL` `DSRLNK` `DLGPL` `UCNUM` | `files.a99` `FOPEN` `FREAD` `FWRITE` `FCLOSE` `FDELETE` `FCALL` `DSRLNK` `DLGPL` `FCNUM` | caller supplies name and buffer (no `UNMP`/`RECBUF`); name length checked; previous error bits cleared; `>83FC` restored; result in `FERR` |
 | `m0test.a99` | `examples/diag/diag.a99` | the key decoder and glyph chart screen, plus a second module of self-tests |
 | `databank.a99`, `tools/font.py`, `tools/keytab.py`, `tools/sim9900.py` | same | simulator gained the real-console-ROM mode |
-| `tools/build.py` | `tools/lkbuild.py` | driven by `app.json`; no Press specifics |
+| `tools/build.py` | `tools/skbuild.py` | driven by `app.json`; no Press specifics |
 
 ## Variables: where they moved
 

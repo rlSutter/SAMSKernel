@@ -1,0 +1,2 @@
+; a note of each octave of A, the pitch checks for the tests: A4 440 Hz for one second
+V1: t120 o4 l1 a

@@ -1,0 +1,11 @@
+{
+  "name": "MUSIC",
+  "min_pages": 128,
+  "modules": [
+    {"name": "music", "source": "music.a99"}
+  ],
+  "data": [
+    {"file": "tune.skm",  "from": "songs/tune.mml",  "loop": true},
+    {"file": "scale.skm", "from": "songs/scale.mml"}
+  ]
+}

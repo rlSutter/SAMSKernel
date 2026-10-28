@@ -17,7 +17,7 @@
 * scratchpad because selecting another bank makes this code disappear from
 * >6000.
 *
-* The refusal messages and BANKTB are written by tools/lkbuild.py.
+* The refusal messages and BANKTB are written by tools/skbuild.py.
 *======================================================================
        COPY "kdefs.a99"
 
@@ -30,7 +30,8 @@
        DATA >0000,>0000
 PRGLST DATA >0000              next program: none
        DATA START
-       COPY "appname.a99"      BYTE n, TEXT '...' : the name the console's menu shows
+* BYTE n, TEXT '...' : the name the console's menu shows
+       COPY  "appname.a99"
        EVEN
 
 * START - the cartridge's program: the four checks, then the copy.  Never
@@ -63,7 +64,8 @@ ST2A   CLR  *R1+
        JNE  ST2A
        LI   R10,STKTOP
        MOV  @NPAGES,R0
-       BL   @AMSTST            every page from PGDATA up (destructive: nothing loaded yet)
+* every page from PGDATA up (destructive: nothing loaded yet)
+       BL    @AMSTST
        MOV  R0,R0
        JEQ  ST3
        MOV  R0,@BADPG
@@ -219,7 +221,8 @@ REFREG DATA >8000              VR0: no M4 (40 columns)
        DATA >87F4              VR7: white on dark blue
        DATA 0
 
-       COPY "appmsg.a99"       MSGSAM, MSGF18, MSGBAD and BANKTB (written by the build)
+* MSGSAM, MSGF18, MSGBAD and BANKTB (written by the build)
+       COPY  "appmsg.a99"
 BADPG  EQU  >8370              the failing page, for the message (scratchpad)
 
        COPY "vdp.a99"

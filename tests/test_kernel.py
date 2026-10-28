@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Lantern Kernel tests: the example applications run in tools/sim9900.py.
+"""SAMS Kernel tests: the example applications run in tools/sim9900.py.
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: boot refusal ram keys quit modules files browser modes modesquit rom realdsr
-Builds the examples first (tools/lkbuild.py; XAS99 or ./xdt99 needed).
+Groups: sources dbg boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
 an EA5 image); without it the group is skipped.  The ROM is TI's code and
@@ -24,7 +24,7 @@ def check(cond, what):
     if not cond: FAILS.append(what)
 
 def build(app):
-    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'lkbuild.py'),
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'),
                         os.path.join(ROOT, 'examples', app)], capture_output=True, text=True)
     if r.returncode: sys.exit(r.stdout + r.stderr)
     return open(glob.glob(os.path.join(ROOT, 'build', app, '*8.bin'))[0], 'rb').read()
@@ -39,7 +39,7 @@ def boot():
     check(halt is None, 'hello boots without a halt')
     check(m.vregs[0] == 4 and m.vregs[1] == 0xF0 and m.vregs[49] == 0x40 and m.vregs[50] == 2 and m.vregs[51] == 0,
           'Text 80, 30 rows, position attributes, no sprites, display on')
-    check('Hello, Lantern Kernel' in lines(m)[0], 'the module drew its title')
+    check('Hello, SAMS Kernel' in lines(m)[0], 'the module drew its title')
     check(m.rw(0x834C) == 128 and m.rw(0x8348) == 1 and m.rw(0x834A) == 0x19, 'NPAGES 128, F18A found, version 1.9')
     check(m.scratch[0xC2] == 0x50 and m.scratch[0xFC] == 1, 'ISR flags >50, frame increment set')
     check(m.palette.get(1) == 0x23A and m.palette.get(2) == 0xDDE, 'colour scheme 0 in the palette')
@@ -204,6 +204,126 @@ def modes_quit():
             check(zero == [0] * 13 and regs[51] == 32 and regs[48] == 1 and regs[15] == 0,
                   '%s: VR10 VR11 VR19 VR24-31 VR49 VR50 back to 0, VR51 = 32, VR48 = 1 before the reset' % what)
 
+def sources():
+    """Every source line fits a TI text file (80 columns, ASCII, no tabs) and the public list has headers."""
+    import lint80, docindex
+    glob_ = sorted(glob.glob(os.path.join(ROOT, 'kernel', '*.a99')) + glob.glob(os.path.join(ROOT, 'examples', '*', '*.a99')))
+    bad = [(os.path.relpath(f, ROOT), n, w) for f in glob_ for n, w in lint80.problems(f)]
+    check(not bad, 'all %d sources are TI-editable (80 columns, ASCII): %s' % (len(glob_), bad[:3]))
+    h = docindex.headers()
+    miss = [n for n in docindex.PUBLIC if n not in h]
+    check(not miss, 'every public routine has a header comment: %s' % miss)
+
+def dbg():
+    """kernel/dbg.a99: a module COPYs it; DBG shows R0-R3, waits for a key, keeps every register."""
+    import tempfile, shutil
+    d = tempfile.mkdtemp()
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'newapp.py'), d, '--name', 'DBGTEST'], capture_output=True)
+    src = open(os.path.join(d, 'main.a99')).read()
+    src = src.replace('       LI   R1,ATEXT\n       BL   @CLS\n       CLR  R0\n       LI   R1,ABAR','       LI   R1,ATEXT\n       BL   @CLS\n       CLR  R0\n       LI   R1,ABAR', 1)
+    src = src.replace('INIT   .enter\n       BL   @REDRAW\n       .leave','INIT   .enter\n       BL   @REDRAW\n       LI   R0,>1234\n       LI   R1,>BEEF\n       LI   R2,>0042\n       LI   R3,>FFFF\n       LI   R4,>4444\n       LI   R9,>9999\n       BL   @DBG\n       MOV  R4,@APPRAM+20\n       MOV  R9,@APPRAM+22\n       MOV  R0,@APPRAM+24\n       .leave', 1)
+    src = src.replace("TITLE  STRI", '       COPY "dbg.a99"\nTITLE  STRI', 1)
+    open(os.path.join(d, 'main.a99'), 'w').write(src)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d, '--out', os.path.join(d, 'b')], capture_output=True, text=True)
+    if r.returncode: sys.exit(r.stdout + r.stderr)
+    c = open(glob.glob(os.path.join(d, 'b', '*8.bin'))[0], 'rb').read()
+    m, cpu, halt = sim9900.run(c, frames=150)
+    row = lines(m)[29]
+    check(row[2:21] == '1234 BEEF 0042 FFFF', 'DBG shows R0-R3 on the bottom row: %r' % row[:24])
+    check(m.rw(0x2314) == 0, 'DBG waits for a key: the code after it has not run')
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>x<WAIT 20>', frames=300)
+    check((m.rw(0x2314), m.rw(0x2316), m.rw(0x2318)) == (0x4444, 0x9999, 0x1234), 'after a key DBG returns with R0, R4 and R9 as they were')
+    shutil.rmtree(d, ignore_errors=True)
+
+def music():
+    """The music player: the music demo and the compiler, checked against the bytes the player
+    writes to the sound chip, their timing, and the pitch of what a model of the chip makes of them."""
+    import skmusic, sn76489, struct
+    c = build('music')
+    VF = sim9900.VSYNC_INSNS
+    def chip(m): return [(i, b) for (src, i, b) in m.chip_log if src == 'cpu']
+    def songbytes(name, **kw):
+        skm, info = skmusic.compile_file(os.path.join(ROOT, 'examples', 'music', 'songs', name), **kw)
+        return skm
+    SIL = [0x9F, 0xBF, 0xDF, 0xFF]
+    # a one-note song: the bytes, the timing, the pitch
+    skm = songbytes('scale.mml')
+    ev, nframes = skmusic.decode(skm)
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>2<WAIT 150>', frames=260)
+    log = chip(m)
+    check([b for i, b in log[:4 + len(ev)]] == SIL + [b for f, b in ev], 'scale: MUPLAY silences the chip, then the song\'s bytes arrive exactly as compiled')
+    t0 = log[4][0]
+    check(abs((log[-5][0] - t0) / VF - 0) < 1.5 and abs((log[-1][0] - t0) / VF - nframes) < 1.5 and m.rw(0x21C0) == 0,
+          'scale: the song ends %d frames after it began and stops by itself (MUSTAT = 0), silencing the chip' % nframes)
+    s = sn76489.synth([((i - t0) / (VF * 60.0), b) for i, b in log[4:-4]], 1.5)
+    check(abs(sn76489.peak_hz(s[2000:20000]) - 440.4) < 3, 'scale: the note sounds at 440 Hz (a model of the chip, FFT peak %.1f)' % sn76489.peak_hz(s[2000:20000]))
+    # the tune: it loops; the second pass writes what the first did
+    skm = songbytes('tune.mml', loop=True)
+    ev, nframes = skmusic.decode(skm, 2)
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 1180>', frames=1300)
+    log = chip(m)
+    got = [b for i, b in log[4:]]
+    check(m.rw(0x21C0) != 0 and got[:len(ev)] == [b for f, b in ev][:len(got)] and len(got) > len(ev) // 2 + 100,
+          'tune: loops, and the bytes written (%d) are the compiled two passes\' bytes' % len(got))
+    # pause and resume: silent while paused, the same sound afterwards
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 150> <WAIT 60> <WAIT 80>', frames=520)
+    log = chip(m)
+    paused = [i for i, b in log if False]
+    model = sn76489.Sn76489(); before = None
+    # find the pause: four silence bytes written by MUPAUSE after the song's bytes began
+    idx = [k for k in range(8, len(log) - 3) if [b for i, b in log[k:k + 4]] == SIL]
+    check(len(idx) == 1, 'pause: exactly one run of four silencing bytes after the song began')
+    k = idx[0]
+    for i, b in log[:k]: model.write(b)
+    snap = (list(model.div), list(model.att), model.noise)
+    for i, b in log[k:k + 4 + 11]: model.write(b)       # the four silencing bytes, then the 8 latch and 3 data bytes of the restore
+    after = (list(model.div), list(model.att), model.noise)
+    check(snap == after and any(a < 15 for a in after[1]), 'pause: the restore writes put back the dividers and volumes the chip had before the pause')
+    mid = [i for i, b in log[k + 4:]]
+    check(not [1 for (i, b) in log[k + 4:k + 12] if (i - log[k + 3][0]) / VF < 30 and k + 12 < len(log) and False] and (log[k + 4][0] - log[k + 3][0]) / VF > 40,
+          'pause: nothing is written while paused (%.0f frames)' % ((log[k + 4][0] - log[k + 3][0]) / VF))
+    # KIDLE steps the song through a loop that never returns to the main loop
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 20>w<WAIT 200>', frames=400)
+    log = chip(m)
+    times = [i / VF for i, b in log[4:]]
+    # the keys go down at frame 60+: W at about frame 140; the loop ends 120 frames later
+    wstart = [(src, i) for (src, i, b) in m.chip_log][0][1] / VF
+    work = [t for t in times if 140 <= t <= 255]
+    check(len(work) > 20, 'KIDLE: %d chip writes during the two seconds of work (the song went on)' % len(work))
+    # SNDTONE and SNDOFF
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>b<WAIT 20>o<WAIT 20>', frames=200)
+    b = [x for i, x in chip(m)]
+    check(b[:3] == [0x8E, 0x0F, 0x90] and b[3:7] == SIL, 'SNDTONE: voice 1, divider 254 (>8E, >0F) loudest (>90); SNDOFF: the four voices off')
+    # stop, and quit silences the chip
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 20>s<WAIT 20><F-=>e', frames=300)
+    b = [x for i, x in chip(m)]
+    check(m.rw(0x21C0) == 0 and b[-4:] == SIL, 'S stops the song, and quitting leaves the chip silent')
+    # the compiler from MIDI: two notes and a drum, as a standard MIDI file
+    def vlq(n):
+        out = [n & 0x7F]; n >>= 7
+        while n: out.append(0x80 | (n & 0x7F)); n >>= 7
+        return bytes(reversed(out))
+    trk = b'\x00\xFF\x51\x03' + (500000).to_bytes(3, 'big')
+    trk += b'\x00\x90\x45\x64' + vlq(480) + b'\x80\x45\x00' + b'\x00\x90\x48\x64' + vlq(480) + b'\x80\x48\x00'
+    trk += b'\x00\x99\x26\x7F' + vlq(120) + b'\x89\x26\x00' + b'\x00\xFF\x2F\x00'
+    smf = b'MThd' + struct.pack('>IHHH', 6, 0, 1, 480) + b'MTrk' + struct.pack('>I', len(trk)) + trk
+    open('/tmp/sk_test.mid', 'wb').write(smf)
+    skm, info = skmusic.compile_file('/tmp/sk_test.mid')
+    ev, nf = skmusic.decode(skm)
+    divs = []
+    model = sn76489.Sn76489()
+    frames = {}
+    for f, b in ev: frames.setdefault(f, []).append(b)
+    for f in sorted(frames):                 # look at the chip between frames: a divider arrives in two bytes
+        for b in frames[f]: model.write(b)
+        if model.att[0] < 15 and (not divs or model.div[0] != divs[-1]): divs.append(model.div[0])
+    check(divs == [254, 214] and nf >= 60 and any(0xE0 <= b <= 0xF0 for f, b in ev),
+          'MIDI: A4 (divider 254) then C5 (214) on voice 1, one second each at 120 BPM, and the drum on the noise voice: %s, %d frames' % (divs, nf))
+    skm2, info2 = skmusic.compile_file('/tmp/sk_test.mid', loop_at=1.0)
+    lp = struct.unpack('>H', skm2[4:6])[0]
+    ev2, _ = skmusic.decode(skm2, 2)
+    check(lp != 0xFFFF and lp > 8 and len(ev2) > len(ev), 'compiler: loop-at one second makes a loop target (offset %d) and the second pass replays from there' % lp)
+
 def modes():
     """Every display mode: the modes demo application (examples/modes) run in the
     simulator, each screen drawn by tools/f18render.py and its pixels checked."""
@@ -288,8 +408,8 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
-          ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('rom', rom), ('realdsr', realdsr)]
+GROUPS = [('sources', sources), ('dbg', dbg), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+          ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':
     want = sys.argv[1:] or [g for g, _ in GROUPS]

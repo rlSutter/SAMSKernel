@@ -1,0 +1,197 @@
+*======================================================================
+* music.a99 - the music player: a song in SAMS pages, played through the
+* TMS9919 sound chip a frame at a time; and direct control of the tones.
+*
+* A song is a stream of commands in the format "SKM" (docs/MUSIC.md), made on
+* the PC by tools/skmusic.py from a MIDI file or a text score, and placed in
+* SAMS pages by the build ("data" in app.json).  The player is stepped once a
+* frame by the main loop (MUTICK), and by KIDLE, KPFR and KWAIT, so music
+* goes on through long operations that poll the keyboard.  It reads the song
+* through slot B and puts slot B back as it found it, so it never disturbs the
+* application's own mapping.
+*
+* SKM: an 8-byte header ('S','K', version 1, flags, loop target word,
+* length word), then commands:
+*   >00        end: jump to the loop target, or stop if there is none
+*   >01->3F    hold this sound for that many frames
+*   >40->7F    write (command AND >3F) to the chip: a tone's second byte
+*   >80->FF    write the byte to the chip: a latch, volume or noise byte
+*======================================================================
+
+* MUPLAY - start the song whose first SAMS page is R0 (the song's pages
+* must be consecutive).  Any song playing is replaced.  R0 = 0 if it began,
+* 1 if the pages do not hold a song.  Uses R0-R4, R12.
+MUPLAY .enter
+       MOV  R0,@MUPAGE
+       MOV  @CURPB,R4
+       .push R4
+       BL   @MAPE              the header, through window >E000
+       MOV  @>E000,R1
+       CI   R1,>534B           'S' 'K'
+       JNE  MUP8
+       MOV  @>E004,@MULOOP
+       LI   R1,8               the commands start after the header
+       MOV  R1,@MUPOS
+       CLR  @MUWAIT
+       CLR  @MUPAUS
+       BL   @MUSIL             quiet, and the shadow as quiet
+       LI   R1,MUSHL
+       LI   R2,MUINIT
+       LI   R3,8
+MUP1   MOVB *R2+,*R1+
+       DEC  R3
+       JNE  MUP1
+       LI   R1,MUSHD
+       LI   R3,4
+MUP2   CLR  *R1+
+       DEC  R3
+       JNE  MUP2
+       SETO @MUSTAT
+       CLR  R0
+       JMP  MUP9
+MUP8   LI   R0,1
+MUP9   .pop R4
+       MOV  R0,R3              (the result, kept across SETPB)
+       MOV  R4,R0
+       BL   @SETPB
+       MOV  R3,R0
+       .leave
+       RT
+
+* MUSTOP - stop the song and silence the chip.  Leaf.  Uses R0.
+MUSTOP CLR  @MUSTAT
+* SNDOFF - silence all four voices (attenuation 15), song or no song.
+* Leaf.  Uses R0.
+SNDOFF
+MUSIL  LI   R0,>9F00
+       MOVB R0,@SOUND
+       LI   R0,>BF00
+       MOVB R0,@SOUND
+       LI   R0,>DF00
+       MOVB R0,@SOUND
+       LI   R0,>FF00
+       MOVB R0,@SOUND
+       RT
+
+* MUPAUSE - R0 = 1 pause the song (the chip goes quiet), R0 = 0 resume it
+* (the chip is put back as the song had it).  Does nothing if no song is
+* playing.  Uses R0-R2, R11 is kept.
+MUPAUSE .enter
+       MOV  @MUSTAT,@MUSTAT
+       JEQ  MPA9
+       MOV  R0,R0
+       JEQ  MPA2
+       SETO @MUPAUS
+       BL   @MUSIL
+       JMP  MPA9
+MPA2   MOV  @MUPAUS,@MUPAUS    already playing: nothing to put back
+       JEQ  MPA9
+       CLR  @MUPAUS
+       CLR  R1                 each register's last bytes, in order
+MPA3   MOVB @MUSHL(R1),@SOUND  the latch byte
+       MOV  R1,R2
+       ANDI R2,1
+       JNE  MPA4               odd registers are volumes: no data byte
+       CI   R1,6
+       JHE  MPA4               nor does the noise register
+       MOVB @MUSHD(R1),@SOUND
+MPA4   INC  R1
+       CI   R1,8
+       JL   MPA3
+MPA9   .leave
+       RT
+
+* MUTICK - advance the song one frame.  The main loop calls it every
+* frame; call it yourself only if you run your own frame loop.  Uses R0-R8,
+* R12 (and slot B is left as found).
+MUTICK MOV  @MUSTAT,@MUSTAT
+       JNE  MUT0
+       RT
+MUT0   MOV  @MUPAUS,@MUPAUS
+       JEQ  MUT0A
+       RT
+MUT0A  MOV  @MUWAIT,@MUWAIT
+       JEQ  MUT1
+       DEC  @MUWAIT
+       RT
+MUT1   .enter
+       MOV  @CURPB,R0
+       .push R0
+       LI   R8,256             commands one frame may read: a song with no
+MUT2   MOV  @MUPOS,R1          waits would otherwise never return
+       SRL  R1,12              the page the next command is in ...
+       A    @MUPAGE,R1
+       MOV  R1,R0
+       BL   @MAPE              ... and the next one
+       INC  R0
+       BL   @MAPF
+       MOV  @MUPOS,R5
+       ANDI R5,>0FFF
+       AI   R5,>E000           R5 reads the stream
+       MOV  R5,R6              where this frame began
+MUT3   DEC  R8
+       JEQ  MUTSTP
+       MOVB *R5+,R1
+       JEQ  MUTEND             >00
+       JLT  MUTWR              >80->FF
+       CB   R1,@MUC40
+       JHE  MUTDAT             >40->7F
+       SRL  R1,8               >01->3F: hold
+       DEC  R1
+       MOV  R1,@MUWAIT
+       S    R6,R5
+       A    R5,@MUPOS
+       JMP  MUT9
+MUTDAT ANDI R1,>3F00
+       MOVB R1,@SOUND
+       MOV  @MULAT,R2
+       MOVB R1,@MUSHD(R2)
+       JMP  MUT3
+MUTWR  MOVB R1,@SOUND
+       MOV  R1,R2
+       SRL  R2,12
+       ANDI R2,7
+       MOV  R2,@MULAT
+       MOVB R1,@MUSHL(R2)
+       JMP  MUT3
+MUTEND MOV  @MULOOP,R1
+       CI   R1,>FFFF
+       JEQ  MUTSTP
+       MOV  R1,@MUPOS          the loop target: map its pages and go on
+       JMP  MUT2
+MUTSTP CLR  @MUSTAT
+       BL   @MUSIL
+MUT9   .pop R0
+       BL   @SETPB
+       .leave
+       RT
+MUC40  BYTE >40
+       EVEN
+* the chip as silence has it: latch bytes of the eight registers
+MUINIT BYTE >80,>9F,>A0,>BF,>C0,>DF,>E0,>FF
+
+* SNDTONE - set a tone voice directly (sound effects, or music of your own).
+* R0 = the voice 0-2, R1 = the divider 1-1023 (frequency = 111,861 / divider
+* Hz), R2 = the attenuation 0-15 (0 loudest, 15 off).  While a song plays
+* its voices would overwrite yours: use a voice the song does not.  Leaf.
+* Uses R0-R4.
+SNDTONE MOV R0,R3
+       SLA  R3,5               the voice, in the latch byte's bits 6-5
+       MOV  R1,R4
+       ANDI R4,>000F
+       ORI  R4,>0080
+       A    R3,R4
+       SWPB R4
+       MOVB R4,@SOUND          latch: the divider's low 4 bits
+       MOV  R1,R4
+       SRL  R4,4
+       ANDI R4,>003F
+       SWPB R4
+       MOVB R4,@SOUND          data: the high 6 bits
+       MOV  R2,R4
+       ANDI R4,>000F
+       ORI  R4,>0090
+       A    R3,R4
+       SWPB R4
+       MOVB R4,@SOUND          the attenuation
+       RT

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """mkshots.py - docs/images/mode-*.png: every screen of examples/modes, drawn by
-tools/f18render.py from the simulator.  Run after tools/lkbuild.py examples/modes."""
+tools/f18render.py from the simulator.  Run after tools/skbuild.py examples/modes."""
 import glob, os, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))

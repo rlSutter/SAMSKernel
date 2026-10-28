@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""guide_pdf.py - build docs/PROGRAMMERS-GUIDE.pdf and docs/VIDEO-MODES.pdf from their Markdown.
+"""guide_pdf.py - build the PDFs in docs/ from their Markdown.
 
-    python3 tools/guide_pdf.py [guide|video]       (no argument: both)
+    python3 tools/guide_pdf.py [guide|video|music|ti]       (no argument: both)
 
 Needs pandoc, wkhtmltopdf, and the Python packages pypdf and reportlab (page
 numbers, bookmarks, document properties are added afterwards: the unpatched
@@ -37,14 +37,16 @@ nav#TOC a { color: #1a1a1a; text-decoration: none; }
 nav#TOC > ul > li { margin-top: .5em; font-family: "DejaVu Sans", sans-serif; font-weight: bold; }
 nav#TOC > ul > li > ul > li { font-weight: normal; font-family: "DejaVu Serif", serif; font-size: 9.5pt; }
 '''
-HEAD = '''<h1 class="title">Lantern Kernel</h1>
+HEAD = '''<h1 class="title">SAMS Kernel</h1>
 <p class="subtitle">The programmer's guide: writing TI-99/4A applications in assembly</p>
 <p class="meta">Version %s &middot; %s<br>For a TI-99/4A with an F18A video card and a SAMS memory card<br>MIT License, &copy; 2026 Rebecca Sutter</p>
 '''
 
 DOCS = {
-    'guide': ('PROGRAMMERS-GUIDE', "# Lantern Kernel: the programmer's guide", "The programmer's guide: writing TI-99/4A applications in assembly", "Lantern Kernel programmer's guide"),
-    'video': ('VIDEO-MODES', "# Lantern Kernel: the F18A's display modes", "The F18A's display modes: every mode and option, with pictures", "Lantern Kernel video modes"),
+    'guide': ('PROGRAMMERS-GUIDE', "# SAMS Kernel: the programmer's guide", "The programmer's guide: writing TI-99/4A applications in assembly", "SAMS Kernel programmer's guide"),
+    'music': ('MUSIC', "# SAMS Kernel: music and sound", "Music and sound: the player, the compiler, the song format", "SAMS Kernel music"),
+    'ti': ('DEVELOPING-ON-A-TI', "# SAMS Kernel: developing with a real TI", "Developing with a real TI: running, debugging, editing", "SAMS Kernel on a real TI"),
+    'video': ('VIDEO-MODES', "# SAMS Kernel: the F18A's display modes", "The F18A's display modes: every mode and option, with pictures", "SAMS Kernel video modes"),
 }
 
 def build(key):
@@ -101,7 +103,7 @@ def build(key):
     print('wrote %s: %d pages, %d headings not found for bookmarks' % (out, len(src.pages), miss))
 
 def main():
-    which = sys.argv[1:] or ['guide', 'video']
+    which = sys.argv[1:] or ['guide', 'video', 'music', 'ti']
     for k in which:
         build(k)
 

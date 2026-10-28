@@ -190,7 +190,8 @@ FC2    MOV  *R1+,*R2+
 * this reads small integers only (under 10,000), as catalogs hold.  The
 * name is the length-prefixed string at the record's start.  Uses R0-R5.
 * Leaf.
-FCNUM  MPY  @FC9,R2            R2:R3 = n * 9 (each number is a length byte and 8 bytes)
+* R2:R3 = n * 9 (each number is a length byte and 8 bytes)
+FCNUM  MPY   @FC9,R2
        CLR  R2                 past the name: 1 + its length
        MOVB *R1,R2
        SWPB R2

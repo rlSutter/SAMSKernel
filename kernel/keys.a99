@@ -209,15 +209,16 @@ KFLUSH MOV  @KHEAD,@KTAIL
        RT
 
 * KIDLE - poll the keyboard if a frame has passed (the VDP's frame flag),
-* so keys typed during long work are buffered.  Reading the flag clears it,
-* so the console's interrupt does not fire in a LIMI 0 section.  Call only
-* between VDP transfers.  Uses R0-R7, R12.
+* so keys typed during long work are buffered, and steps the music player.
+* Reading the flag clears it, so the console's interrupt does not fire in a
+* LIMI 0 section.  Call only between VDP transfers.  Uses R0-R8, R12.
 KIDLE  .enter
        MOVB @VDPSTA,R0         the VDP's status: bit 0 is the frame flag
        ANDI R0,>8000
        JEQ  KI9
        INC  @FRAME             count the frame
        BL   @KPOLL             and take any keys
+       BL   @MUTICK            and step the song
 KI9    .leave
        RT
 
@@ -236,6 +237,7 @@ KPFR   .enter
        .push R8
        INC  @FRAME             count the frame
        BL   @KPOLL             and take any keys
+       BL   @MUTICK            and step the song
        .pop R8
        .pop R7
        .pop R6
@@ -250,9 +252,10 @@ KPFR   .enter
 * KWAIT - wait for a key: R0 = its code (high byte).  Runs frames
 * (VSYNC, KPOLL) until one arrives, so it is for modal moments only
 * (a message that waits for a key, a prompt): the module's TICK does not
-* run meanwhile.  Uses R0-R7, R12.
+* run meanwhile.  Uses R0-R8, R12.
 KWAIT  .enter
 KW1    BL   @VSYNC
+       BL   @MUTICK
        BL   @KPOLL
        BL   @KEYGET
        MOV  R0,R0

@@ -1,4 +1,4 @@
-# Lantern Kernel: the F18A's display modes
+# SAMS Kernel: the F18A's display modes
 
 The kernel boots in Text 80, but the F18A offers much more, and `VMODE` sets up any of it. This document is the reference for every
 mode and option the kernel sets, and for the registers beyond them (`VREG`): what each looks like, where its tables live, what the
@@ -123,7 +123,7 @@ while Graphics II is showing** unless the bottom of the screen may be damaged. S
 
 **Text 80** (`VMT80`) is 80 columns of 6 x 8 glyphs. With `VOPOS` every position has an attribute byte (high nibble foreground, low nibble background: palette entries 0-15, which are the
 kernel's colour *roles*, so a colour scheme recolours the whole screen). Without it all text takes the foreground and background in VR7 (`RTEXT` on `RBG`) and the attributes you pass are
-ignored. This is the mode Press and the Lantern Kernel's boot use. 24 rows (1,920 cells) or 30 (2,400).
+ignored. This is the mode Press and the SAMS Kernel's boot use. 24 rows (1,920 cells) or 30 (2,400).
 
 | Without `VOPOS`, 24 rows | Text 40, 30 rows, with `VOPOS` |
 | --- | --- |
@@ -340,7 +340,7 @@ The F18A is also a 9918A-compatible: VR0-VR7 mean what they do on the 9918A, and
 ## 13. Trying the modes
 
 ```
-python3 tools/lkbuild.py examples/modes                 build/modes/videomodes8.bin: load it in js99er (F18A, 512K SAMS)
+python3 tools/skbuild.py examples/modes                 build/modes/videomodes8.bin: load it in js99er (F18A, 512K SAMS)
 python3 tools/f18render.py build/modes/videomodes8.bin shot.png "<WAIT 5>6<WAIT 20>" 900     key 6: Graphics II, drawn to shot.png
 python3 tools/mkshots.py                                the fifteen images in docs/images
 python3 tests/test_kernel.py modes modesquit            the pixel checks, and the register restore on quit

@@ -19,13 +19,14 @@ EPTR   EQU  APPRAM+10          work: the entry being filled
 DNAME  EQU  APPRAM+16          the disk's name, length-prefixed (11 bytes)
 ENTS   EQU  APPRAM+32          the files: MAXF entries of 16 bytes
 *                              +0 name (length-prefixed, 10 characters at most)
-*                              +12 type (1 DIS/FIX 2 DIS/VAR 3 INT/FIX 4 INT/VAR 5 program)
+* +12 type (1 DIS/FIX 2 DIS/VAR 3 INT/FIX 4 INT/VAR 5 program)
 *                              +14 size in sectors
 MAXF   EQU  20
 RECBUF EQU  ENTS+(MAXF*16)     a catalog record (38 bytes)
 EEND   EQU  RECBUF+40
 * the viewer's variables, above the browser's
-VNAME  EQU  EEND               the file name: DSK1.NAME, length-prefixed (20 bytes)
+* the file name: DSK1.NAME, length-prefixed (20 bytes)
+VNAME  EQU   EEND
 NLINES EQU  VNAME+20           lines loaded
 TOPLN  EQU  VNAME+22           the line at the top of the screen
 VPAGES EQU  VNAME+24           8 words: the SAMS page of each 51 lines

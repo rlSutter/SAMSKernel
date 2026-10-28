@@ -1,5 +1,6 @@
 *======================================================================
-* amsinit.a99 - the memory card found, sized and tested (the loader only: the kernel
+* amsinit.a99 - the memory card found, sized and tested (the loader only: the
+* kernel
 * keeps pager.a99's mapping routines)
 *======================================================================
 
@@ -108,7 +109,8 @@ AT1    MOV  R5,R0
        MOV  R5,R4              signature: page number and its complement
        SWPB R4
        XOR  R5,R4
-       INV  R4                 page-specific: its number mixed with its complement
+* page-specific: its number mixed with its complement
+       INV   R4
        MOV  R4,@>E000          at the page's first word ...
        MOV  R4,@>EFFE          ... and its last
        INC  R5                 the next page

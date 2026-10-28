@@ -1,4 +1,4 @@
-# Lantern Kernel: conventions
+# SAMS Kernel: conventions
 
 The rules the kernel's code follows and an application should. Each exists because breaking it has already cost a debugging
 session in The Lantern Coast or Press. The programmer's guide explains them for application authors; this is the compact
@@ -31,7 +31,7 @@ list for people changing the kernel.
 - A module cannot call another's routines (they are not mapped): `MODCALL` (mapping in, calling, mapping back) or `GOMOD`
   (switching).
 - Modules share state only through slot A addresses agreed in a shared file.
-- A module may not reuse a name `kernel.equ` exports: the routines in `kernel/public.txt` and the equates in `kdefs.a99`. Every other kernel label is private (`lkbuild.py` filters `kernel.equ`), so adding an internal label to the kernel cannot break an application.
+- A module may not reuse a name `kernel.equ` exports: the routines in `kernel/public.txt` and the equates in `kdefs.a99`. Every other kernel label is private (`skbuild.py` filters `kernel.equ`), so adding an internal label to the kernel cannot break an application.
 
 ## The VDP and the keyboard
 
@@ -62,7 +62,7 @@ list for people changing the kernel.
 
 ## Changing the kernel
 
-1. `python3 tools/lkbuild.py examples/diag` (and the others): no assembly errors, the kernel under 8K.
+1. `python3 tools/skbuild.py examples/diag` (and the others): no assembly errors, the kernel under 8K.
 2. `python3 tests/test_kernel.py` (set `TI_CONSOLE_ROM` to your own console ROM to include the real-interrupt group).
 3. `python3 tools/docindex.py --check`, then `python3 tools/docindex.py`.
 4. Update the documents, `CHANGES.md`, and `VERSION` for anything an application can see.

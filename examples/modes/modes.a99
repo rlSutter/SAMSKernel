@@ -83,15 +83,18 @@ SCRTAB DATA S1,S2,S3,S4,S5,S6,S7,S8,S9,S0,SA,SB,SC,SD,SE
 * helpers
 *----------------------------------------------------------------------
 * HDR - the title bar: R1 = the title (length-prefixed).  In a mode without
-* an attribute table FILLA does nothing and the title takes the screen's colours.
+* an attribute table FILLA does nothing and the title takes the screen's
+* colours.
 * (The text routines take an attribute byte; what it means depends on the mode.)
 HDR    .enter
        MOV  R1,@TMP1
-       LI   R4,ABAR            the title bar's attribute: the status bar's colour roles ...
+* the title bar's attribute: the status bar's colour roles ...
+       LI    R4,ABAR
        MOV  @VMOPT,R0
        ANDI R0,>000C
        JEQ  HD1
-       CLR  R4                 ... but in an enhanced colour mode an attribute is flags and a
+* ... but in an enhanced colour mode an attribute is flags and a
+       CLR   R4
 HD1    MOV  R4,@TMP2           palette pair, so palette pair 0
        CLR  R0
        MOV  R4,R1
@@ -114,7 +117,8 @@ RL1    MOV  R9,R1
        MOV  R3,@TMP2
        AI   R3,2
        MOV  R3,R0
-       MOV  R9,R2              the attribute: role in the high nibble, page background
+* the attribute: role in the high nibble, page background
+       MOV   R9,R2
        SLA  R2,12
        AI   R2,RBG*256
        MOV  R2,@TMP3
@@ -131,7 +135,8 @@ RL1    MOV  R9,R1
        .leave
        RT
 
-* LDPAL - the 64-entry demonstration palette (entry 0 of every group of 8 is dark).
+* LDPAL - the 64-entry demonstration palette (entry 0 of every group of 8 is
+* dark).
 LDPAL  .enter
        CLR  R0
        LI   R1,PAL64
@@ -216,7 +221,8 @@ S5A    MOVB R1,@VDPWD
        AI   R1,>0100
        DEC  R2
        JNE  S5A
-       LI   R0,GM1CT           colour table: group g = foreground (g mod 14) + 2, on the page
+* colour table: group g = foreground (g mod 14) + 2, on the page
+       LI    R0,GM1CT
        BL   @VWAD
        CLR  R6
 S5B    CLR  R4
@@ -251,7 +257,8 @@ S6B    MOVB *R4+,@VDPWD
        JNE  S6B
        DEC  R3
        JNE  S6A
-       LI   R0,GM2CT           the colours: (row + column) mod 13 + 2 on the page
+* the colours: (row + column) mod 13 + 2 on the page
+       LI    R0,GM2CT
        BL   @VWAD
        CLR  R6                 the tile
 S6C    MOV  R6,R4
@@ -284,7 +291,8 @@ S7     .enter
        LI   R0,VMMC
        CLR  R1
        BL   @VMODE
-       LI   R0,NAMTAB          names: (row mod 4) * 32 + column, as the TMS9918A's manual does
+* names: (row mod 4) * 32 + column, as the TMS9918A's manual does
+       LI    R0,NAMTAB
        BL   @VWAD
        CLR  R6                 the row
 S7A    CLR  R5                 the column
@@ -301,7 +309,9 @@ S7B    MOV  R4,R3
        INC  R6
        CI   R6,24
        JL   S7A
-       LI   R0,PATTAB          the colour blocks of pattern n: byte k = left (n + k) mod 16, right (n/4 + 3k) mod 16
+* the colour blocks of pattern n: byte k = left (n + k) mod 16, right (n/4 +
+* 3k) mod 16
+       LI    R0,PATTAB
        BL   @VWAD
        CLR  R6                 n
 S7C    CLR  R7                 k
@@ -329,7 +339,8 @@ S7D    MOV  R6,R3
        RT
 
 *----------------------------------------------------------------------
-* enhanced colour 1: one plane, a palette PAIR chosen by the attribute's low nibble
+* enhanced colour 1: one plane, a palette PAIR chosen by the attribute's low
+* nibble
 * (flags: >40 flip x, >20 flip y, >10 colour 0 transparent, >80 priority)
 *----------------------------------------------------------------------
 S8     .enter
@@ -369,7 +380,8 @@ S8A    MOV  R9,R1              rows 2-17: pair n
        RT
 
 *----------------------------------------------------------------------
-* enhanced colour 2: two planes, 4 colours; the attribute picks a set of 4 palette entries
+* enhanced colour 2: two planes, 4 colours; the attribute picks a set of 4
+* palette entries
 *----------------------------------------------------------------------
 S9     .enter
        LI   R0,VMT40
@@ -414,12 +426,14 @@ S0     .enter
        BL   @LDPAL
        LI   R1,>AA00           plane 0
        LI   R2,>CC00           plane 1
-       LI   R3,>F000           plane 2: the colour counts down 7 to 0 across the tile
+* plane 2: the colour counts down 7 to 0 across the tile
+       LI    R3,>F000
        BL   @TILE1
        LI   R1,T0
        BL   @HDR
        CLR  R9
-S0A    MOV  R9,R1              rows 3-10: palette set n (the attribute's bits 3-1)
+* rows 3-10: palette set n (the attribute's bits 3-1)
+S0A    MOV   R9,R1
        AI   R1,3
        SLA  R1,5
        AI   R1,2
@@ -468,7 +482,8 @@ SA     .enter
        LI   R1,PBALL
        LI   R2,8
        BL   @VMBW
-       LI   R0,SATAB           the attribute table: y - 1, x, pattern, colour; >D0 ends it
+* the attribute table: y - 1, x, pattern, colour; >D0 ends it
+       LI    R0,SATAB
        LI   R1,SATA
        LI   R2,SATAE-SATA
        BL   @VMBW
@@ -476,7 +491,8 @@ SA     .enter
        RT
 
 *----------------------------------------------------------------------
-* enhanced colour sprites: 16 x 16, three planes, palette set from the colour nibble
+* enhanced colour sprites: 16 x 16, three planes, palette set from the colour
+* nibble
 *----------------------------------------------------------------------
 SB     .enter
        LI   R0,VMGM1
@@ -556,7 +572,8 @@ SCA    MOV  R9,R0
        LI   R1,SL2+1
        LI   R2,9
        BL   @VMBW
-       LI   R0,>2400           layer 2's attributes: colour 0 transparent, pair 1
+* layer 2's attributes: colour 0 transparent, pair 1
+       LI    R0,>2400
        LI   R1,>1100
        LI   R2,768
        BL   @VFILL
@@ -629,7 +646,8 @@ SDB    MOV  R7,R3
        LI   R1,>2800           40 high
        BL   @VREG
        LI   R0,VR_BMPCT
-       LI   R1,>8300           on, 4 colours from palette entries 12-15, drawn where the
+* on, 4 colours from palette entries 12-15, drawn where the
+       LI    R1,>8300
        BL   @VREG              tiles show the background
        .leave
        RT
@@ -646,7 +664,8 @@ SE     .enter
        LI   R0,>2000
        BL   @VWAD
        CLR  R6                 y
-SEA    CLR  R7                 byte j of the row: 4 pixels, two fat pixels of 4 bits
+* byte j of the row: 4 pixels, two fat pixels of 4 bits
+SEA    CLR   R7
 SEB    MOV  R7,R3
        MOV  R6,R4
        SRL  R4,1
@@ -687,7 +706,9 @@ SEB    MOV  R7,R3
 *----------------------------------------------------------------------
 * data
 *----------------------------------------------------------------------
-T1     STRI 'Text 80, 30 rows, colour per position    1-9 0 A-E pick a screen   FCTN = quits'
+T1     BYTE 79
+       TEXT 'Text 80, 30 rows, colour per position    1-9 0 A-E pick '
+       TEXT 'a screen   FCTN = quits'
 T2     STRI 'Text 80, 24 rows, colours of VR7 (the attributes are ignored)'
 T3     STRI 'Text 40, 24 rows, colours of VR7'
 T4     STRI 'Text 40, 30 rows, colour per position'

@@ -1,8 +1,9 @@
 *======================================================================
-* hello.a99 - the smallest Lantern Kernel application: one module that
+* hello.a99 - the smallest SAMS Kernel application: one module that
 * prints a line, echoes what is typed, and quits on FCTN =.
 *======================================================================
-       COPY "kernel.equ"      the kernel's symbols (routines, variables, equates)
+* the kernel's symbols (routines, variables, equates)
+       COPY  "kernel.equ"
        COPY "macros.a99"      .enter, .leave, .push, .pop, .callmod
 
 ATEXT  EQU  (RTEXT*16+RBG)*256        text on the page background
@@ -11,7 +12,8 @@ ABAR   EQU  (RBARFG*16+RBARBG)*256    the status bar's colours
 CURPOS EQU  APPRAM+0                   where the next typed character goes
 
        AORG >C000
-       DATA INIT,TICK,REDRAW,0         the entry table: INIT, TICK, REDRAW, reserved
+* the entry table: INIT, TICK, REDRAW, reserved
+       DATA  INIT,TICK,REDRAW,0
 
 * INIT - the module has been switched to: draw the screen.
 INIT   .enter
@@ -60,6 +62,6 @@ TK1    CI   R0,>2000                   a printable character (space to ~)?
 TK9    .leave
        RT
 
-TITLE  STRI 'Hello, Lantern Kernel'
+TITLE  STRI 'Hello, SAMS Kernel'
 HELLO  STRI 'Type something; FCTN = quits.'
        EVEN

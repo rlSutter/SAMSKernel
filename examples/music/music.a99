@@ -1,0 +1,163 @@
+*======================================================================
+* music.a99 - the music player: play a song, pause it, stop it, play a beep
+* over it, and work for two seconds without the music stopping.
+*
+*   1  play the tune (it loops)      2  play one note (A, 440 Hz, once)
+*   SPACE pause / resume S stop B beep on voice 1 O quiet
+*   W  work for two seconds: a loop that calls KIDLE, which steps the song
+*   FCTN = quits
+*
+* The songs are data in SAMS pages: tools/skmusic.py compiles songs/*.mml and
+* the build puts them in pages named PD_TUNE and PD_SCALE (app.json); MUPLAY
+* takes the first page.  The kernel's main loop steps the player each frame.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+INIT   .enter
+       BL   @REDRAW
+       .leave
+       RT
+
+* REDRAW - the whole screen: the help lines, the labels of the status.
+REDRAW .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R9,HELP            pairs: position, string; a 0 ends the list
+RD1    MOV  *R9+,R0
+       JEQ  RD2
+       MOV  *R9+,R1
+       LI   R2,ANORM
+       BL   @PUTS
+       JMP  RD1
+RD2    BL   @STATUS
+       .leave
+       RT
+
+* STATUS - what the player is doing, drawn every frame.
+STATUS .enter
+       LI   R1,SNO
+       MOV  @MUSTAT,@MUSTAT
+       JEQ  ST1
+       LI   R1,SYES
+       MOV  @MUPAUS,@MUPAUS
+       JEQ  ST1
+       LI   R1,SPAU
+ST1    LI   R0,10*COLS+14
+       LI   R2,ABOLD
+       BL   @PUTS
+       LI   R0,11*COLS+14
+       MOV  @MUPOS,R1
+       LI   R2,ABOLD
+       BL   @HEX4
+       LI   R0,12*COLS+14
+       MOV  @FRAME,R1
+       LI   R2,ABOLD
+       BL   @HEX4
+       .leave
+       RT
+
+* TICK - the keys.
+TICK   .enter
+       MOV  R0,R9              (the key: STATUS changes R0)
+       BL   @STATUS
+       MOV  R9,R0
+       JEQ  TK9
+       CI   R0,KQUIT*256
+       JNE  TK1
+       BL   @MUSTOP
+       SETO @QUITF
+       JMP  TK9
+TK1    CI   R0,>6100           letters to capitals
+       JL   TK2
+       CI   R0,>7A00
+       JH   TK2
+       AI   R0,->2000
+TK2    CI   R0,>3100           1: the tune
+       JNE  TK3
+       LI   R0,PD_TUNE
+       BL   @MUPLAY
+       JMP  TK9
+TK3    CI   R0,>3200           2: one note
+       JNE  TK4
+       LI   R0,PD_SCALE
+       BL   @MUPLAY
+       JMP  TK9
+TK4    CI   R0,>2000           SPACE: pause or resume
+       JNE  TK5
+       LI   R0,1
+       MOV  @MUPAUS,@MUPAUS
+       JEQ  TK4A
+       CLR  R0
+TK4A   BL   @MUPAUSE
+       JMP  TK9
+TK5    CI   R0,>5300           S: stop
+       JNE  TK6
+       BL   @MUSTOP
+       JMP  TK9
+* B: a beep on voice 1 (divider 254 = 440 Hz), loudest
+TK6    CI    R0,>4200
+       JNE  TK7
+       CLR  R0
+       LI   R1,254
+       CLR  R2
+       BL   @SNDTONE
+       JMP  TK9
+TK7    CI   R0,>4F00           O: quiet
+       JNE  TK8
+       BL   @SNDOFF
+       JMP  TK9
+TK8    CI   R0,>5700           W: work for two seconds
+       JNE  TK9
+       LI   R0,14*COLS+2
+       LI   R1,SWORK
+       LI   R2,AMARK
+       BL   @PUTS
+       MOV  @FRAME,R9
+* 120 frames on: the loop never returns to the main loop, but
+       AI    R9,120
+TK8A   BL   @KIDLE             KIDLE sees each frame go by and steps the song
+       MOV  @FRAME,R0
+       S    R9,R0
+       JLT  TK8A
+       LI   R0,14*COLS+2
+       LI   R1,SDONE
+       LI   R2,AMARK
+       BL   @PUTS
+TK9    .leave
+       RT
+
+STITLE STRI ' SAMS Kernel   music'
+SYES   STRI 'playing'
+SNO    STRI 'stopped'
+SPAU   STRI 'paused '
+SWORK  STRI 'working: the song plays on (KIDLE)   '
+SDONE  STRI 'worked for two seconds, the song went on     '
+SL1    STRI '1  play the tune (it loops)'
+SL2    STRI '2  play one note, A = 440 Hz (once)'
+SL3    STRI 'SPACE  pause and resume'
+SL4    STRI 'S  stop      B  a beep on voice 1      O  quiet'
+SL5    STRI 'W  work for two seconds (a loop that calls KIDLE)'
+SL6    STRI 'FCTN =  quit'
+SL7    STRI 'Playing:'
+SL8    STRI 'Position:'
+SL9    STRI 'Frame:'
+       EVEN
+HELP   DATA 2*COLS+2,SL1,3*COLS+2,SL2,4*COLS+2,SL3,5*COLS+2,SL4,6*COLS+2,SL5
+       DATA 7*COLS+2,SL6,10*COLS+2,SL7,11*COLS+2,SL8,12*COLS+2,SL9,0

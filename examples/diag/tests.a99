@@ -1,5 +1,5 @@
 *======================================================================
-* tests.a99 - the Lantern Kernel self-test, module 2 of 2 (diag.a99 is
+* tests.a99 - the SAMS Kernel self-test, module 2 of 2 (diag.a99 is
 * the other; CTRL T there switches here).
 *
 * Runs each check of the kernel's services once and shows PASS or FAIL
@@ -392,7 +392,7 @@ CDM0   CLR  R0
 CDM9   .leave
        RT
 
-* MKREC - the record for TSERR (0-2) into TSBUF: 'LANTERN KERNEL n'.
+* MKREC - the record for TSERR (0-2) into TSBUF: 'SAMS KERNEL n'.
 * R2 = its length.  Leaf.  Uses R1-R3.
 MKREC  LI   R1,SREC
        LI   R2,TSBUF
@@ -407,7 +407,7 @@ MK1    MOVB *R1+,*R2+
        LI   R2,16
        RT
 
-* CKFILE - write three records to DSK1.LKTEST (DIS/VAR 80), close, open
+* CKFILE - write three records to DSK1.SKTEST (DIS/VAR 80), close, open
 * again, read them back and compare, see the end of file (error 5),
 * close, delete, and see that the file is gone (opening it fails).
 * A failure's detail is step * 100 + the DSR's error code.
@@ -502,14 +502,14 @@ CF9    .leave
 
 SPASS  STRI 'PASS'
 SFAIL  STRI 'FAIL'
-STITLE STRI ' Lantern Kernel   self-test'
+STITLE STRI ' SAMS Kernel   self-test'
 SKEY   STRI 'Press any key to return to the diagnostic.'
 SPASSD STRI 'Passed'
 SOF    STRI 'of'
 S12345 TEXT '12345'
 SBEEF  TEXT 'BEEF'
-SREC   TEXT 'LANTERN KERNEL 0'
-FNAME  STRI 'DSK1.LKTEST'
+SREC   TEXT 'SAMS KERNEL REC0'
+FNAME  STRI 'DSK1.SKTEST'
 N1     STRI 'Hardware: SAMS, F18A, DMA'
 N2     STRI 'Paging: MAPE, MAPF, SETPB'
 N3     STRI 'Page pool: PINIT, PALLOC, PRELS'

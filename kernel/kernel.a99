@@ -38,6 +38,7 @@ KSTART LIMI 0
        MOV  R0,@NEXTPG
        JMP  KCHK
 KMAIN  BL   @VSYNC             once per frame
+       BL   @MUTICK            the song, if one is playing
        BL   @KPOLL
        BL   @KEYGET            R0 = next code or 0
        MOV  @>C002,R1          the module's TICK
@@ -104,5 +105,6 @@ KXFF   DATA >FFFF
        COPY "modules.a99"
        COPY "pool.a99"
        COPY "files.a99"
+       COPY "music.a99"
 KEND
        END

@@ -73,7 +73,8 @@ FOF9    .leave
        RT
 * VR10, VR11, VR19, VR24-VR31 (tile layer 2, interrupt line, palette selects,
 * scrolling, page and plane sizes, sprite limit, bitmap layer), VR48 = 1,
-* VR49 = 0 (24 rows, normal colour), VR50 = 0, VR51 = 32 (no stop sprite), VR15 = 0
+* VR49 = 0 (24 rows, normal colour), VR50 = 0, VR51 = 32 (no stop sprite), VR15
+* = 0
 OFFREG DATA >8A00,>8B00,>9300,>9800,>9900,>9A00,>9B00,>9C00
        DATA >9D00,>9E00,>9F00,>B001,>B100,>B200,>B320,>8F00,0
 

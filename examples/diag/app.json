@@ -1,5 +1,5 @@
 {
-  "name": "LK DIAG",
+  "name": "SK DIAG",
   "min_pages": 128,
   "modules": [
     {"name": "diag",  "source": "diag.a99"},

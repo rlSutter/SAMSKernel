@@ -1,4 +1,4 @@
-# Lantern Kernel: hardware notes
+# SAMS Kernel: hardware notes
 
 What the kernel does with each piece of hardware, and why. The F18A facts were taken from
 js99er's source (`src/app/emulator/classes/f18a.ts`, the reference emulator) and the keyboard
@@ -175,6 +175,11 @@ advances by the *high byte of `>83FC`* (R14 of the GPL workspace), not by one. T
 non-zero, which is why programs written against a real console always worked, but nothing guarantees it
 survives a DSR (which runs in that workspace). The kernel therefore sets it to 1 at start-up and again after
 every DSR call. If you write your own DSR calls, do the same.
+
+## Sound
+
+The TMS9919 (SN76489 family) has three tone voices and a noise voice, written a byte at a time at `>8400`; MUSIC.md has the byte formats, the divider table and the player. The console's interrupt routine also plays *sound lists* from
+VDP RAM or GROM (pointer `>83CC`, duration `>83CE`, flag bit 0 of `>83FD`); `>83C2` = `>50` does not turn that off, so both can drive the chip. The kernel silences it on quit (four attenuation bytes `>9F >BF >DF >FF`).
 
 ## SAMS
 

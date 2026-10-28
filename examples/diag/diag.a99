@@ -1,5 +1,5 @@
 *======================================================================
-* diag.a99 - the Lantern Kernel diagnostic, module 1 of 2 (the other is
+* diag.a99 - the SAMS Kernel diagnostic, module 1 of 2 (the other is
 * tests.a99).  Shows everything the kernel provides on one screen: the
 * 80 x 30 Text 80 screen, every colour role, the whole glyph set, and a
 * key decoder that names each chord with its code and modifiers.  A typing
@@ -41,7 +41,8 @@ TYEND  EQU  28*80
 TYSIZE EQU  7*80
 
        AORG >C000
-       DATA DGINIT,DGTICK,DGDRAW,0,DGPING     entries 0-3 as always; 4: for MODCALL
+* entries 0-3 as always; 4: for MODCALL
+       DATA  DGINIT,DGTICK,DGDRAW,0,DGPING
 
 * DGPING - entry 4, called by the self-test through MODCALL: returns a
 * number in R0 so the test can see the call happened and came back.
@@ -189,7 +190,8 @@ GC1    MOV  R9,R5
        MOV  R9,R1
        LI   R2,AMARK
        BL   @HEX2
-GC2    MOV  R9,R1              position: (7 + glyph / 32) * 80 + 6 + 2 * (glyph mod 32)
+* position: (7 + glyph / 32) * 80 + 6 + 2 * (glyph mod 32)
+GC2    MOV   R9,R1
        SRL  R1,5
        AI   R1,7
        LI   R2,80
@@ -513,7 +515,7 @@ LEGEND DATA >F1,SLDEL,>F2,SLINS,>F3,SLERA,>F4,SLCLR,>F5,SLBEG
        DATA >F6,SLPRO,>F7,SLAID,>F8,SLRDO,>F9,SLBCK,>FD,SLQUI
        DATA >C5,SLUP,>D3,SLLFT,>C4,SLRGT,>D8,SLDWN,0
 
-SBAR   STRI ' Lantern Kernel   diagnostic'
+SBAR   STRI ' SAMS Kernel   diagnostic'
 S512   STRI 'SAMS 512K'
 S1M    STRI 'SAMS 1M+  '
 SF18   STRI 'F18A '
@@ -544,7 +546,9 @@ SLDWN  STRI '(down)'
 
 * the labels and samples: DATA position, attribute; string; EVEN
 LABELS DATA 3*80,AMARK
-       STRI 'Character attributes as colour roles (CTRL 3 cycles the five schemes)'
+       BYTE 69
+       TEXT 'Character attributes as colour roles (CTRL 3 cycles the '
+       TEXT 'five schemes)'
        EVEN
        DATA 4*80+2,ANORM
        STRI 'Normal'
@@ -586,10 +590,14 @@ LABELS DATA 3*80,AMARK
        STRI 'Marker'
        EVEN
        DATA 6*80,AMARK
-       STRI 'Glyphs: 0-31 UI, 32-126 ASCII, 127 Latin-1 mark, 128-222 underlined, 223+ UI'
+       BYTE 76
+       TEXT 'Glyphs: 0-31 UI, 32-126 ASCII, 127 Latin-1 mark, 128-222'
+       TEXT ' underlined, 223+ UI'
        EVEN
        DATA 16*80,AMARK
-       STRI 'Keyboard: every chord shows its code and modifiers; a held key repeats.'
+       BYTE 71
+       TEXT 'Keyboard: every chord shows its code and modifiers; a he'
+       TEXT 'ld key repeats.'
        EVEN
        DATA 17*80+2,AMARK
        STRI 'Last key'
@@ -604,10 +612,14 @@ LABELS DATA 3*80,AMARK
        STRI 'Keys received'
        EVEN
        DATA 20*80,AMARK
-       STRI 'Typing area: FCTN E S D X move, FCTN 3 clears, ENTER starts a new line.'
+       BYTE 71
+       TEXT 'Typing area: FCTN E S D X move, FCTN 3 clears, ENTER sta'
+       TEXT 'rts a new line.'
        EVEN
        DATA 29*80,AMARK
-       STRI 'Lantern Kernel diagnostic.  CTRL T self-test, CTRL 3 colour scheme, FCTN = quits.'
+       BYTE 81
+       TEXT 'SAMS Kernel diagnostic.  CTRL T self-test, CTRL 3 col'
+       TEXT 'our scheme, FCTN = quits.'
        EVEN
        DATA -1
        END

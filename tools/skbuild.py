@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""lkbuild.py - build a Lantern Kernel application into a cartridge image.
+"""skbuild.py - build a SAMS Kernel application into a cartridge image.
 
-    python3 tools/lkbuild.py APPDIR [--out DIR]
+    python3 tools/skbuild.py APPDIR [--out DIR]
 
 APPDIR holds app.json and the application's sources.  The result is
 OUT/APPNAME8.bin (default OUT: build/APPDIR-name): a FinalGROM 99 "8"
@@ -18,8 +18,9 @@ app.json:
     ],
     "boot":      "hello",              the module that starts (default: the first)
     "data": [                          optional: files copied into SAMS pages
-      {"file": "words.bin", "page": "0x40"}      (> 8K: consecutive page pairs)
-    ]
+      {"file": "words.bin", "page": "0x40"},     (> 8K: consecutive page pairs)
+      {"file": "tune.skm", "from": "tune.mml", "loop": true}      music, compiled from a MIDI file or
+    ]                                            a text score by tools/skmusic.py (then MUPLAY PD_TUNE)
   }
 
 What the build does, in order: generates gen/font.a99 and gen/keytab.a99;
@@ -29,9 +30,10 @@ kernel, which exports its symbols to kernel.equ; assembles the loader, the
 data bank and each module (which COPY "kernel.equ"); checks every bank
 fits in 8K; packs the image.
 
-Include path for every assembly, in order: the application's directory,
-the build directory, kernel/, gen/ -- so an application may replace
-databank.a99 (the font and colour schemes) with its own.
+Include path: the kernel and the loader see only the build directory, kernel/ and gen/ (an
+application's file of the same name as one of the kernel's cannot shadow it); the data bank and
+every module see the application's directory first, so an application may replace databank.a99
+(the font and colour schemes) with its own.
 
 The assembler is xdt99's xas99.py: set XAS99, or put xdt99 beside this
 directory (./xdt99 or ../xdt99).
@@ -45,7 +47,7 @@ LOW_FREE = range(0x04, 0x0A)          # pages the CPU never maps: free for the a
 
 
 def die(msg):
-    sys.exit('lkbuild: ' + msg)
+    sys.exit('skbuild: ' + msg)
 
 
 def find_xas():
@@ -64,7 +66,7 @@ def run(*cmd):
     sys.stdout.write(r.stdout)
     sys.stderr.write(r.stderr)
     if r.returncode:
-        sys.exit('lkbuild: failed: ' + ' '.join(cmd))
+        sys.exit('skbuild: failed: ' + ' '.join(cmd))
 
 
 def asm(src, out, incs, lst=None, equ=None):
@@ -111,6 +113,24 @@ def load_app(appdir):
     return app
 
 
+def prepare_data(app, bdir):
+    """Data entries with "from" are music: tools/skmusic.py compiles the MIDI file or text score
+    (relative to the application) into the build directory; "loop": true, "loop_at": seconds and
+    "fps" are passed on.  Every entry gets "_path", the file whose bytes go into SAMS."""
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    for d in app['data']:
+        if 'from' in d:
+            import skmusic
+            src = os.path.join(app['_dir'], d['from'])
+            skm, info = skmusic.compile_file(src, d.get('fps', 60), bool(d.get('loop')), d.get('loop_at'),
+                                             d.get('volume', 0), d.get('transpose', 0))
+            d['_path'] = os.path.join(bdir, d['file'])
+            open(d['_path'], 'wb').write(skm)
+            print('music %s: %d bytes, %.1f s' % (d['file'], info['bytes'], info['seconds']))
+        else:
+            d['_path'] = os.path.join(app['_dir'], d['file'])
+
+
 def assign_pages(app):
     """Give every module and data file its pages; return (items, pgfree)."""
     used = {}                             # page -> owner
@@ -142,7 +162,7 @@ def assign_pages(app):
             m['_page'] = next_free(2)
             take(m['_page'], 2, m['name'])
     for d in app['data']:
-        size = os.path.getsize(os.path.join(app['_dir'], d['file']))
+        size = os.path.getsize(d['_path'])
         chunks = max(1, (size + BANK - 1) // BANK)
         if 'page' in d:
             first = num(d['page'])
@@ -156,7 +176,7 @@ def assign_pages(app):
 
 
 def write_cfg(app, bdir, banks, pgfree):
-    L = ['* appcfg.a99 - made by tools/lkbuild.py from app.json; do not edit',
+    L = ['* appcfg.a99 - made by tools/skbuild.py from app.json; do not edit',
          'PGMIN  EQU  %d' % app['min_pages']]
     for m in app['modules']:
         L.append('%-6s EQU  >%02X' % ('PG_' + ident(m['name']), m['_page']))
@@ -166,10 +186,10 @@ def write_cfg(app, bdir, banks, pgfree):
         L.append('%-6s EQU  >%02X' % ('PD_' + ident(os.path.splitext(d['file'])[0]), d['_page']))
     open(os.path.join(bdir, 'appcfg.a99'), 'w').write('\n'.join(L) + '\n')
     open(os.path.join(bdir, 'appname.a99'), 'w').write(
-        '* made by tools/lkbuild.py\n       BYTE %d\n       TEXT \'%s\'\n' % (len(app['name']), app['name']))
+        '* made by tools/skbuild.py\n       BYTE %d\n       TEXT \'%s\'\n' % (len(app['name']), app['name']))
     kb = app['min_pages'] * 4
     size = ('%dK' % kb)
-    msg = ['* appmsg.a99 - made by tools/lkbuild.py: the refusal screens and the bank table',
+    msg = ['* appmsg.a99 - made by tools/skbuild.py: the refusal screens and the bank table',
            'MSGSAM BYTE 8', '       STRI \'%s\'' % app['name'],
            '       BYTE 11', '       STRI \'NEEDS A SAMS MEMORY CARD WITH %s\'' % size,
            '       BYTE 12', "       STRI 'OF MEMORY OR MORE TO RUN.'",
@@ -232,6 +252,7 @@ def main():
     os.makedirs(os.path.join(ROOT, 'gen'), exist_ok=True)
     run(sys.executable, os.path.join(ROOT, 'tools', 'font.py'))
     run(sys.executable, os.path.join(ROOT, 'tools', 'keytab.py'))
+    prepare_data(app, bdir)
     pgfree = assign_pages(app)
     # banks: 0 loader, 1 kernel, 2 data bank, then modules, then data files
     banks = [(2, PGDATA)]
@@ -247,12 +268,13 @@ def main():
             nb += 1
     write_cfg(app, bdir, banks, pgfree)
     incs = [appdir, bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen')]
+    kincs = [bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen')]    # the kernel never sees the application's files
     ksrc = os.path.join(ROOT, 'kernel')
     equ = os.path.join(bdir, 'kernel.equ')
-    kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), incs,
+    kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
                  os.path.join(bdir, 'kernel.lst'), equ)
     export_public(ksrc, bdir, equ)
-    loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), incs,
+    loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
                  os.path.join(bdir, 'loader.lst'))
     ds = os.path.join(appdir, 'databank.a99')
     ds = ds if os.path.exists(ds) else os.path.join(ksrc, 'databank.a99')
@@ -266,7 +288,7 @@ def main():
         images.append(b)
         sizes.append((m['name'], len(b)))
     for d in app['data']:
-        raw = open(os.path.join(appdir, d['file']), 'rb').read()
+        raw = open(d['_path'], 'rb').read()
         for c in range(d['_chunks']):
             images.append(raw[c * BANK:(c + 1) * BANK])
         sizes.append((d['file'], len(raw)))

@@ -182,7 +182,8 @@ VM9    MOV  R2,R0
        ORI  R0,>8100
        BL   @VDPWR
        SWPB R2
-       MOVB R2,@VR1CPY         the console's copy, used when it blanks the screen
+* the console's copy, used when it blanks the screen
+       MOVB  R2,@VR1CPY
        .leave
        RT
 

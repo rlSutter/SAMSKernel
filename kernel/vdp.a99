@@ -56,8 +56,10 @@ VMBW0  CI   R2,16               16 bytes a pass while there are 16 left
        MOVB *R1+,@VDPWD
        MOVB *R1+,@VDPWD
        MOVB *R1+,@VDPWD
-       AI   R2,-16             (no interrupts in here: the console ISR sets the VDP
-       JMP  VMBW0              address to read the music, which would break the copy)
+* (no interrupts in here: the console ISR sets the VDP
+       AI    R2,-16
+* address to read the music, which would break the copy)
+       JMP   VMBW0
 VMBW1  MOV  R2,R2              the last few, one at a time
        JEQ  VMBW2
 VMBW3  MOVB *R1+,@VDPWD

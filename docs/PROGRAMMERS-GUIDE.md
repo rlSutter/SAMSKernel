@@ -1,7 +1,6 @@
-# Lantern Kernel: the programmer's guide
+# SAMS Kernel: the programmer's guide
 
-How to write an application for the TI-99/4A in TMS9900 assembly on the Lantern
-Kernel. The guide is a tutorial first (parts 1-3 get a program on the screen), then
+How to write an application for the TI-99/4A in TMS9900 assembly on the SAMS Kernel. The guide is a tutorial first (parts 1-3 get a program on the screen), then
 a tour of each service (parts 4-11), then the practical matter of building and
 testing (parts 12-13), and ends with a checklist of the mistakes that have already
 cost someone a day (part 14). Look up a single routine in
@@ -29,6 +28,7 @@ card, its size or the F18A is missing.
 | Memory | 7K of RAM that is always there (slot A), 8K of your code in the window at `>C000`, and up to 1M of SAMS pages you map into `>E000-FFFF`; a page pool to hand them out |
 | Structure | a main loop that calls your module once a frame; up to dozens of 8K modules; `GOMOD` to switch, `MODCALL` to call into another module and come back |
 | Files | open, read, write, close, delete through any DSR (disk controller, TIPI, ...) |
+| Music | play a song from SAMS pages (a register-log player, stepped every frame), tone effects; songs compile from MIDI or a text score (MUSIC.md) |
 | Safety | the loader's checks, a clean power-up state, a clean exit to the TI title screen |
 
 **What you need on the PC:** Python 3, and [xdt99](https://github.com/endlos99/xdt99)
@@ -41,7 +41,7 @@ headless simulator in `tools/` for testing.
 Build and run the smallest example:
 
 ```
-python3 tools/lkbuild.py examples/hello
+python3 tools/skbuild.py examples/hello
 python3 tools/sim9900.py build/hello/hello8.bin --keys "<ALPHA>hello" --frames 200
 ```
 
@@ -55,7 +55,7 @@ program:
 
 ```
 python3 tools/newapp.py myapp --name "MY APP"
-python3 tools/lkbuild.py myapp
+python3 tools/skbuild.py myapp
 ```
 
 ### Anatomy of `examples/hello/hello.a99`
@@ -626,11 +626,10 @@ should not be able to queue them).
 **Frame timing.** `VSYNC` waits for the next frame and is the only place interrupts are allowed. To
 wait N frames: loop `BL @VSYNC` N times (or `BL @KWAIT` for a key).
 
-**Sound.** The console's interrupt routine plays *sound lists* (the console's own sound
-format) from VDP RAM or GROM, one block per frame: point `SNDPTC` (`>83CC`) at the list, set
-bit 0 of `SNDFLG` (`>83FD`) for a list in VRAM, and `SNDDUR` (`>83CE`) to 1 to start it. To silence
-everything write the four attenuation bytes `>9F >BF >DF >FF` to `SOUND` (as `KEXIT` does). The kernel
-has no further sound API in 1.0, and the sound-list path has not been exercised by the tests.
+**Sound and music.** `MUPLAY` starts a song held in SAMS pages and the main loop steps it every frame (and `KIDLE`, `KPFR` and `KWAIT` do too, so
+music goes on through long operations that poll the keyboard). `MUSTOP`, `MUPAUSE`, `SNDTONE` and `SNDOFF` stop, pause, make a tone directly, and silence the chip. Songs are compiled
+on the PC from a MIDI file or a text score (`tools/skmusic.py`), and the build puts them in pages (`"from"` in `app.json`'s `data`); MUSIC.md has the whole story, the score language and the song format.
+The console's own sound lists (the interrupt routine plays them from VRAM or GROM) still work and share the chip with the player; the two have not been mixed in a test.
 
 **Screen blank.** After about nine idle minutes the console blanks the display (it writes VR1 from
 `VR1CPY` with the display bit cleared); any key restores it (`KPUT` writes `VR1CPY` back with the display
@@ -649,7 +648,7 @@ there is no exit hook.
 
 ## 12. Building
 
-`python3 tools/lkbuild.py APPDIR` reads `APPDIR/app.json`:
+`python3 tools/skbuild.py APPDIR` reads `APPDIR/app.json`:
 
 ```json
 {
@@ -735,6 +734,8 @@ believe it (part 14). **Real console ROM:** if you have your own copy of the TI 
 interrupt routine instead of a model of it, which catches mistakes in how a program treats the
 console's variables. The ROM is TI's: it is never part of this repository; keep it outside.
 
+**Developing with a real TI.** DEVELOPING-ON-A-TI.md: the first-run ladder, what each loader refusal means, debugging with no debugger (`dbg.a99`), editing sources on the TI, and what it would take to build there as well.
+
 **The self-test on hardware.** `examples/diag` is meant to be the first thing run on a new
 machine: press CTRL T for the kernel's self-test (hardware, paging, pool, module call, keyboard,
 screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every key shows its code.
@@ -761,6 +762,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 14. **The console's frame counter needs `>83FC`'s high byte non-zero** (the kernel sets it at start and after
     every DSR call). Do not clear it.
 15. **Slot A is 7K.** If you need more, it is a SAMS page.
+    **Music steps with the frames you let through**: a long loop that never calls `KIDLE` (or returns to the main loop) stalls the song.
 16. **It works in the simulator** is the beginning of a test, not the end: js99er, then the real machine.
 
 ## 15. What the kernel does not do (version 1.1)
@@ -768,7 +770,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 - Video: every F18A mode is reachable (`VMODE`, `VREG`), but the kernel only *draws* for you in the glyph modes
   (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite
   library, no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.
-- No sound API beyond the console's sound lists.
+- Sound: a music player and tone effects (MUSIC.md), but no envelopes, no effect mixer and no priorities; the console's sound lists are available, unmixed with the player.
 - No heap, no text-editing engine, no menus: those are applications (Press has an editor built on the
   ancestor of this kernel; see FROM-PRESS.md).
 - One file open at a time; no relative-record files beyond what the PAB offers, no file-size query.

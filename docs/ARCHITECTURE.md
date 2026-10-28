@@ -1,4 +1,4 @@
-# Lantern Kernel: how it works
+# SAMS Kernel: how it works
 
 For people who want to know what happens between power-on and `TICK`, why the kernel is shaped as it is, and what to
 change when it must change. Application authors need only the [programmer's guide](PROGRAMMERS-GUIDE.md).
@@ -8,14 +8,14 @@ change when it must change. Application authors need only the [programmer's guid
 | File | Runs at | Is |
 | --- | --- | --- |
 | `loader.a99` (+ `vdp`, `f18a`, `f18det`, `pager`, `amsinit`) | cartridge bank 0, `>6000` | machine checks, refusal screens, copies the banks into SAMS |
-| `kernel.a99` (+ `vdp`, `f18a`, `pager`, `keys`, `text`, `video`, `modules`, `pool`, `files`) | SAMS pages `>0A-0B`, `>A000` | start-up, main loop, exit, and every service |
+| `kernel.a99` (+ `vdp`, `f18a`, `pager`, `keys`, `text`, `video`, `modules`, `pool`, `files`, `music`) | SAMS pages `>0A-0B`, `>A000` | start-up, main loop, exit, and every service |
 | `databank.a99` | pages `>10-11`, read through slot B | the font and five colour schemes |
 | the application's modules | slot C, `>C000` | the program |
 | `kdefs.a99` | (included everywhere) | hardware addresses, memory map, key codes, roles, geometry |
 | `macros.a99` | (included everywhere) | `.enter .leave .push .pop .intsvc .callmod` |
 | `build/.../appcfg.a99`, `appname.a99`, `appmsg.a99` | (generated) | the application's numbers, name, refusal screens and bank table |
 
-The kernel is about 4.4K of its 8K bank: there is room for roughly 3.7K more services before the bank is full.
+The kernel is about 5.0K of its 8K bank: there is room for roughly 3.2K more services before the bank is full.
 
 ## 2. The cartridge image
 
@@ -26,7 +26,7 @@ The kernel is about 4.4K of its 8K bank: there is room for roughly 3.7K more ser
 | 0 | the loader (and the cartridge header the console's menu reads) | stays at `>6000` |
 | 1 | the kernel | `>A000` (pages `>0A-0B`) |
 | 2 | the data bank | pages `>10-11` |
-| 3... | each module in `app.json` order, then each 8K piece of each data file | the pages `lkbuild` assigned |
+| 3... | each module in `app.json` order, then each 8K piece of each data file | the pages `skbuild` assigned |
 
 The image is padded to a power-of-two number of banks (at least four).
 
@@ -90,7 +90,8 @@ the halves differ).
 | `>20C0-20E7` | `POOLBM` ... `FREECT` | the page pool's bitmap (32 bytes), range, free count |
 | `>20E8-20F5` | `VMNUM`, `VMOPT`, `TXCOLS`, `TXROWS`, `TXCELLS`, `TXATTR`, `NAMBAS` | the video mode and the text routines' geometry (set by `VMODE`) |
 | `>2100-21BF` | `FHOT` ... `FPAB` | the file service's state: scratchpad save (96), device name, saved words, the PAB (64) |
-| `>21C0-21FF` | | free for the kernel's growth |
+| `>21C0-21DD` | `MUSTAT` ... `MUSHD` | the music player's state: playing, paused, the song's page, the offset, the hold count, the loop target, the latched register and the shadow of the chip's registers |
+| `>21E0-21FF` | | free for the kernel's growth |
 | `>2200-22FF` | `MODRAM` | scratch for the running module |
 | `>2300-3EFF` | `APPRAM`..`APPTOP` | **the application's**: 7,168 bytes |
 | `>3F00-3FFF` | stack | R10 starts at `>4000`; 128 words |
@@ -127,6 +128,14 @@ names `>0000`, GPU `>0960`, Graphics I colours `>09C0`, attributes `>0A00`, spri
 calls `VMTAB` (fills the tables for the mode, loads the glyphs from the data bank through slot B, clears the sprite table, installs the GPU program, loads the colour scheme with `LDSCHM`), then turns the display on
 and sets `VR1CPY`. `LDSCHM` additionally copies the scheme's entry 2 to entry 1 when tile enhanced colour is on. The boot calls it as `T80INI` (Text 80, 30 rows, attribute per position).
 
+## 6a. The music player in detail
+
+`MUTICK` runs from the main loop (right after `VSYNC`) and from `KIDLE`, `KPFR` and `KWAIT`. If no song plays, or one is paused, it returns at once; if the song is holding it counts a frame off and returns (8 instructions).
+Otherwise it saves `CURPB`, maps the song's page for the next command through slot B (`MAPE` for the page, `MAPF` for the next, so a read may run on into it), and reads commands until a hold: a byte `>80-FF` or a data byte
+`>40-7F` goes to the chip (and into a shadow of the eight registers so that `MUPAUSE` can put the chip back), `>01-3F` sets the hold and ends the frame, `>00` jumps to the loop target (and maps again) or stops the song. The offset is a
+16-bit number from the start of the song; the page is `MUPAGE + offset / 4096`. At most 256 commands a frame. Then `SETPB` restores slot B. `MUPLAY` checks the 'SK' magic, sets the state and silences the chip. A song is therefore any
+bytes in consecutive SAMS pages; the compiler (`tools/skmusic.py`) is only one way to make them.
+
 ## 7. The keyboard in detail
 
 `KSCAN` writes each column number to the 9901's outputs 18-20 and reads the eight rows from inputs 3-10 into `KEYMAP` (0 = down),
@@ -156,7 +165,7 @@ SAMS mapping off (`SBZ 1`, `SBZ 0`); select cartridge bank 0 (so the console fin
 
 ## 10. The build
 
-`lkbuild.py`: generate `gen/font.a99` and `gen/keytab.a99`; assign pages (modules, then data files) and write `appcfg.a99` (`PGMIN`,
+`skbuild.py`: generate `gen/font.a99` and `gen/keytab.a99`; assign pages (modules, then data files) and write `appcfg.a99` (`PGMIN`,
 `PG_<MODULE>`, `PGBOOT`, `PGFREE`, `PD_<FILE>`), `appname.a99`, `appmsg.a99` (refusal messages built from the name and `min_pages`, and `BANKTB`);
 assemble the kernel with `-E build/kernel.equ` (every symbol, so modules know the kernel's addresses *and* the application's page equates);
 assemble the loader, the data bank and the modules; check each fits in 8K; concatenate; pad to a power of two.

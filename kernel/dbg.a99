@@ -1,0 +1,58 @@
+*======================================================================
+* dbg.a99 - a debugging aid for a TI that has no debugger: COPY it into
+* a module (after kernel.equ and macros.a99), then BL @DBG wherever you
+* want to look.  DBG shows R0-R3 in hex on the screen's bottom row and
+* waits for a key; every register is kept, so you can put it anywhere.
+* It needs no variables: it keeps everything on the stack.  Text modes
+* only (it writes the screen with HEX4).
+*
+*     LI   R0,>1234
+*     ...
+*     BL   @DBG                R0-R3 are shown; a key goes on
+*======================================================================
+
+* DBG - show R0-R3, wait for a key.  Keeps every register.
+DBG    .enter
+       .push R0
+       .push R1
+       .push R2
+       .push R3
+       .push R4
+       .push R5
+       .push R6
+       .push R7
+       .push R8
+       .push R9
+       MOV  @TXROWS,R1         the bottom row's second cell
+       DEC  R1
+       MOV  @TXCOLS,R2
+       MPY  R1,R2              R3 = (rows - 1) * columns
+       AI   R3,2
+       MOV  R3,R8              R8 = where the next number goes
+       CLR  R9                 R9 = which register, 0-3
+DBG1   MOV  R10,R4             R0 is 18 bytes up the stack, R1 at 16 ...
+       AI   R4,18
+       MOV  R9,R2
+       SLA  R2,1
+       S    R2,R4
+       MOV  *R4,R1
+       MOV  R8,R0
+       LI   R2,(RBARFG*16+RBARBG)*256
+       BL   @HEX4
+       AI   R8,5
+       INC  R9
+       CI   R9,4
+       JL   DBG1
+       BL   @KWAIT
+       .pop R9
+       .pop R8
+       .pop R7
+       .pop R6
+       .pop R5
+       .pop R4
+       .pop R3
+       .pop R2
+       .pop R1
+       .pop R0
+       .leave
+       RT
