@@ -1,0 +1,179 @@
+*======================================================================
+* joy.a99 - the two joysticks: what is down on each, how many times fire
+* has been pressed, and a switch that makes a joystick type arrow keys.
+*
+*   0 1 2 3   the joysticks type keys: none, joystick 1, joystick 2, both
+*   any other key shows its code (so you can see what a joystick typed)
+*   FCTN =    quit
+*
+* JOYGET gives a joystick's state (what is down) and what went down since
+* the last look, so no press is missed however brief; JOYKEY makes the
+* kernel type UP, DOWN, LEFT, RIGHT and ENTER codes for a joystick into the
+* keyboard buffer, with the keyboard's repeat, so a menu written for keys
+* works with a joystick too.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+ADIM   EQU  (RDIM*16+RBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+
+CNT1   EQU  APPRAM+0           fire presses seen on joystick 1
+CNT2   EQU  APPRAM+2           ... on joystick 2
+LASTK  EQU  APPRAM+4           the last key code that was not 0-3
+NKEYS  EQU  APPRAM+6           keys received
+SEEN1  EQU  APPRAM+8           every direction joystick 1 has shown
+SEEN2  EQU  APPRAM+10
+ST1    EQU  APPRAM+12          the states now
+ST2    EQU  APPRAM+14
+TMP    EQU  APPRAM+16
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+INIT   .enter
+       BL   @REDRAW
+       .leave
+       RT
+
+REDRAW .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SJ1
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,3*COLS+2
+       LI   R1,SJ2
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,6*COLS+2
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       BL   @SHOW
+       .leave
+       RT
+
+* SHOW - the states, the counts and the last key.
+SHOW   .enter
+       LI   R8,2*COLS          joystick 1's row
+       MOV  @ST1,R1
+       BL   @SHOW1
+       LI   R8,3*COLS
+       MOV  @ST2,R1
+       BL   @SHOW1
+       LI   R0,5*COLS+2
+       LI   R1,SCNT
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,5*COLS+16
+       MOV  @CNT1,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,5*COLS+24
+       MOV  @CNT2,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,8*COLS+2
+       LI   R1,SKEYS
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,8*COLS+16
+       MOV  @NKEYS,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,8*COLS+24
+       MOV  @LASTK,R1
+       LI   R2,ABOLD
+       BL   @HEX2
+       .leave
+       RT
+
+* SHOW1 - one joystick's five labels, bold for what is down: R1 = its state,
+* R8 = its row's first cell.
+SHOW1  .enter
+       MOV  R1,@TMP
+       CLR  R9
+SH1    MOV  R9,R3
+       SLA  R3,1
+       MOV  @JMASK(R3),R4
+       MOV  @TMP,R1
+       COC  R4,R1
+       JEQ  SH2
+       LI   R2,ADIM
+       JMP  SH3
+SH2    LI   R2,ABOLD
+SH3    MOV  @JNAME(R3),R1
+       MOV  @JCOL(R3),R0
+       A    R8,R0
+       BL   @PUTS
+       INC  R9
+       CI   R9,5
+       JL   SH1
+       .leave
+       RT
+
+* TICK - the keys, then the joysticks.
+TICK   .enter
+       MOV  R0,R9
+       JEQ  TK2
+       CI   R9,KQUIT*256
+       JNE  TK0
+       SETO @QUITF
+       JMP  TK9
+TK0    CI   R9,>3000           0-3: who types keys
+       JL   TK1
+       CI   R9,>3300
+       JH   TK1
+       AI   R9,->3000
+       SRL  R9,8
+       MOV  R9,@JOYKEY
+       JMP  TK2
+TK1    SRL  R9,8
+       MOV  R9,@LASTK
+       INC  @NKEYS
+TK2    LI   R0,1
+       BL   @JOYGET
+       MOV  R1,@ST1
+       SOC  R1,@SEEN1
+       ANDI R2,JFIRE
+       JEQ  TK3
+       INC  @CNT1
+TK3    LI   R0,2
+       BL   @JOYGET
+       MOV  R1,@ST2
+       SOC  R1,@SEEN2
+       ANDI R2,JFIRE
+       JEQ  TK4
+       INC  @CNT2
+TK4    BL   @SHOW
+TK9    .leave
+       RT
+
+STITLE STRI ' SAMS Kernel   joysticks'
+SJ1    STRI 'Joystick 1'
+SJ2    STRI 'Joystick 2'
+SCNT   STRI 'Fire presses'
+SKEYS  STRI 'Keys typed'
+SHELP  STRI '0-3: the joysticks type keys (0 none, 3 both)   FCTN = quits'
+SF     STRI 'FIRE'
+SL     STRI 'LEFT'
+SR     STRI 'RIGHT'
+SD     STRI 'DOWN'
+SU     STRI 'UP'
+       EVEN
+JMASK  DATA JFIRE,JLEFT,JRIGHT,JDOWN,JUP
+JNAME  DATA SF,SL,SR,SD,SU
+JCOL   DATA 14,20,26,33,39

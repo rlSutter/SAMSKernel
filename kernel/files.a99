@@ -7,13 +7,18 @@
 * routine returns R0 = 0 when it worked, else the DSR's error code 1-7
 * (the three top bits of the PAB's flag byte: 5 = past the end of the
 * file, 7 = file not found) or >FF when no card answers to the device
-* name.  One file is open at a time (the PAB and its record buffer in VRAM
-* are single); open the next after closing the first.
+* name.  Up to FMAXH (3) files can be open at once, each through a handle
+* 0-2: FSEL says which handle the other routines act on (it is 0 until a
+* program changes it, so a program that never calls FSEL has one file, as
+* before).  Each handle has its own PAB in VRAM (the controller tells open
+* files apart by their PABs); the record buffer is shared, since a call
+* finishes with it.  The disk controller keeps 3 file buffers, so a fourth
+* open fails with the DSR's error.  Close a file before FDELETE on its handle.
 *
 * The names are length-prefixed strings ("DSK1.NOTES", a byte 10 first,
 * STRI makes them).  The records are copied between the VRAM buffer and
 * the caller's own buffer (up to 255 bytes), so no caller ever touches the
-* PAB, VRAM >3600-37D7, or the controller's area from >37D8.
+* PABs, VRAM >3600-37BF, or the controller's area from >37D8.
 *
 * How the DSR is called (the rules the Lantern Coast learned the hard way):
 *   - in the GPL workspace (>83E0), R12 the card's CRU base, R13 = >9800,
@@ -30,6 +35,23 @@
 * DSR calls take milliseconds to seconds: poll the keyboard between
 * records (KIDLE) if the user must not be locked out.
 *======================================================================
+
+* FSEL - choose the file handle (0-2) the other file routines act on: R0 = the
+* handle.  R0 = 0, or >FF if there is no such handle (and the choice stays).
+* Each handle's file stays open while you use the others.  Leaf.  Uses R0.
+FSEL   CI   R0,FMAXH
+       JHE  FSL9
+       MOV  R0,@FSELH
+       CLR  R0
+       RT
+FSL9   LI   R0,>00FF
+       RT
+
+* FPADR - R0 = the VRAM address of the selected handle's PAB.  Leaf.
+FPADR  MOV  @FSELH,R0
+       SLA  R0,6               64 bytes a PAB
+       AI   R0,FPABV
+       RT
 
 * FOPEN - open the file named by R2 (a length-prefixed string).
 *   R0 = flags in the high byte (add FIN/FOUT/FUPDT/FAPP, FVAR/FFIXED,
@@ -68,8 +90,10 @@ FPABOP .enter
 FO1    MOVB *R1+,*R2+          into the PAB
        DEC  R3
        JNE  FO1
-       LI   R0,FPABV           the PAB in VRAM
+       MOV  R2,R4              (its end)
+       BL   @FPADR             the selected handle's PAB in VRAM
        LI   R1,FPAB
+       MOV  R4,R2
        AI   R2,-FPAB           its length
        BL   @VMBW              copied there
        BL   @FCALL             call the DSR
@@ -84,14 +108,15 @@ FOBAD  LI   R0,>00FF           a name that cannot be used: no such device
 * length (also in FLEN).  Uses R0-R9.
 FREAD  .enter
        MOV  R1,@FNMP           (the destination, kept in FNMP meanwhile)
-       LI   R0,FPABV
+       BL   @FPADR
        LI   R1,>0200           opcode 2: READ
        BL   @VSBW
        BL   @FCALL
        CLR  R2
        MOV  R0,R0
        JNE  FR9
-       LI   R0,FPABV+5         the PAB's character count
+       BL   @FPADR
+       AI   R0,5               the PAB's character count
        BL   @VRAD
        CLR  R2
        MOVB @VDPRD,R2
@@ -115,11 +140,12 @@ FWRITE .enter
        MOV  R2,R2              nothing to copy?
        JEQ  FW1
        BL   @VMBW              the bytes there (R1 is the source)
-FW1    LI   R0,FPABV+5         the PAB's character count
+FW1    BL   @FPADR
+       AI   R0,5               the PAB's character count
        MOV  @FLEN,R1
        SWPB R1                 (a byte)
        BL   @VSBW
-       LI   R0,FPABV
+       BL   @FPADR
        LI   R1,>0300           opcode 3: WRITE
        BL   @VSBW
        BL   @FCALL
@@ -129,7 +155,7 @@ FW1    LI   R0,FPABV+5         the PAB's character count
 
 * FCLOSE - close the file.  R0 = 0 or the error.  Uses R0-R9.
 FCLOSE .enter
-       LI   R0,FPABV
+       BL   @FPADR
        LI   R1,>0100           opcode 1: CLOSE
        BL   @VSBW
        BL   @FCALL
@@ -148,10 +174,12 @@ FDELETE LI  R3,>0700           opcode 7: DELETE
 * the scratchpad it uses kept and put back, >8356 at the name length.
 * R0 = 0, the error, or >FF.  Uses R0-R9.
 FCALL  .enter
-       LI   R0,FPABV+1         the previous call's error bits (the top three
-       BL   @VSBR              of the flag byte) cleared first: a DSR that
-       ANDI R1,>1F00           succeeds may leave them as they were, and a
-       LI   R0,FPABV+1         later call would report that old error
+       BL   @FPADR
+       INC  R0                 the previous call's error bits (the top three
+       MOV  R0,@FPFLG          of the flag byte) cleared first: a DSR that
+       BL   @VSBR              succeeds may leave them as they were, and a
+       ANDI R1,>1F00           later call would report that old error
+       MOV  @FPFLG,R0
        BL   @VSBW
        LI   R1,>8320           >8320->837F -> FHOT
        LI   R2,FHOT
@@ -159,7 +187,8 @@ FCALL  .enter
 FC1    MOV  *R1+,*R2+          kept
        DEC  R3
        JNE  FC1
-       LI   R0,FPABV+9         the PAB's name length byte
+       BL   @FPADR
+       AI   R0,9               the PAB's name length byte
        MOV  R0,@>8356          where DSRLNK finds the name
        BL   @DSRLNK            find the device and call it
        MOV  R0,R5              (the result)
@@ -328,7 +357,8 @@ DLGO1  MOV  @>83D2,R2          the next entry
        JMP  DLGO2
 DLERR  CLR  R5                 R5: not run
 DLRD   SBZ  0                  the card's ROM off
-       LI   R0,FPABV+1         the PAB's flag byte
+       BL   @FPADR
+       INC  R0                 the PAB's flag byte
        BL   @VRAD
        MOVB @VDPRD,R0          the PAB's flag byte
        SRL  R0,13              its error bits (top three)

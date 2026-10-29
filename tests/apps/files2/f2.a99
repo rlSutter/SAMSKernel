@@ -1,0 +1,92 @@
+*======================================================================
+* f2.a99 - three files open at once: SRC is copied to DST record by
+* record (handles 0 and 1) while SRC2 is read on handle 2 alongside; then
+* all three are closed and a handle that does not exist is refused.  The
+* results are words from APPRAM, read by tests/test_kernel.py (group files2).
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* results (words, by byte offset): 0 open SRC, 2 open DST,
+RES    EQU   APPRAM
+* 4 open SRC2, 6 records copied, 8 records read from
+* SRC2, 10 the last read error on SRC (5 = the end),
+*                              12 scratch, 14 write errors, 16 FSEL 3 (>FF),
+* 18 done, 20 22 24 each handle's close result (7 after
+*                              the end of a file: TI's controller has closed it)
+BUF    EQU  APPRAM+100
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+TICK   RT
+
+INIT   .enter
+       CLR  R0
+       BL   @FSEL
+       LI   R2,SRC
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@RES
+       LI   R0,1
+       BL   @FSEL
+       LI   R2,DST
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@RES+2
+       LI   R0,2
+       BL   @FSEL
+       LI   R2,SRC2
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@RES+4
+LOOP   CLR  R0
+       BL   @FSEL
+       LI   R1,BUF
+       BL   @FREAD
+       MOV  R0,@RES+10
+       JNE  DONE
+       MOV  R2,@RES+12         the record's length
+       LI   R0,2               the third file's own position
+       BL   @FSEL
+       LI   R1,BUF+200
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  NOT2
+       INC  @RES+8
+NOT2   LI   R0,1
+       BL   @FSEL
+       LI   R1,BUF
+       MOV  @RES+12,R2
+       BL   @FWRITE
+       MOV  R0,R0
+       JEQ  W1
+       INC  @RES+14
+W1     INC  @RES+6
+       JMP  LOOP
+DONE   CLR  R0
+       BL   @FSEL
+       BL   @FCLOSE
+       MOV  R0,@RES+20
+       LI   R0,1
+       BL   @FSEL
+       BL   @FCLOSE
+       MOV  R0,@RES+22
+       LI   R0,2
+       BL   @FSEL
+       BL   @FCLOSE
+       MOV  R0,@RES+24
+       LI   R0,3
+       BL   @FSEL
+       MOV  R0,@RES+16
+       SETO @RES+18
+       .leave
+       RT
+
+SRC    STRI 'DSK1.SRC'
+DST    STRI 'DSK1.DST'
+SRC2   STRI 'DSK1.SRC2'
+       EVEN

@@ -94,7 +94,9 @@ slot B are allowed (`MAPE` and `MAPF` each set one window); `PAGEB` sets a conse
 | `>2100-21BF` | `FHOT` ... `FPAB` | the file service's state: scratchpad save (96), device name, saved words, the PAB (64) |
 | `>21C0-21DD` | `MUSTAT` ... `MUSHD` | the music player's state: playing, paused, the song's page, the offset, the hold count, the loop target, the latched register and the shadow of the chip's registers |
 | `>21E0-21EB` | `CURA2 CURA3 CURBE CURBF CURCC CURCD` | the page each window of slots A, B and C holds (the pager keeps them) |
-| `>21EC-21FF` | | free for the kernel's growth |
+| `>21EC-21F9` | `JOY1 JOY2 JOYN1 JOYN2 JOYKEY JKLAST JKHOLD` | the joysticks: states, presses not yet looked at, the key-typing switch and its repeat |
+| `>21FA-21FD` | `FSELH`, `FPFLG` | the selected file handle; a scratch address |
+| `>21FE-21FF` | | free for the kernel's growth |
 | `>2200-22FF` | `MODRAM` | scratch for the running module |
 | `>2300-3EFF` | `APPRAM`..`APPTOP` | **the application's**: 7,168 bytes |
 | `>3F00-3FFF` | stack | R10 starts at `>4000`; 128 words |
@@ -184,7 +186,7 @@ assemble the loader, the data bank and the modules; check each fits in 8K; conca
 - **Interrupts masked except in `VSYNC`.** A TMS9900 interrupt between the two bytes of a VDP address write corrupts the address. Only the frame wait
   allows one, and the main loop is built around that.
 - **`GOMOD` deferred, `MODCALL` immediate.** See part 4.
-- **One file at a time.** The PAB and buffer live at fixed VRAM addresses so that the controller's own buffers (`>37D8` up) are never disturbed.
+- **Three files at a time.** The controller finds an open file by its PAB's VRAM address, so each handle has its own PAB (`>3700 + 64 n`); the record buffer (`>3600`) is shared, since every call finishes with it; all of it lies below the controller's own buffers (`>37D8` up), which are never disturbed. `FSEL` picks the handle (`FSELH`, `>21FA`); nothing else about the service changed, so code that never selects a handle sees one file.
 - **The role-based colour scheme** puts the colours in 16 palette words, so a scheme change is 32 bytes of I/O.
 
 ## 12. Open questions

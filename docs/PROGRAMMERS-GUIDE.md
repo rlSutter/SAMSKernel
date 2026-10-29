@@ -369,6 +369,23 @@ wait for a key in a moment that really is modal ("Press any key"), `KWAIT` runs 
 until one arrives; `KFLUSH` throws away what is buffered. Compare with high-byte
 constants: `CI R0,KQUIT*256`, `CI R0,>2000`, `CI R0,>9400` (CTRL T).
 
+**Joysticks.** Both joysticks are read every frame, with the keyboard (they are keyboard columns 6 and 7 on the TI). `JOYGET` takes R0 = 1 or 2 and returns R1 = what is down now and
+R2 = what went down since the last `JOYGET`, as bits `JFIRE JLEFT JRIGHT JDOWN JUP` (1 = active), so a program sees every press however brief:
+
+```
+       LI   R0,1              joystick 1
+       BL   @JOYGET           R1 = down now, R2 = new presses
+       COC  @JBIT,R2          a fire press since I looked?   (JBIT DATA JFIRE)
+       JEQ  SHOOT
+       MOV  R1,R3
+       ANDI R3,JLEFT          held left?
+       JNE  GOLEFT
+```
+
+`JOY1` and `JOY2` hold the states themselves, if you would rather read a word. To drive a menu or editor written for keys with a joystick, set `JOYKEY` (1 = joystick 1, 2 = joystick 2, 3 = both): the kernel
+then types `KUP KDOWN KLEFT KRIGHT` and `KENTER` codes into the key buffer for it, with the keyboard's repeat (24 frames, then every 4), and your `TICK` sees them as keys. `examples/joystick` shows all of it.
+A joystick that is not plugged in reads as nothing down; there is no presence test. Not tried on real joysticks.
+
 **Modifiers separately.** `KMODS` holds the modifiers of the last code (`>80` FCTN,
 `>40` SHIFT, `>20` CTRL, `>10` ALPHA LOCK) in the high byte, and `ALOCK` is non-zero while
 ALPHA LOCK is down.
@@ -537,7 +554,7 @@ routine runs with *its* module in slot C, so it may not touch your code or data 
 ## 9. Files
 
 The file service speaks to any device through the console's device service routines: the
-disk controller (`DSK1.`), TIPI (`PI.`), a printer port (`PIO`), and so on. It opens one file at a time.
+disk controller (`DSK1.`), TIPI (`PI.`), a printer port (`PIO`), and so on. It can hold up to three files open at once (part 9, "Several files").
 
 | Routine | In | Out |
 | --- | --- | --- |
@@ -604,7 +621,42 @@ one-time power-up routine, the PAB in VRAM, and clearing the previous call's err
   lost (the viewer does).
 - Interrupts are off during the call.
 - The VRAM from `>3600` is the service's and the controller's; keep your own VRAM below it.
-- One file open at a time. Open, use, close, then the next.
+- Up to three files are open at once (below); open a fourth only after closing one.
+
+### Several files
+
+Each open file has a **handle**, 0-2. `FSEL` (R0 = the handle) says which handle `FOPEN`, `FREAD`, `FWRITE`, `FCLOSE` and `FDELETE` act on; it is 0 until you change it, so a program that never calls `FSEL` works with one file, as before.
+Every handle keeps its own file open and its own place in it while you use the others:
+
+```
+       CLR  R0
+       BL   @FSEL             handle 0: the input
+       LI   R2,SRC
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       LI   R0,1
+       BL   @FSEL             handle 1: the output
+       LI   R2,DST
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+LOOP   CLR  R0
+       BL   @FSEL
+       LI   R1,BUF
+       BL   @FREAD            a record from handle 0 ...
+       MOV  R0,R0
+       JNE  DONE
+       LI   R0,1
+       BL   @FSEL
+       LI   R1,BUF
+       BL   @FWRITE           ... written to handle 1 (R2 = the length FREAD gave)
+       JMP  LOOP
+```
+
+`FSEL` answers `>FF` for a handle above 2 (and keeps the old choice). The limit is the disk controller's: it keeps three file buffers, so a fourth open fails with its error; a printer or another device's
+file counts as one of the three. Each handle has its own PAB in VRAM (`>3700`, `>3740`, `>3780`: the controller tells open files apart by their PABs) and they share one record buffer, since a call finishes with it. `FDELETE` uses the
+selected handle's PAB, so close that handle's file first. `tests/apps/files2` is a working copy-while-reading example, checked against TI's own controller ROM.
 
 ## 10. Time
 
@@ -779,9 +831,8 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 - Sound: a music player and tone effects (MUSIC.md), but no envelopes, no effect mixer and no priorities; the console's sound lists are available, unmixed with the player.
 - No heap, no text-editing engine, no menus: those are applications (Press has an editor built on the
   ancestor of this kernel; see FROM-PRESS.md).
-- One file open at a time; no relative-record files beyond what the PAB offers, no file-size query.
-- Joysticks are not read (the keyboard scan covers the keyboard only).
-- Cards over 1M are used as 1M.
+- At most three files open at once (the controller's three buffers); no relative-record files beyond what the PAB offers, no file-size query.
+- Joysticks are read, but only as direction-and-fire switches (no analog, no presence test, no calibration).
 - No cooperative multitasking: one module's `TICK` runs at a time.
 
 ## Appendix: a second module in five minutes

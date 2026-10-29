@@ -167,6 +167,23 @@ CURBF  EQU  >21E6            window >F000
 CURCC  EQU   >21E8
 CURCD  EQU  >21EA            window >D000
 
+* Joysticks (keys.a99), read every KPOLL: a state is
+* JFIRE|JLEFT|JRIGHT|JDOWN|JUP
+JFIRE  EQU  1
+JLEFT  EQU  2
+JRIGHT EQU  4
+JDOWN  EQU  8
+JUP    EQU  16
+JOY1   EQU  >21EC            joystick 1's state now (1 = active)
+JOY2   EQU  >21EE            joystick 2's
+JOYN1  EQU  >21F0            joystick 1's presses since JOYGET last looked
+JOYN2  EQU  >21F2
+* non-zero: a joystick types arrow keys and ENTER (1: joystick 1, 2: joystick
+* 2, 3: both)
+JOYKEY EQU   >21F4
+JKLAST EQU  >21F6            the code the joystick is typing now
+JKHOLD EQU  >21F8            frames it has held it (for the repeat)
+
 * File service (files.a99): >2100->21FF
 FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
 FNAMB  EQU  >2160            8 bytes: the device name for the DSR search
@@ -179,12 +196,15 @@ FDD0   EQU  >2172
 FDD2   EQU  >2174
 FDPWR  EQU  >2176            non-zero once the controller's power-up has run
 FD70   EQU  >2178            >8370 as the controller's power-up left it
+FSELH  EQU  >21FA            the file handle the F routines act on (0-2)
+FPFLG  EQU  >21FC            scratch: a PAB flag byte's address
 FERR   EQU  >217A            the last file operation's result
 FLEN   EQU  >217C            the last record's length
 * the name in use (address of a length-prefixed string)
 FNMP   EQU   >217E
 FPAB   EQU  >2180            64 bytes: the PAB as built
-*                            >21EC->21FF: free for the kernel's growth
+*                            >21EC->21F9: the joystick variables (below)
+*                            >21FA->21FF: the file service's handle (FSELH)
 
 * 256 bytes of scratch for the running module (not kept across a module switch)
 MODRAM EQU   >2200
@@ -358,8 +378,11 @@ VR_LOCK  EQU  57             unlock sequence
 *----------------------------------------------------------------------
 * File service (files.a99)
 *----------------------------------------------------------------------
-FPABV  EQU  >3700            the PAB in VRAM
-FBUFV  EQU  >3600            the record buffer in VRAM (up to 255 bytes)
+FPABV  EQU  >3700            handle 0's PAB in VRAM (handle n: +64 * n)
+* the record buffer in VRAM (up to 255 bytes), shared by the handles
+FBUFV  EQU   >3600
+* files that can be open at once (the controller's default is 3 buffers)
+FMAXH  EQU   3
 * open flags (the PAB's flag byte, high byte of R0): add one from each group
 FDISP  EQU  >0000            DISPLAY records
 FINTL  EQU  >0800            INTERNAL records

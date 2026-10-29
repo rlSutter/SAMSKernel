@@ -1,0 +1,7 @@
+{
+  "name": "FILES2",
+  "min_pages": 128,
+  "modules": [
+    {"name": "f2", "source": "f2.a99"}
+  ]
+}

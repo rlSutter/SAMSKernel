@@ -13,7 +13,13 @@
 
 * KINIT - the keyboard as at power-up: no chord down, nothing buffered.
 * The kernel calls it once at boot.  Leaf.  Uses nothing.
-KINIT  CLR  @KHEAD
+KINIT  CLR  @JOY1
+       CLR  @JOY2
+       CLR  @JOYN1
+       CLR  @JOYN2
+       CLR  @JKLAST
+       CLR  @JKHOLD
+       CLR  @KHEAD
        CLR  @KTAIL
        CLR  @KLAST
        CLR  @KHOLD
@@ -141,6 +147,7 @@ KDNONE SETO @KCURK             no key at all
 * send the key's first code.  Uses R0-R7, R12.
 KPOLL  .enter
        BL   @KSCAN
+       BL   @JOYPOLL           the joysticks, from the same matrix
        BL   @KDECOD
        MOV  @KCURK,R2
        JLT  KP0                no key down
@@ -167,6 +174,106 @@ KP2    MOV  @KLAST,R0          held: repeat at 24 frames, then every 4
 KP3    MOV  R1,@KMODS
        BL   @KPUT              the code into the buffer
 KP9    .leave
+       RT
+
+* JOYPOLL - read both joysticks (keyboard columns 6 and 7; the rows are fire,
+* left, right, down, up, 0 = active) into JOY1 and JOY2 as JFIRE|JLEFT|JRIGHT|
+* JDOWN|JUP (1 = active), noting presses in JOYN1 and JOYN2; and, if JOYKEY says
+* so, type arrow-key and ENTER codes for them with the keyboard's repeat.  Uses
+* R0-R6, R12.
+JOYPOLL .enter
+       LI   R1,>0600
+       LI   R5,JOY1
+       BL   @JOYRD
+       LI   R1,>0700
+       LI   R5,JOY2
+       BL   @JOYRD
+       MOV  @JOYKEY,R0
+       JEQ  JP9
+       CLR  R4                 the joysticks the flag names, together
+       MOV  @JOYKEY,R0
+       ANDI R0,1
+       JEQ  JK1
+       SOC  @JOY1,R4
+JK1    MOV  @JOYKEY,R0
+       ANDI R0,2
+       JEQ  JK2
+       SOC  @JOY2,R4
+JK2    LI   R3,JKTAB           the first direction in the table that is down
+JK3    MOV  *R3+,R2
+       JEQ  JKNO
+       COC  R2,R4
+       JEQ  JKYES
+       INCT R3
+       JMP  JK3
+JKYES  MOV  *R3,R0
+       JMP  JK6
+JKNO   CLR  R0
+JK6    C    R0,@JKLAST
+       JEQ  JK7
+       MOV  R0,@JKLAST         a new code: type it
+       CLR  @JKHOLD
+       MOV  R0,R0
+       JEQ  JP9
+       BL   @KPUT
+       JMP  JP9
+JK7    MOV  R0,R0              the same code still held: repeat it as a key does
+       JEQ  JP9
+       INC  @JKHOLD
+       MOV  @JKHOLD,R2
+       CI   R2,24
+       JL   JP9
+       LI   R2,20
+       MOV  R2,@JKHOLD
+       BL   @KPUT
+JP9    .leave
+       RT
+JKTAB  DATA JUP,KUP*256,JDOWN,KDOWN*256,JLEFT,KLEFT*256,JRIGHT,KRIGHT*256
+       DATA JFIRE,KENTER*256,0
+
+* JOYRD - R1 = a column in the high byte (>0600 joystick 1, >0700 joystick 2),
+* R5 = JOY1 or JOY2: the state word at R5 gets what is down now, and the presses
+* that are new join the word four bytes on (JOYN1, JOYN2). Leaf. Uses R1-R6,
+* R12.
+JOYRD  LI   R12,>0024          CRU outputs 18-20 select the column
+       LDCR R1,3
+       NOP
+       NOP
+       LI   R12,>0006          the row lines
+       CLR  R4
+       STCR R4,8
+       INV  R4                 1 = active
+       ANDI R4,>1F00           fire, left, right, down, up
+       SRL  R4,8
+       MOV  R4,R6
+       SZC  *R5,R6             down now and not before: new
+       MOV  R5,R2
+       AI   R2,4
+       SOC  R6,*R2
+       MOV  R4,*R5
+       RT
+
+* JOYGET - joystick R0 (1 or 2): R1 = what is down now
+* (JFIRE|JLEFT|JRIGHT|JDOWN|
+* JUP), R2 = what went down since the last JOYGET (cleared by this call), so a
+* program sees every press however brief.  Any other R0: R1 = R2 = 0.  The state
+* is read once a frame, by KPOLL, so it follows the main loop (and KIDLE).
+* Leaf.
+* Uses R1, R2.
+JOYGET CI   R0,1
+       JEQ  JG1
+       CI   R0,2
+       JEQ  JG2
+       CLR  R1
+       CLR  R2
+       RT
+JG1    MOV  @JOY1,R1
+       MOV  @JOYN1,R2
+       CLR  @JOYN1
+       RT
+JG2    MOV  @JOY2,R1
+       MOV  @JOYN2,R2
+       CLR  @JOYN2
        RT
 
 * KPUT - put code R0 (high byte) in the buffer; dropped if it is full.

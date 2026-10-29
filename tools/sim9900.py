@@ -36,6 +36,8 @@ for _c, _col in enumerate(KTAB):
 KEYPOS['ENTER'] = (0, 2); KEYPOS['SPACE'] = (0, 1)
 FCTN, SHIFT, CTRL = (0, 4), (0, 5), (0, 6)
 MODIFIERS = frozenset([FCTN, SHIFT, CTRL])
+# joysticks 1 and 2 are read as keyboard columns 6 and 7; the rows are fire, left, right, down, up (0 = active)
+JOYROW = {'FIRE': 0, 'LEFT': 1, 'RIGHT': 2, 'DOWN': 3, 'UP': 4}
 SHIFTED = {'!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6', '&': '7', '*': '8',
            '(': '9', ')': '0', '+': '=', '<': ',', '>': '.', ':': ';', '-': '/'}
 FCTNED = {'|': 'A', '`': 'C', '{': 'F', '}': 'G', '?': 'I', "'": 'O', '"': 'P', '[': 'R',
@@ -64,7 +66,9 @@ def parse_keys(script):
             if tok.startswith('WAIT '): ev.append(('wait', int(tok[5:]), None)); continue
             if tok.startswith('HOLD '): hold = int(tok[5:]); continue
             if tok == 'ALPHA': ev.append(('alpha', 0, None)); continue
-            if tok in ('ENTER', 'SPACE'): chord = frozenset([KEYPOS[tok]])
+            if len(tok) > 3 and tok[0] == 'J' and tok[1] in '12' and tok[2] == '-':     # a joystick: <J1-LEFT+FIRE>
+                chord = frozenset((5 + int(tok[1]), JOYROW[d]) for d in tok[3:].split('+'))
+            elif tok in ('ENTER', 'SPACE'): chord = frozenset([KEYPOS[tok]])
             elif len(tok) >= 3 and tok[1] == '-':
                 mod = {'C': CTRL, 'F': FCTN, 'S': SHIFT}[tok[0]]
                 k = tok[2:]

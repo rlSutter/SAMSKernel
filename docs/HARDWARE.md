@@ -176,6 +176,12 @@ non-zero, which is why programs written against a real console always worked, bu
 survives a DSR (which runs in that workspace). The kernel therefore sets it to 1 at start-up and again after
 every DSR call. If you write your own DSR calls, do the same.
 
+## Joysticks
+
+The TI reads both joysticks through the keyboard matrix: with the column select (CRU outputs 18-20) at 6 the row lines (inputs 3-10) show joystick 1, at 7 joystick 2: row 0 fire, 1 left, 2 right, 3 down,
+4 up, a line low while the switch is closed. `KPOLL` reads both every frame with output 21 held high (as for the keyboard, so ALPHA LOCK stays off the row lines). The simulator models them (key script tokens `<J1-FIRE>`,
+`<J1-LEFT+UP>`, `<J2-DOWN>`). **Not tried on a real joystick**: the column and row assignment is from the console's keyboard scan as I know it, and js99er's joystick settings are another place to check it.
+
 ## Sound
 
 The TMS9919 (SN76489 family) has three tone voices and a noise voice, written a byte at a time at `>8400`; MUSIC.md has the byte formats, the divider table and the player. The console's interrupt routine also plays *sound lists* from

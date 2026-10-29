@@ -1,0 +1,7 @@
+{
+  "name": "JOYSTICK",
+  "min_pages": 128,
+  "modules": [
+    {"name": "joy", "source": "joy.a99"}
+  ]
+}

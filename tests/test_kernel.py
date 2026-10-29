@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 joystick files2 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -24,10 +24,10 @@ def check(cond, what):
     if not cond: FAILS.append(what)
 
 def build(app):
-    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'),
-                        os.path.join(ROOT, 'examples', app)], capture_output=True, text=True)
+    path = os.path.join(ROOT, app) if app.startswith('tests/') else os.path.join(ROOT, 'examples', app)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), path], capture_output=True, text=True)
     if r.returncode: sys.exit(r.stdout + r.stderr)
-    return open(glob.glob(os.path.join(ROOT, 'build', app, '*8.bin'))[0], 'rb').read()
+    return open(glob.glob(os.path.join(ROOT, 'build', os.path.basename(app), '*8.bin'))[0], 'rb').read()
 
 def lines(m): return sim9900.screen(m).split('\n')
 def codes(m):
@@ -264,6 +264,60 @@ def dbg():
     m, cpu, halt = sim9900.run(c, keys='<WAIT 5>x<WAIT 20>', frames=300)
     check((m.rw(0x2314), m.rw(0x2316), m.rw(0x2318)) == (0x4444, 0x9999, 0x1234), 'after a key DBG returns with R0, R4 and R9 as they were')
     shutil.rmtree(d, ignore_errors=True)
+
+def joystick():
+    """Both joysticks, read as keyboard columns 6 and 7: what is down, the presses between looks, and JOYKEY, which
+    types arrow keys and ENTER for a joystick with the keyboard's repeat."""
+    c = build('joystick')
+    b = 0x2300
+    keys = '<WAIT 5><J1-FIRE><WAIT 6><J1-FIRE><WAIT 6><J1-LEFT+UP><WAIT 6><J1-RIGHT><WAIT 6><J1-DOWN><WAIT 6><J2-FIRE><WAIT 6><J2-LEFT><WAIT 10>'
+    m, cpu, halt = sim9900.run(c, keys=keys, frames=260)
+    check(m.rw(b) == 2 and m.rw(b + 2) == 1, 'fire presses counted per joystick, each press once (J1 %d, J2 %d)' % (m.rw(b), m.rw(b + 2)))
+    check(m.rw(b + 8) == 0x1F and m.rw(b + 10) == 0x03, 'every direction of joystick 1 was seen (%02X); joystick 2 shows only its own (%02X)' % (m.rw(b + 8), m.rw(b + 10)))
+    check(m.rw(b + 6) == 0 and m.rw(0x21F4) == 0, 'with JOYKEY off a joystick types nothing (%d keys)' % m.rw(b + 6))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 8><J1-UP><WAIT 8><J1-LEFT><WAIT 8><J1-FIRE><WAIT 10>', frames=200)
+    check(m.rw(b + 6) == 3 and m.rw(b + 4) == 0x0D, 'JOYKEY 1: UP, LEFT and FIRE type three keys, the last ENTER (%d keys, last >%02X)' % (m.rw(b + 6), m.rw(b + 4)))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>2<WAIT 8><HOLD 70><J2-DOWN><WAIT 10>', frames=200)
+    check(m.rw(b + 6) >= 10 and m.rw(b + 4) == 0xD8, 'JOYKEY 2: DOWN held 70 frames repeats like a key (%d keys, last >%02X)' % (m.rw(b + 6), m.rw(b + 4)))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5>1<WAIT 8><J2-UP><WAIT 8><J2-FIRE><WAIT 10>', frames=200)
+    check(m.rw(b + 6) == 0, 'JOYKEY 1 does not type for joystick 2 (%d keys)' % m.rw(b + 6))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 5><ALPHA>ab<J1-FIRE><WAIT 10>', frames=150)
+    check(m.rw(b + 6) == 2 and m.rw(b + 4) == 0x62 and m.rw(b) == 1, 'the keyboard works beside a joystick: two keys typed (last %02X) and a fire press counted' % m.rw(b + 4))
+
+def files2():
+    """Three files open at once, each through its own handle (FSEL): one file copied to a second while a third is read
+    alongside; every record arrives; a fourth handle is refused.  Against TI's own disk controller ROM, and the stand-in drive."""
+    import tempfile, skdisk, tifdc
+    c = build('tests/apps/files2')
+    d = tempfile.mkdtemp()
+    src = ['record %02d of the source file, copied by handle 0 to handle 1' % i for i in range(1, 31)]
+    open(d + '/src', 'w').write('\n'.join(src) + '\n')
+    open(d + '/src2', 'w').write(''.join('second file, record %02d\n' % i for i in range(1, 21)))
+    b = 0x2300
+    def results(m):
+        r = lambda o: m.rw(b + o)
+        return dict(opens=(r(0), r(2), r(4)), copied=r(6), alongside=r(8), lasterr=r(10), werr=r(14), fsel3=r(16), done=r(18), closes=(r(20), r(22), r(24)))
+    if os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM']):
+        p = d + '/d.dsk'
+        skdisk.make_disk(p, [d + '/src', d + '/src2'])
+        img = bytearray(open(p, 'rb').read()); box = {}
+        def setup(m): box['f'] = tifdc.TIFDC(image=img); m.tifdc = box['f']
+        m, cpu, halt = sim9900.run(c, frames=1500, setup=setup)
+        r = results(m)
+        check(r['opens'] == (0, 0, 0) and r['done'] != 0, 'TI controller: three files open at once, all three opened without error %s' % (r['opens'],))
+        check(r['copied'] == 30 and r['werr'] == 0 and r['lasterr'] == 5, 'TI controller: 30 records copied from handle 0 to handle 1, then the end of file (5): %s' % r)
+        check(tifdc.read_file(box['f'].image, 'DST') == tifdc.read_file(bytes(img), 'SRC'), 'TI controller: the copy is the same file, record for record')
+        check(r['alongside'] == 20, 'TI controller: handle 2 read its own 20 records alongside, at its own position (%d)' % r['alongside'])
+        check(r['fsel3'] == 0xFF and r['closes'][1] == 0 and all(x in (0, 7) for x in r['closes']), 'a fourth handle is refused (>FF); every close answers (a file read to its end is already closed: 7): %s' % (r['closes'],))
+    else:
+        print('  (TI controller part skipped: TIFDC_ROM)')
+    def setup2(m):
+        m.dvfiles['SRC'] = [s.encode() for s in src]
+        m.dvfiles['SRC2'] = [('second file, record %02d' % i).encode() for i in range(1, 21)]
+    m, cpu, halt = sim9900.run(c, frames=1500, setup=setup2)
+    r = results(m)
+    check(r['copied'] == 30 and r['alongside'] == 20 and r['werr'] == 0 and r['fsel3'] == 0xFF and m.dvfiles.get('DST') == [s.encode() for s in src],
+          'stand-in drive: the same: 30 records copied while 20 are read alongside, a fourth handle refused: %s' % r)
 
 def music():
     """The music player: the music demo and the compiler, checked against the bytes the player
@@ -555,7 +609,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -202,6 +202,18 @@ the chord in KEYMAP: R0 = its code in the high byte, or 0 for no key (or a chord
 
 scan, decode, and buffer a code when a key goes down, and on each repeat while it is held.  A code comes from the key and the modifiers held as it went down; letting go of a modifier before the key (or pressing one late) changes nothing while that key stays down, so releasing CTRL a moment before B never types a stray 'b'.  Repeats send the key's first code.  Uses R0-R7, R12.
 
+### `JOYPOLL` *(internal)*
+
+read both joysticks (keyboard columns 6 and 7; the rows are fire, left, right, down, up, 0 = active) into JOY1 and JOY2 as JFIRE|JLEFT|JRIGHT| JDOWN|JUP (1 = active), noting presses in JOYN1 and JOYN2; and, if JOYKEY says so, type arrow-key and ENTER codes for them with the keyboard's repeat.  Uses R0-R6, R12.
+
+### `JOYRD` *(internal)*
+
+R1 = a column in the high byte (>0600 joystick 1, >0700 joystick 2), R5 = JOY1 or JOY2: the state word at R5 gets what is down now, and the presses that are new join the word four bytes on (JOYN1, JOYN2). Leaf. Uses R1-R6, R12.
+
+### `JOYGET`
+
+joystick R0 (1 or 2): R1 = what is down now (JFIRE|JLEFT|JRIGHT|JDOWN| JUP), R2 = what went down since the last JOYGET (cleared by this call), so a program sees every press however brief.  Any other R0: R1 = R2 = 0.  The state is read once a frame, by KPOLL, so it follows the main loop (and KIDLE). Leaf. Uses R1, R2.
+
 ### `KPUT`
 
 put code R0 (high byte) in the buffer; dropped if it is full. A key restarts the console's screen-blank timer and turns the display back on, should the console have blanked it: VR1 = VR1CPY with the display bit set, so the current mode is kept (Text 80 in the editor, Graphics II on the title).  Leaf.  Uses R2, R3.
@@ -305,6 +317,14 @@ the lowest free page: R0 = its number, or 0 if the pool is empty.  The page is m
 give page R0 back to the pool (it must have come from it). Releasing a page twice is harmless.  Uses R0-R5.  Leaf.
 
 ## Files (files.a99)
+
+### `FSEL`
+
+choose the file handle (0-2) the other file routines act on: R0 = the handle.  R0 = 0, or >FF if there is no such handle (and the choice stays). Each handle's file stays open while you use the others.  Leaf.  Uses R0.
+
+### `FPADR` *(internal)*
+
+R0 = the VRAM address of the selected handle's PAB.  Leaf.
 
 ### `FOPEN`
 

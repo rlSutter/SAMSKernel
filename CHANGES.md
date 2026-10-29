@@ -1,5 +1,13 @@
 # Changes
 
+## 1.5.0 (29 October 2026)
+
+- **Joysticks.** `KPOLL` reads both joysticks (keyboard columns 6 and 7) every frame: `JOYGET` (R0 = 1 or 2) returns what is down and the presses since the last look, `JOY1`/`JOY2` hold the states, and `JOYKEY` makes the kernel type
+  arrow-key and ENTER codes for a joystick with the keyboard's repeat. New `examples/joystick`; the simulator's key script has `<J1-FIRE>`, `<J1-LEFT+UP>`, `<J2-DOWN>`. Test group `joystick`.
+- **Several files open at once.** Each file has a handle 0-2, chosen with `FSEL`; every handle keeps its own PAB in VRAM and its own place in its file, and `FOPEN FREAD FWRITE FCLOSE FDELETE` act on the selected one. Handle 0 is the default, so existing code is unchanged. Three
+  is the disk controller's own limit (its three file buffers). Test group `files2` (a file copied while a third is read alongside, against TI's real controller ROM and the stand-in drive; `tests/apps/files2`).
+- Not tried on a real TI: real joysticks, and the file handles on a controller other than TI's (TIPI, CF7+ ...).
+
 ## 1.4.0 (29 October 2026)
 
 The kernel uses the whole of a big SAMS card: pages are numbers 0-4095 (up to 16M), where they were 0-255 (1M).

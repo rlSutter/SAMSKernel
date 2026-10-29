@@ -40,13 +40,14 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 | `examples/diag` | two modules: a key/glyph/colour diagnostic, and a self-test of the kernel's services (CTRL T). Run it first on new hardware |
 | `examples/modes` | one module, fifteen screens: every display mode and option (keys `1-9 0 A-E`); the pixel tests render them |
 | `examples/workbench` | the workbench: edit, assemble and run programs on the TI (an editor, a native assembler checked against xas99, a launcher) |
+| `examples/joystick` | both joysticks: states, fire presses, and a switch that makes a joystick type arrow keys |
 | `examples/music` | a music player: two songs from SAMS pages, pause, stop, tone effects, music stepping through a long loop |
 | `examples/browser` | two modules: a DSK1 catalog browser and a text-file viewer (GOMOD with an argument, the file service, the page pool, slot B paging) |
 
 ## Tests
 
 ```
-python3 tests/test_kernel.py            sources dbg native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+python3 tests/test_kernel.py            sources dbg joystick files2 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 TI_CONSOLE_ROM=/path/to/console-rom TIFDC_ROM=/path/to/disk-controller-rom python3 tests/test_kernel.py rom realdsr
 ```
 
@@ -56,7 +57,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.4.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.5.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have; `GOMOD`, the page pool, `FCNUM`, the
 table-driven loader and the packaging are new. Run `examples/diag` and press CTRL T on the first real machine.
 

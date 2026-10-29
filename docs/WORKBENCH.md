@@ -108,7 +108,7 @@ INIT   ...
 ## 6. How it works, and what it costs
 
 `asm.a99` is a module of 5.3K. It reads the source a line at a time with the kernel's file service, **twice** (pass 1 gives every label its address, pass 2 produces the bytes). The symbol table is a hash table of 14-byte entries in two SAMS pages mapped
-at `>E000`; the image is built in a 4K buffer in slot A. A `COPY` closes the file, assembles the included file, and reopens the first file, reading on to where it was (the file service has one file open at a time). Pass 2 does not read KERNEL/EQU again: its symbols stay in the table.
+at `>E000`; the image is built in a 4K buffer in slot A. A `COPY` closes the file, assembles the included file, and reopens the first file, reading on to where it was (it could keep both open now that the file service has handles; it still closes and reopens, which is simpler and was tested first). Pass 2 does not read KERNEL/EQU again: its symbols stay in the table.
 The editor (`ed.a99`, 2.4K) keeps lines in SAMS pages (51 lines of 80 bytes a page) in the order of a table of slot numbers. The shell is `wb.a99` (2K).
 
 Instructions executed, in the simulator, including reading the disk through TI's disk controller ROM and the 274-line KERNEL/EQU:
