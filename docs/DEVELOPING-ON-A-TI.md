@@ -1,13 +1,13 @@
 # SAMS Kernel: developing with a real TI
 
 Can you develop for the kernel *on* a TI? Partly, and this document says exactly how far, what is checked and what is not. The kernel's build is a PC program (Python and
-the xdt99 assembler), and the kernel itself loads from a cartridge into SAMS; both facts shape what a TI can do. Three levels:
+the xdt99 assembler), and the kernel itself loads from a cartridge into SAMS; both facts shape what a TI can do. Three levels (the third is new in 1.3.0):
 
 | Level | What you do on the TI | Works today? |
 | --- | --- | --- |
 | **A. The TI as the test machine** | run what the PC built, look at it, test it | yes (with the caveats below); the normal way |
 | **B. The TI as the editor too** | write the source on the TI, move the files to the PC to build | yes; the sources are kept safe for it (part 4) |
-| **C. Everything on the TI** | edit, assemble, build and run with no PC | **no**: part 5 says what it would take |
+| **C. Everything on the TI** | edit, assemble and run with no PC, in the workbench | **yes, for one-module programs, in the simulator** (part 5, and WORKBENCH.md); not on real hardware yet |
 
 **What is verified.** All of this project is verified in a simulator (a TMS9900, the F18A, SAMS, a keyboard, TI's own console ROM and disk controller ROM), not on a real TI-99/4A. No
 image from this project has yet been run on a real FinalGROM 99 or a real F18A and SAMS card. Treat the first run on real hardware as a test, and use the ladder in part 2.
@@ -77,20 +77,17 @@ python3 xdm99.py disk.dsk -e MAIN -o main.a99            take a file back off
 
 The loop is then: edit on the TI, move the files to the PC, `skbuild.py`, move the image to the cartridge, run. It works, and it is slow: do most of the iterating in the simulator and js99er, and use the TI to confirm.
 
-## 5. Level C: everything on the TI (not possible today)
+## 5. Level C: everything on the TI, in the workbench
 
-Three things are missing, and none of them is small. What I measured about the sources (23 files, 5,100 lines): they use the assembler's **macros** (`.enter`, `.leave`, `.push`, `.pop`, `.callmod`, `.intsvc`: 234 uses), **`STRI`** (102),
-**`COPY`** (36), **labels longer than six characters** (30), and **parenthesised expressions** (`(RTEXT*16+RBG)*256`).
+`examples/workbench` is an application on the kernel with an **editor**, a **native assembler** and a **launcher**: WORKBENCH.md is its manual. You write a program in the editor, press CTRL A, and run it with R, all on the TI. What is checked: the
+assembler's output is byte-identical to xas99's for every example module and two probe sources (every instruction and operand form), and the editor, the catalog and the run are exercised by key scripts, in the simulator.
 
-1. **An assembler on the TI that accepts them.** I have not checked which TI-resident assemblers handle macros, long labels and `STRI`. The Editor/Assembler's assembler, as I know it, has no macros and short labels, so I
-   expect it cannot assemble these sources unchanged: check before you build on it. (The alternatives are a macro-free flavour of the sources, which a script could generate, or a native assembler that takes the xas99 dialect.)
-2. **A way to run without the cartridge.** The kernel and every module live in SAMS pages that the cartridge's loader copies in. The Editor/Assembler can load object code to an `AORG` address, and a module assembled at `>C000` would land in whatever page is mapped there (the identity map has `>0C-0D`, which
-   is slot C's default pair), so a *single-module* program could in principle be loaded that way; modules in other pages cannot, because the loader does not map pages. A real answer is a small **disk loader**: a stage-0 program, run from the Editor/Assembler or from XBasic, that reads the kernel and module images from
-   disk files into SAMS pages (the kernel's own file service, `files.a99`, is about a kilobyte) and starts the kernel. That would let a TI with a disk drive (or a TIPI) run builds with no FinalGROM. It would need a build step that writes the images as disk files.
-3. **The build itself.** `skbuild.py` assigns pages, writes the application's equates, assembles the kernel and exports its symbols so that each module can `COPY "kernel.equ"`, packs the banks, and compiles music. On the TI all of that has to exist in a TI language. This is the big one.
+What it is not, and what is still needed:
 
-None of that exists here; I have not built, tested or estimated it beyond the sketch above. If you want a part of it, the useful order is: the **disk loader** first (it removes the need for a cartridge on every test and is self-contained), then **macro-free generated sources** (so
-the Editor/Assembler can be tried), and only then a native build. Say which, and I will build that one and test it in the simulator against TI's real disk controller ROM.
+- **A PC once.** The workbench cartridge image and the disk holding `KERNEL/EQU` (the kernel's addresses) are made with `skbuild.py` and `skdisk.py`; they are prebuilt in `images/`. After that the PC is not needed to edit, assemble and run.
+- **One-module programs, up to 4,096 bytes, run inside the workbench** (not a cartridge: a FinalGROM's storage cannot be written by the TI). To make a cartridge, build the program on the PC.
+- **Not run on a real TI-99/4A**, and the time an assembly takes there is not measured (1.9 to 8.2 million instructions for the examples).
+- **Not supported:** user macros (`.defm`), forward `EQU`, relocatable output, saving the assembled image to disk.
 
 ## 6. Differences between the TI and the simulator, to expect
 

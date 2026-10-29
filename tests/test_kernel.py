@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg native nativemods workbench boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg native nativemods workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -421,7 +421,13 @@ def workbench():
     m, img = asmharness.workbench_ui('<WAIT 10>nRET/A99<ENTER><WAIT 10>a<WAIT 2500>r<WAIT 60><ALPHA>x<WAIT 80>', 3200, ['/tmp/ret.a99'])
     ln = sim9900.screen(m).split('\n')
     check(ln[0].strip() == 'SAMS Kernel   workbench' and 'Assembled' in ln[9], 'a program returns to the workbench with GOMOD PG_WB, and its result is still there: %r' % ln[9].strip())
-    # the whole round
+
+def workbenchfull():
+    """The whole round on the simulated TI: type a program in the editor, assemble it, run it."""
+    import asmharness, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
     prog = ['       COPY "kernel.equ"', '       COPY "macros.a99"', '       AORG >C000', '       DATA INIT,TICK,INIT,0',
             'INIT   .enter', '       LI   R0,2*COLS+2', '       LI   R1,MSG', '       LI   R2,(RTEXT*16+RBG)*256',
             '       BL   @PUTS', '       .leave', '       RT', 'TICK   RT', "MSG    STRI 'Built on the TI'"]
@@ -517,7 +523,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -734,6 +734,8 @@ believe it (part 14). **Real console ROM:** if you have your own copy of the TI 
 interrupt routine instead of a model of it, which catches mistakes in how a program treats the
 console's variables. The ROM is TI's: it is never part of this repository; keep it outside.
 
+**The workbench.** WORKBENCH.md: an editor, an assembler and a launcher that run on the TI, so a one-module program can be written, assembled and run there.
+
 **Developing with a real TI.** DEVELOPING-ON-A-TI.md: the first-run ladder, what each loader refusal means, debugging with no debugger (`dbg.a99`), editing sources on the TI, and what it would take to build there as well.
 
 **The self-test on hardware.** `examples/diag` is meant to be the first thing run on a new

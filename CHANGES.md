@@ -1,5 +1,16 @@
 # Changes
 
+## 1.3.0 (29 October 2026)
+
+Building on the TI: `examples/workbench`, with a native assembler, an editor and a launcher (docs/WORKBENCH.md).
+
+- `asm.a99`, a module of 5.3K: two passes, `COPY` includes, every TMS9900 instruction and operand form, `AORG DATA BYTE TEXT STRI EVEN EQU COPY END BSS`, the kernel's macros built in, xas99's left-to-right expressions and
+  alignment rules, 12-character symbols. **Byte-identical to xas99** for every example module and for two probe sources, on the simulated TI reading its source through TI's disk controller ROM. It encodes `LDCR Rn,16` correctly (xas99 makes an STCR of it).
+- `ed.a99`, a full-screen DIS/VAR 80 editor (800 lines of 80 columns); `wb.a99`, the shell: file name, disk catalog, assemble, run, back to the menu with `GOMOD PG_WB`.
+- `tools/skdisk.py` (a disk of sources plus KERNEL/EQU), `tools/asmharness.py` (the assembler and the whole workbench in the simulator); test groups `native`, `nativemods`, `workbench`, `workbenchfull` (a program typed in the editor, assembled and run).
+- The 80-column fixer now computes split strings' lengths with the assembler instead of freezing a count; `skbuild.py` exports each module's symbols (`NAME.equ`).
+- Unverified: a real TI, real assembly time, the way the workbench's disk reaches a real machine.
+
 ## 1.2.0 (28 October 2026)
 
 Renamed **SAMS Kernel** (it was "Lantern Kernel"; `lkbuild.py` is now `skbuild.py`, the diagnostic `skdiag8.bin`; The Lantern Coast, the game it descends from, keeps its name). Music.
