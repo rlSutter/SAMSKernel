@@ -1,0 +1,315 @@
+*======================================================================
+* asm.a99 - the native assembler: SAMS Kernel programs assembled on the
+* TI itself.  Reads a DIS/VAR 80 source file from disk (and the files it
+* COPYs), in two passes, and leaves the program image in OUTBUF.
+*
+* The dialect is xas99's, the part the examples use: labels, every TMS9900
+* instruction, the directives AORG DATA BYTE TEXT STRI EVEN EQU COPY END
+* BSS (LIST UNL TITL IDT PAGE are accepted and ignored), the kernel's
+* macros .enter .leave .push .pop .intsvc .callmod built in (COPY of
+* macros.a99 is accepted and ignored), and expressions of + - * / and
+* parentheses evaluated strictly left to right, as xas99 does.  Symbols are
+* case-insensitive and 8 characters long.  docs/WORKBENCH.md has the rest.
+*
+* Call it with MODCALL entry 4 (ASMGO): SRCNAME holds the file name (a
+* length-prefixed string, "DSK1.HELLO"); it returns R0 = the number of
+* errors and R1 = the image's length; the image is at OUTBUF, its first
+* byte at address ORGB.  The error list is in ERRTAB.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* ----- storage in slot A (APPRAM) -----
+SRCNAME EQU APPRAM             the input file name (32 bytes, shared)
+LINE   EQU  APPRAM+256         the source line, ended by a zero byte
+LLEN   EQU  APPRAM+512
+PASS   EQU  APPRAM+514         1 or 2
+LC     EQU  APPRAM+516         the location counter
+LCSTMT EQU  APPRAM+518         ... where this statement began ($)
+ORGB   EQU  APPRAM+520         the image's first address
+ORGSET EQU  APPRAM+522         non-zero once an AORG (or code) set it
+OUTLEN EQU  APPRAM+524         the image's length so far
+NERR   EQU  APPRAM+526         errors found
+LNUM   EQU  APPRAM+528         the line number in the file being read
+UNRES  EQU  APPRAM+530         an expression used a symbol not yet defined
+DEPTH  EQU  APPRAM+532         COPY depth, 0 = the main file
+ENDF   EQU  APPRAM+534         END seen
+NAMLEN EQU  APPRAM+536         length of the name last scanned
+NAMBUF EQU  APPRAM+538         10 bytes: the name, upper case, 8 characters
+OPT    EQU  APPRAM+550         operand type Ts (2 words)
+OPS    EQU  APPRAM+554         operand register S (2 words)
+OPE    EQU  APPRAM+558         operand extra word (2 words)
+OPH    EQU  APPRAM+562         operand has an extra word (2 words)
+OPIDX  EQU  APPRAM+566         which operand (0 or 2)
+CLASS  EQU  APPRAM+568
+OPCODE EQU  APPRAM+570
+LABF   EQU  APPRAM+572         this line has a label
+LABNM  EQU  APPRAM+574         10 bytes: the label
+COPYF  EQU  APPRAM+586         non-zero: the line was a COPY (name in INCNM)
+INCNM  EQU  APPRAM+588         24 bytes: the include's full name
+SAVEN  EQU  APPRAM+612         scratch
+LABLEN EQU  APPRAM+634         the length of the line's label
+TMPW   EQU  APPRAM+614         scratch words (6)
+ERRTAB EQU  APPRAM+640         24 errors: line, (depth << 8 | code)
+CNTS   EQU  APPRAM+736         records read of each open file (4 words)
+NAMES  EQU  APPRAM+744         4 file names of 24 bytes
+STRBUF EQU  APPRAM+848         a string being built (80 bytes)
+OUTBUF EQU  APPRAM+1024        the image: 4,096 bytes
+OUTMAX EQU  4096
+SYMBAS EQU  >E000              the symbol table: 800 slots of 10 bytes
+SYMEND EQU  >E000+8000
+NSYMS  EQU  800
+
+* error codes
+E_SYN  EQU  1                  unknown mnemonic or bad statement
+E_OPR  EQU  2                  bad operand
+E_UND  EQU  3                  undefined symbol
+E_DUP  EQU  4                  label defined twice
+E_JMP  EQU  5                  jump out of range or to an odd address
+E_VAL  EQU  6                  value out of range
+E_FIL  EQU  7                  file not found or unreadable
+E_OVF  EQU  8                  image over 4,096 bytes
+E_ORG  EQU  9                  bad AORG
+E_LEN  EQU  10                 name longer than 8 characters
+E_EXP  EQU  11                 bad expression
+E_EQU  EQU  12                 EQU needs a label and a defined value
+E_PHS  EQU  13                 a label's value changed between the passes
+
+       AORG >C000
+       DATA ASMIN,ASMIN,0,0,ASMGO
+
+ASMIN  RT
+
+*----------------------------------------------------------------------
+* characters
+*----------------------------------------------------------------------
+* UPC - R0's high byte to upper case.  Leaf.
+UPC    CI   R0,>6100
+       JL   UPC9
+       CI   R0,>7A00
+       JH   UPC9
+       AI   R0,->2000
+UPC9   RT
+
+* NAMC - R1 = 1 if R0's high byte (upper case) may be inside a name:
+* a letter, digit, _ $ or .  Leaf.  Uses R1.
+NAMC   LI   R1,1
+       CI   R0,>3000
+       JL   NC2
+       CI   R0,>3900
+       JLE  NC9
+NC2    CI   R0,>4100
+       JL   NC3
+       CI   R0,>5A00
+       JLE  NC9
+NC3    CI   R0,>5F00
+       JEQ  NC9
+       CI   R0,>2400
+       JEQ  NC9
+       CI   R0,>2E00
+       JEQ  NC9
+       CLR  R1
+NC9    RT
+
+* SKSP - move R8 past blanks.  Leaf.  Uses R0.
+SKSP   CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2000
+       JNE  SKS9
+       INC  R8
+       JMP  SKSP
+SKS9   RT
+
+* GETNM - scan the name at R8 into NAMBUF (upper case, blank padded to
+* 8; NAMLEN = its real length).  Uses R0-R2.
+GETNM  .enter
+       LI   R1,NAMBUF
+       LI   R2,>2020
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       CLR  @NAMLEN
+GN1    CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       BL   @NAMC
+       MOV  R1,R1
+       JEQ  GN9
+       MOV  @NAMLEN,R2
+       CI   R2,8
+       JHE  GN2
+       MOVB R0,@NAMBUF(R2)
+GN2    INC  @NAMLEN
+       INC  R8
+       JMP  GN1
+GN9    .leave
+       RT
+
+* DECNUM - the decimal number at R8 into R0.  Leaf.  Uses R0-R2.
+DECNUM CLR  R0
+DN1    CLR  R1
+       CLR  R1
+       MOVB *R8,R1
+       SWPB R1
+       CI   R1,48
+       JL   DN9
+       CI   R1,57
+       JH   DN9
+       AI   R1,-48
+       MOV  R0,R2
+       SLA  R0,3
+       SLA  R2,1
+       A    R2,R0
+       A    R1,R0
+       INC  R8
+       JMP  DN1
+DN9    RT
+
+* HEXNUM - the hex digits at R8 into R0 (R1 = how many).  Leaf.
+* Uses R0-R3.
+HEXNUM CLR  R0
+       CLR  R3
+HX1    CLR  R1
+       CLR  R1
+       MOVB *R8,R1
+       SWPB R1
+       CI   R1,97
+       JL   HX2
+       AI   R1,-32
+HX2    CI   R1,48
+       JL   HX9
+       CI   R1,57
+       JLE  HX3
+       CI   R1,65
+       JL   HX9
+       CI   R1,70
+       JH   HX9
+       AI   R1,-7
+HX3    AI   R1,-48
+       SLA  R0,4
+       A    R1,R0
+       INC  R3
+       INC  R8
+       JMP  HX1
+HX9    MOV  R3,R1
+       RT
+
+*----------------------------------------------------------------------
+* errors
+*----------------------------------------------------------------------
+* ERR - note error R0 on this line.  Errors that both passes would find
+* are noted in pass 2 only.  Leaf.  Uses R0-R2.
+ERR    MOV  @PASS,R1
+       CI   R1,2
+       JNE  ERR9
+ERR1   MOV  @NERR,R1
+       INC  @NERR
+       CI   R1,24
+       JHE  ERR9
+       SLA  R1,2
+       AI   R1,ERRTAB
+       MOV  @LNUM,*R1+
+       MOV  @DEPTH,R2
+       SWPB R2
+       SOC  R0,R2
+       MOV  R2,*R1
+ERR9   RT
+* ERRA - the same, in either pass (for what only pass 1 can find)
+ERRA   B    @ERR1
+
+*----------------------------------------------------------------------
+* the symbol table: 800 slots of 10 bytes in two SAMS pages, mapped at
+* >E000: 8 name characters, a value word.  A slot whose first byte is 0
+* is free.
+*----------------------------------------------------------------------
+* MAPSYM - the symbol table pages in slot B.  Uses R0-R3, R12.
+MAPSYM .enter
+       LI   R0,PGFREE
+       BL   @MAPE
+       LI   R0,PGFREE+1
+       BL   @MAPF
+       .leave
+       RT
+
+* FINDSYM - find NAMBUF in the table.  R5 = its slot, or the free slot
+* where it belongs; R1 = 1 found, 0 not found, -1 the table is full.
+* Uses R0-R7.
+FINDSYM .enter
+       BL   @MAPSYM
+       MOV  @NAMBUF,R0         hash: ((w0 * 3 + w1) * 3 + w2) * 3 + w3
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+2,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+4,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+6,R0
+       MOV  R0,R2
+       CLR  R1
+       LI   R3,NSYMS
+       DIV  R3,R1              R2 = hash mod 800
+       MOV  R2,R5
+       SLA  R5,3
+       SLA  R2,1
+       A    R2,R5              slot * 10
+       AI   R5,SYMBAS
+       LI   R7,NSYMS
+FS1    MOVB *R5,R0
+       JEQ  FSFREE
+       C    *R5,@NAMBUF
+       JNE  FSNXT
+       C    @2(R5),@NAMBUF+2
+       JNE  FSNXT
+       C    @4(R5),@NAMBUF+4
+       JNE  FSNXT
+       C    @6(R5),@NAMBUF+6
+       JEQ  FSFND
+FSNXT  AI   R5,10
+       CI   R5,SYMEND
+       JL   FS2
+       LI   R5,SYMBAS
+FS2    DEC  R7
+       JNE  FS1
+       SETO R1
+       JMP  FS9
+FSFREE CLR  R1
+       JMP  FS9
+FSFND  LI   R1,1
+FS9    .leave
+       RT
+
+* DEFSYM - define NAMBUF as R4.  A second definition is an error (E_DUP);
+* a full table is E_OVF.  Uses R0-R7.
+DEFSYM .enter
+       MOV  @NAMLEN,R0
+       CI   R0,8
+       JLE  DS0
+       LI   R0,E_LEN
+       BL   @ERRA
+DS0    MOV  R4,@TMPW
+       BL   @FINDSYM
+       MOV  R1,R1
+       JGT  DSDUP
+       JLT  DSFUL
+       MOV  @NAMBUF,*R5
+       MOV  @NAMBUF+2,@2(R5)
+       MOV  @NAMBUF+4,@4(R5)
+       MOV  @NAMBUF+6,@6(R5)
+       MOV  @TMPW,@8(R5)
+       JMP  DS9
+DSDUP  MOV  @PASS,R0
+       CI   R0,1
+       JNE  DS9
+       LI   R0,E_DUP
+       BL   @ERRA
+       JMP  DS9
+DSFUL  LI   R0,E_OVF
+       BL   @ERRA
+DS9    .leave
+       RT

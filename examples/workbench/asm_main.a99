@@ -1,0 +1,269 @@
+
+*----------------------------------------------------------------------
+* the kernel's macros, built in
+*----------------------------------------------------------------------
+MENTER .enter
+       LI   R0,>064A           DECT R10
+       BL   @EMITW
+       LI   R0,>C68B           MOV R11,*R10
+       BL   @EMITW
+       .leave
+       RT
+MLEAVE .enter
+       LI   R0,>C2FA           MOV *R10+,R11
+       BL   @EMITW
+       .leave
+       RT
+MPUSH  .enter
+       BL   @GETREG
+       CI   R0,-1
+       JNE  MP1
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+MP1    MOV  R0,@TMPW
+       LI   R0,>064A
+       BL   @EMITW
+       MOV  @TMPW,R0
+       AI   R0,>C680           MOV Rn,*R10
+       BL   @EMITW
+       .leave
+       RT
+MPOP   .enter
+       BL   @GETREG
+       CI   R0,-1
+       JNE  MQ1
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+MQ1    SLA  R0,6
+       AI   R0,>C03A           MOV *R10+,Rn
+       BL   @EMITW
+       .leave
+       RT
+MINTS  .enter
+       LI   R0,>0300           LIMI 2
+       BL   @EMITW
+       LI   R0,2
+       BL   @EMITW
+       LI   R0,>0300           LIMI 0
+       BL   @EMITW
+       CLR  R0
+       BL   @EMITW
+       .leave
+       RT
+MCALLM .enter
+       BL   @EXPR              the page
+       MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR              the entry number
+       SLA  R0,1
+       AI   R0,>C000
+       MOV  R0,@TMPW+2
+       LI   R0,>0200           LI R0,page
+       BL   @EMITW
+       MOV  @TMPW,R0
+       BL   @EMITW
+       LI   R0,>0201           LI R1,>C000+2n
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       LI   R1,MODNM           BL @MODCALL
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       BL   @LOOKUP
+       MOV  R0,@TMPW
+       LI   R0,>06A0
+       BL   @EMITW
+       MOV  @TMPW,R0
+       BL   @EMITW
+       .leave
+       RT
+MODNM  TEXT 'MODCALL '
+
+*----------------------------------------------------------------------
+* a statement
+*----------------------------------------------------------------------
+* FINDOP - R5 = the table entry for the name in NAMBUF, or 0.  By binary
+* search of OPTAB (12 bytes an entry, sorted).  Uses R0-R7.
+FINDOP CLR  R3
+       LI   R4,NOPS-1
+FO1    C    R3,R4
+       JGT  FONO
+       MOV  R3,R5
+       A    R4,R5
+       SRL  R5,1
+       MOV  R5,R6
+       SLA  R6,3
+       MOV  R5,R7
+       SLA  R7,2
+       A    R7,R6
+       AI   R6,OPTAB
+       MOV  R6,R2
+       LI   R1,NAMBUF
+       LI   R0,4
+FO2    C    *R2+,*R1+
+       JL   FOLO
+       JH   FOHI
+       DEC  R0
+       JNE  FO2
+       MOV  R6,R5
+       RT
+FOLO   MOV  R5,R3
+       INC  R3
+       JMP  FO1
+FOHI   MOV  R5,R4
+       DEC  R4
+       JMP  FO1
+FONO   CLR  R5
+       RT
+
+* ASMLINE - the source line in LINE (R8 at its start).  Uses R0-R7.
+ASMLINE .enter
+       CLR  @LABF
+       CLR  @COPYF
+       CLR  @UNRES
+       MOV  @LC,@LCSTMT
+       CLR  R0
+       MOVB *R8,R0
+       JEQ  ALX
+       CI   R0,>2A00
+       JEQ  ALX
+       CI   R0,>3B00
+       JEQ  ALX
+       CI   R0,>2000
+       JEQ  ALOP
+       BL   @GETNM
+       MOV  @NAMLEN,@LABLEN
+       LI   R1,NAMBUF
+       LI   R2,LABNM
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       SETO @LABF
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>3A00
+       JNE  ALOP
+       INC  R8
+ALOP   BL   @SKSP
+       CLR  R0
+       MOVB *R8,R0
+       JNE  AL1
+       BL   @DEFLAB            a label alone
+       JMP  ALX
+AL1    CI   R0,>2A00
+       JEQ  ALX
+       BL   @GETNM
+       BL   @FINDOP
+       MOV  R5,R5
+       JNE  AL2
+       BL   @DEFLAB
+       LI   R0,E_SYN
+       BL   @ERR
+       JMP  ALX
+ALX    .leave
+       RT
+AL2    MOV  @8(R5),@OPCODE
+       MOV  @10(R5),@CLASS
+       BL   @SKSP
+       MOV  @CLASS,R0
+       CI   R0,20
+       JL   AL3                instructions and DATA and the macros are
+       CI   R0,21              aligned to a word before their label
+       JEQ  AL3
+       CI   R0,40
+       JHE  AL3
+       JMP  AL4
+AL3    BL   @ALIGN2
+AL4    MOV  @CLASS,R0
+       CI   R0,26
+       JEQ  ALEQU
+       CI   R0,20
+       JEQ  ALORG
+       BL   @DEFLAB
+       MOV  @LC,@LCSTMT
+       MOV  @CLASS,R0
+       CI   R0,12
+       JLE  ALINS
+       CI   R0,21
+       JEQ  ALDAT
+       CI   R0,22
+       JEQ  ALBYT
+       CI   R0,23
+       JEQ  ALTXT
+       CI   R0,24
+       JEQ  ALSTR
+       CI   R0,25
+       JEQ  ALEVN
+       CI   R0,27
+       JEQ  ALCPY
+       CI   R0,28
+       JEQ  ALEND
+       CI   R0,29
+       JEQ  ALBSS
+       CI   R0,40
+       JEQ  ALM0
+       CI   R0,41
+       JEQ  ALM1
+       CI   R0,42
+       JEQ  ALM2
+       CI   R0,43
+       JEQ  ALM3
+       CI   R0,44
+       JEQ  ALM4
+       CI   R0,45
+       JEQ  ALM5
+       JMP  AL8                LIST UNL TITL IDT PAGE: ignored
+ALINS  BL   @INSTR
+       JMP  AL8
+ALDAT  BL   @DDATA
+       JMP  AL8
+ALBYT  BL   @DBYTE
+       JMP  AL8
+ALTXT  BL   @DTEXT
+       JMP  AL8
+ALSTR  BL   @DSTRI
+       JMP  AL8
+ALEVN  MOV  @LC,R0
+       ANDI R0,1
+       JEQ  AL8
+       CLR  R0
+       BL   @EMITB
+       JMP  AL8
+ALCPY  BL   @DCOPY
+       B    @AL9
+ALEND  SETO @ENDF
+       B    @AL9
+ALBSS  BL   @DBSS
+       JMP  AL8
+ALM0   BL   @MENTER
+       JMP  AL8
+ALM1   BL   @MLEAVE
+       JMP  AL8
+ALM2   BL   @MPUSH
+       JMP  AL8
+ALM3   BL   @MPOP
+       JMP  AL8
+ALM4   BL   @MINTS
+       JMP  AL8
+ALM5   BL   @MCALLM
+       JMP  AL8
+ALEQU  BL   @DEQU
+       JMP  AL8
+ALORG  BL   @DAORG
+       BL   @DEFLAB
+       JMP  AL8
+AL8    MOV  @PASS,R0           pass 2: a name that is still not defined
+       CI   R0,2
+       JNE  AL9
+       MOV  @UNRES,@UNRES
+       JEQ  AL9
+       LI   R0,E_UND
+       BL   @ERR
+AL9    .leave
+       RT

@@ -1,0 +1,32 @@
+       AORG >C000
+A1     BYTE 1
+A2     DATA >1234
+A3     BYTE 2
+A4     MOV  R1,R2
+A5     BYTE 3
+A6     NOP
+A7     RT
+       BYTE 4,5
+A8     TEXT 'AB'
+A9     STRI 'xyz'
+       EVEN
+B1     DATA 2+3*4,>10-1,(2+3)*4,-1,10/3
+B2     DATA 'A','AB'
+       BYTE >FF,-1,'z'
+       BSS  3
+B3     DATA B3,A2,$
+       LI   R0,B4
+B4     AI   R1,-1
+       JMP  B4
+       JMP  $+4
+       SLA  R1,0
+       SLA  R2,15
+       LDCR R1,8
+       STCR *R2+,16
+       MOV  @B4(R3),*R5+
+       SBO  -1
+       TB   127
+       XOP  @B4,5
+       CLR  @>8300
+       DECT R10
+       END

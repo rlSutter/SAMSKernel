@@ -1,0 +1,7 @@
+{
+  "name": "WORKBENCH",
+  "min_pages": 128,
+  "modules": [
+    {"name": "asm", "source": "asm.a99"}
+  ]
+}

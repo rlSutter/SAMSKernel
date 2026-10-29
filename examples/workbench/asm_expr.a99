@@ -1,0 +1,367 @@
+
+*----------------------------------------------------------------------
+* expressions: + - * / and parentheses, strictly left to right
+*----------------------------------------------------------------------
+* LOOKUP - the value of the name in NAMBUF: R0, or 0 with UNRES set when
+* it is not defined (yet).  Uses R0-R7.
+LOOKUP .enter
+       BL   @FINDSYM
+       MOV  R1,R1
+       JGT  LKFND
+       JMP  LKNO
+LKFND  MOV  @8(R5),R0
+       JMP  LK9
+LKNO   SETO @UNRES
+       CLR  R0
+LK9    .leave
+       RT
+
+* TERM - a number (decimal, >hex), 'c' or 'cc', $, a name, (expression),
+* -term, +term, at R8: R0.  Uses R0-R7.
+TERM   .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2800
+       JEQ  TPAR
+       CI   R0,>2D00
+       JEQ  TNEG
+       CI   R0,>2B00
+       JEQ  TPLUS
+       CI   R0,>3000
+       JL   T1
+       CI   R0,>3900
+       JLE  TDEC
+T1     CI   R0,>3E00
+       JEQ  THEX
+       CI   R0,>2700
+       JEQ  TCHR
+       CI   R0,>2400
+       JEQ  TDLR
+       BL   @UPC
+       CI   R0,>4100
+       JL   TERR
+       CI   R0,>5A00
+       JLE  TNAM
+       CI   R0,>5F00
+       JEQ  TNAM
+       CI   R0,>2E00
+       JEQ  TNAM
+TERR   LI   R0,E_EXP
+       BL   @ERR
+       CLR  R0
+       JMP  T9
+TPAR   INC  R8
+       BL   @EXPR
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2900
+       JNE  TERR
+       INC  R8
+       JMP  T9
+TNEG   INC  R8
+       BL   @TERM
+       NEG  R0
+       JMP  T9
+TPLUS  INC  R8
+       BL   @TERM
+       JMP  T9
+TDEC   BL   @DECNUM
+       JMP  T9
+THEX   INC  R8
+       BL   @HEXNUM
+       MOV  R1,R1
+       JEQ  TERR
+       JMP  T9
+TCHR   INC  R8                 'c' or 'cc'
+       CLR  R0
+       MOVB *R8+,R0
+       JEQ  TERR
+       SWPB R0                 R0 = c
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JEQ  TCHR1              one character
+       CLR  R2
+       MOVB *R8+,R2
+       JEQ  TERR
+       SLA  R0,8               c1 c2
+       SWPB R2
+       A    R2,R0
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JNE  TERR
+TCHR1  INC  R8
+       JMP  T9
+TDLR   INC  R8
+       MOV  @LCSTMT,R0
+       JMP  T9
+TNAM   BL   @GETNM
+       MOV  @NAMLEN,R0
+       CI   R0,8
+       JLE  TN1
+       LI   R0,E_LEN
+       BL   @ERR
+TN1    BL   @LOOKUP
+T9     .leave
+       RT
+
+* EXPR - an expression at R8: R0.  Uses R0-R7.
+EXPR   .enter
+       BL   @TERM
+EX1    CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2B00
+       JEQ  EXADD
+       CI   R1,>2D00
+       JEQ  EXSUB
+       CI   R1,>2A00
+       JEQ  EXMUL
+       CI   R1,>2F00
+       JEQ  EXDIV
+       JMP  EX9
+EXADD  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       A    R1,R0
+       JMP  EX1
+EXSUB  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       S    R1,R0
+       JMP  EX1
+EXMUL  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       MPY  R1,R0
+       MOV  R1,R0
+       JMP  EX1
+EXDIV  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       MOV  R1,R1
+       JNE  EXD1
+       LI   R0,E_EXP
+       BL   @ERR
+       CLR  R0
+       JMP  EX1
+EXD1   MOV  R0,R3
+       CLR  R2
+       DIV  R1,R2
+       MOV  R2,R0
+       JMP  EX1
+EX9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* operands
+*----------------------------------------------------------------------
+* GETREG - R0 = the register number if R8 is at R0-R15, else -1 (and R8
+* has not moved).  Uses R0-R4.
+GETREG .enter
+       MOV  R8,@SAVEN
+       CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       CI   R0,>5200
+       JNE  GRNO
+       INC  R8
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>3000
+       JL   GRNO
+       CI   R0,>3900
+       JH   GRNO
+       BL   @DECNUM
+       CI   R0,15
+       JH   GRNO
+       MOV  R0,R4
+       CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       BL   @NAMC
+       MOV  R1,R1
+       JNE  GRNO
+       MOV  R4,R0
+       JMP  GR9
+GRNO   MOV  @SAVEN,R8
+       SETO R0
+GR9    .leave
+       RT
+
+* COMMA - the comma at R8, or an operand error.  Uses R0.
+COMMA  .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JEQ  CM1
+       LI   R0,E_OPR
+       BL   @ERR
+       JMP  CM9
+CM1    INC  R8
+CM9    .leave
+       RT
+
+* OPND - one operand at R8, into the slot R1 selects (0 or 2): OPT is
+* the address mode Ts (0 register, 1 *R, 2 symbolic or indexed, 3 *R+),
+* OPS the register, OPE the address word when OPH is set.  Uses R0-R7.
+OPND   .enter
+       MOV  R1,@OPIDX
+       CLR  @OPH(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2A00
+       JEQ  OPIND
+       CI   R0,>4000
+       JEQ  OPSYM
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       MOV  @OPIDX,R1
+       CLR  @OPT(R1)
+       MOV  R0,@OPS(R1)
+       JMP  OP9
+OPIND  INC  R8
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       MOV  @OPIDX,R1
+       MOV  R0,@OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2B00
+       JNE  OPI1
+       INC  R8
+       LI   R0,3
+       JMP  OPI2
+OPI1   LI   R0,1
+OPI2   MOV  R0,@OPT(R1)
+       JMP  OP9
+OPSYM  INC  R8
+       BL   @EXPR
+       MOV  @OPIDX,R1
+       MOV  R0,@OPE(R1)
+       SETO @OPH(R1)
+       LI   R0,2
+       MOV  R0,@OPT(R1)
+       CLR  @OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2800
+       JNE  OP9
+       INC  R8
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       JEQ  OPBAD              R0 itself cannot index
+       MOV  @OPIDX,R1
+       MOV  R0,@OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2900
+       JNE  OPBAD
+       INC  R8
+       JMP  OP9
+OPBAD  LI   R0,E_OPR
+       BL   @ERR
+OP9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* the image
+*----------------------------------------------------------------------
+* EMITB - the byte in R0's high byte at the location counter (pass 2
+* stores it in OUTBUF); the counter moves on.  Uses R0, R1.
+EMITB  .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  EB8
+       MOV  @ORGSET,@ORGSET
+       JNE  EB1
+       SETO @ORGSET
+       MOV  @LC,@ORGB
+EB1    MOV  @LC,R1
+       S    @ORGB,R1
+       CI   R1,OUTMAX
+       JL   EB2
+       LI   R0,E_OVF
+       BL   @ERR
+       JMP  EB8
+EB2    MOVB R0,@OUTBUF(R1)
+       INC  R1
+       C    R1,@OUTLEN
+       JLE  EB8
+       MOV  R1,@OUTLEN
+EB8    INC  @LC
+       .leave
+       RT
+
+* EMITW - the word R0 (high byte first).  Uses R0, R1.
+EMITW  .enter
+       MOV  R0,@TMPW+4
+       BL   @EMITB
+       MOV  @TMPW+4,R0
+       SWPB R0
+       BL   @EMITB
+       .leave
+       RT
+
+* ALIGN2 - pad to an even location counter.  Uses R0, R1.
+ALIGN2 .enter
+       MOV  @LC,R0
+       ANDI R0,1
+       JEQ  AL29
+       CLR  R0
+       BL   @EMITB
+AL29   .leave
+       RT
+
+* EMITX - the extra address words of the operands, source first.
+EMITX  .enter
+       MOV  @OPH,R0
+       JEQ  EXA1
+       MOV  @OPE,R0
+       BL   @EMITW
+EXA1   MOV  @OPH+2,R0
+       JEQ  EXA9
+       MOV  @OPE+2,R0
+       BL   @EMITW
+EXA9   .leave
+       RT
+
+* DEFLAB - define the line's label at the location counter (pass 1), or
+* check it still has that value (pass 2).  Uses R0-R7.
+DEFLAB .enter
+       MOV  @LABF,@LABF
+       JEQ  DL9
+       LI   R1,LABNM
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  @PASS,R0
+       CI   R0,1
+       JNE  DL2
+       MOV  @LC,R4
+       MOV  @LABLEN,@NAMLEN
+       BL   @DEFSYM
+       JMP  DL9
+DL2    BL   @FINDSYM
+       MOV  R1,R1
+       JGT  DL3
+       JMP  DL9
+DL3    C    @8(R5),@LC
+       JEQ  DL9
+       LI   R0,E_PHS
+       BL   @ERR
+DL9    .leave
+       RT

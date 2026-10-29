@@ -1,0 +1,1784 @@
+*======================================================================
+* asm.a99 - the native assembler: SAMS Kernel programs assembled on the
+* TI itself.  Reads a DIS/VAR 80 source file from disk (and the files it
+* COPYs), in two passes, and leaves the program image in OUTBUF.
+*
+* The dialect is xas99's, the part the examples use: labels, every TMS9900
+* instruction, the directives AORG DATA BYTE TEXT STRI EVEN EQU COPY END
+* BSS (LIST UNL TITL IDT PAGE are accepted and ignored), the kernel's
+* macros .enter .leave .push .pop .intsvc .callmod built in (COPY of
+* macros.a99 is accepted and ignored), and expressions of + - * / and
+* parentheses evaluated strictly left to right, as xas99 does.  Symbols are
+* case-insensitive and 8 characters long.  docs/WORKBENCH.md has the rest.
+*
+* Call it with MODCALL entry 4 (ASMGO): SRCNAME holds the file name (a
+* length-prefixed string, "DSK1.HELLO"); it returns R0 = the number of
+* errors and R1 = the image's length; the image is at OUTBUF, its first
+* byte at address ORGB.  The error list is in ERRTAB.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* ----- storage in slot A (APPRAM) -----
+SRCNAME EQU APPRAM             the input file name (32 bytes, shared)
+LINE   EQU  APPRAM+256         the source line, ended by a zero byte
+LLEN   EQU  APPRAM+512
+PASS   EQU  APPRAM+514         1 or 2
+LC     EQU  APPRAM+516         the location counter
+LCSTMT EQU  APPRAM+518         ... where this statement began ($)
+ORGB   EQU  APPRAM+520         the image's first address
+ORGSET EQU  APPRAM+522         non-zero once an AORG (or code) set it
+OUTLEN EQU  APPRAM+524         the image's length so far
+NERR   EQU  APPRAM+526         errors found
+LNUM   EQU  APPRAM+528         the line number in the file being read
+UNRES  EQU  APPRAM+530         an expression used a symbol not yet defined
+DEPTH  EQU  APPRAM+532         COPY depth, 0 = the main file
+ENDF   EQU  APPRAM+534         END seen
+NAMLEN EQU  APPRAM+536         length of the name last scanned
+NAMBUF EQU  APPRAM+538         10 bytes: the name, upper case, 8 characters
+OPT    EQU  APPRAM+550         operand type Ts (2 words)
+OPS    EQU  APPRAM+554         operand register S (2 words)
+OPE    EQU  APPRAM+558         operand extra word (2 words)
+OPH    EQU  APPRAM+562         operand has an extra word (2 words)
+OPIDX  EQU  APPRAM+566         which operand (0 or 2)
+CLASS  EQU  APPRAM+568
+OPCODE EQU  APPRAM+570
+LABF   EQU  APPRAM+572         this line has a label
+LABNM  EQU  APPRAM+574         10 bytes: the label
+COPYF  EQU  APPRAM+586         non-zero: the line was a COPY (name in INCNM)
+INCNM  EQU  APPRAM+588         24 bytes: the include's full name
+SAVEN  EQU  APPRAM+612         scratch
+LABLEN EQU  APPRAM+634         the length of the line's label
+TMPW   EQU  APPRAM+614         scratch words (6)
+ERRTAB EQU  APPRAM+640         24 errors: line, (depth << 8 | code)
+CNTS   EQU  APPRAM+736         records read of each open file (4 words)
+NAMES  EQU  APPRAM+744         4 file names of 24 bytes
+STRBUF EQU  APPRAM+848         a string being built (80 bytes)
+OUTBUF EQU  APPRAM+1024        the image: 4,096 bytes
+OUTMAX EQU  4096
+SYMBAS EQU  >E000              the symbol table: 800 slots of 10 bytes
+SYMEND EQU  >E000+8000
+NSYMS  EQU  800
+
+* error codes
+E_SYN  EQU  1                  unknown mnemonic or bad statement
+E_OPR  EQU  2                  bad operand
+E_UND  EQU  3                  undefined symbol
+E_DUP  EQU  4                  label defined twice
+E_JMP  EQU  5                  jump out of range or to an odd address
+E_VAL  EQU  6                  value out of range
+E_FIL  EQU  7                  file not found or unreadable
+E_OVF  EQU  8                  image over 4,096 bytes
+E_ORG  EQU  9                  bad AORG
+E_LEN  EQU  10                 name longer than 8 characters
+E_EXP  EQU  11                 bad expression
+E_EQU  EQU  12                 EQU needs a label and a defined value
+E_PHS  EQU  13                 a label's value changed between the passes
+
+       AORG >C000
+       DATA ASMIN,ASMIN,0,0,ASMGO
+
+ASMIN  RT
+
+*----------------------------------------------------------------------
+* characters
+*----------------------------------------------------------------------
+* UPC - R0's high byte to upper case.  Leaf.
+UPC    CI   R0,>6100
+       JL   UPC9
+       CI   R0,>7A00
+       JH   UPC9
+       AI   R0,->2000
+UPC9   RT
+
+* NAMC - R1 = 1 if R0's high byte (upper case) may be inside a name:
+* a letter, digit, _ $ or .  Leaf.  Uses R1.
+NAMC   LI   R1,1
+       CI   R0,>3000
+       JL   NC2
+       CI   R0,>3900
+       JLE  NC9
+NC2    CI   R0,>4100
+       JL   NC3
+       CI   R0,>5A00
+       JLE  NC9
+NC3    CI   R0,>5F00
+       JEQ  NC9
+       CI   R0,>2400
+       JEQ  NC9
+       CI   R0,>2E00
+       JEQ  NC9
+       CLR  R1
+NC9    RT
+
+* SKSP - move R8 past blanks.  Leaf.  Uses R0.
+SKSP   CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2000
+       JNE  SKS9
+       INC  R8
+       JMP  SKSP
+SKS9   RT
+
+* GETNM - scan the name at R8 into NAMBUF (upper case, blank padded to
+* 8; NAMLEN = its real length).  Uses R0-R2.
+GETNM  .enter
+       LI   R1,NAMBUF
+       LI   R2,>2020
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       MOV  R2,*R1+
+       CLR  @NAMLEN
+GN1    CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       BL   @NAMC
+       MOV  R1,R1
+       JEQ  GN9
+       MOV  @NAMLEN,R2
+       CI   R2,8
+       JHE  GN2
+       MOVB R0,@NAMBUF(R2)
+GN2    INC  @NAMLEN
+       INC  R8
+       JMP  GN1
+GN9    .leave
+       RT
+
+* DECNUM - the decimal number at R8 into R0.  Leaf.  Uses R0-R2.
+DECNUM CLR  R0
+DN1    CLR  R1
+       CLR  R1
+       MOVB *R8,R1
+       SWPB R1
+       CI   R1,48
+       JL   DN9
+       CI   R1,57
+       JH   DN9
+       AI   R1,-48
+       MOV  R0,R2
+       SLA  R0,3
+       SLA  R2,1
+       A    R2,R0
+       A    R1,R0
+       INC  R8
+       JMP  DN1
+DN9    RT
+
+* HEXNUM - the hex digits at R8 into R0 (R1 = how many).  Leaf.
+* Uses R0-R3.
+HEXNUM CLR  R0
+       CLR  R3
+HX1    CLR  R1
+       CLR  R1
+       MOVB *R8,R1
+       SWPB R1
+       CI   R1,97
+       JL   HX2
+       AI   R1,-32
+HX2    CI   R1,48
+       JL   HX9
+       CI   R1,57
+       JLE  HX3
+       CI   R1,65
+       JL   HX9
+       CI   R1,70
+       JH   HX9
+       AI   R1,-7
+HX3    AI   R1,-48
+       SLA  R0,4
+       A    R1,R0
+       INC  R3
+       INC  R8
+       JMP  HX1
+HX9    MOV  R3,R1
+       RT
+
+*----------------------------------------------------------------------
+* errors
+*----------------------------------------------------------------------
+* ERR - note error R0 on this line.  Errors that both passes would find
+* are noted in pass 2 only.  Leaf.  Uses R0-R2.
+ERR    MOV  @PASS,R1
+       CI   R1,2
+       JNE  ERR9
+ERR1   MOV  @NERR,R1
+       INC  @NERR
+       CI   R1,24
+       JHE  ERR9
+       SLA  R1,2
+       AI   R1,ERRTAB
+       MOV  @LNUM,*R1+
+       MOV  @DEPTH,R2
+       SWPB R2
+       SOC  R0,R2
+       MOV  R2,*R1
+ERR9   RT
+* ERRA - the same, in either pass (for what only pass 1 can find)
+ERRA   B    @ERR1
+
+*----------------------------------------------------------------------
+* the symbol table: 800 slots of 10 bytes in two SAMS pages, mapped at
+* >E000: 8 name characters, a value word.  A slot whose first byte is 0
+* is free.
+*----------------------------------------------------------------------
+* MAPSYM - the symbol table pages in slot B.  Uses R0-R3, R12.
+MAPSYM .enter
+       LI   R0,PGFREE
+       BL   @MAPE
+       LI   R0,PGFREE+1
+       BL   @MAPF
+       .leave
+       RT
+
+* FINDSYM - find NAMBUF in the table.  R5 = its slot, or the free slot
+* where it belongs; R1 = 1 found, 0 not found, -1 the table is full.
+* Uses R0-R7.
+FINDSYM .enter
+       BL   @MAPSYM
+       MOV  @NAMBUF,R0         hash: ((w0 * 3 + w1) * 3 + w2) * 3 + w3
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+2,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+4,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+6,R0
+       MOV  R0,R2
+       CLR  R1
+       LI   R3,NSYMS
+       DIV  R3,R1              R2 = hash mod 800
+       MOV  R2,R5
+       SLA  R5,3
+       SLA  R2,1
+       A    R2,R5              slot * 10
+       AI   R5,SYMBAS
+       LI   R7,NSYMS
+FS1    MOVB *R5,R0
+       JEQ  FSFREE
+       C    *R5,@NAMBUF
+       JNE  FSNXT
+       C    @2(R5),@NAMBUF+2
+       JNE  FSNXT
+       C    @4(R5),@NAMBUF+4
+       JNE  FSNXT
+       C    @6(R5),@NAMBUF+6
+       JEQ  FSFND
+FSNXT  AI   R5,10
+       CI   R5,SYMEND
+       JL   FS2
+       LI   R5,SYMBAS
+FS2    DEC  R7
+       JNE  FS1
+       SETO R1
+       JMP  FS9
+FSFREE CLR  R1
+       JMP  FS9
+FSFND  LI   R1,1
+FS9    .leave
+       RT
+
+* DEFSYM - define NAMBUF as R4.  A second definition is an error (E_DUP);
+* a full table is E_OVF.  Uses R0-R7.
+DEFSYM .enter
+       MOV  @NAMLEN,R0
+       CI   R0,8
+       JLE  DS0
+       LI   R0,E_LEN
+       BL   @ERRA
+DS0    MOV  R4,@TMPW
+       BL   @FINDSYM
+       MOV  R1,R1
+       JGT  DSDUP
+       JLT  DSFUL
+       MOV  @NAMBUF,*R5
+       MOV  @NAMBUF+2,@2(R5)
+       MOV  @NAMBUF+4,@4(R5)
+       MOV  @NAMBUF+6,@6(R5)
+       MOV  @TMPW,@8(R5)
+       JMP  DS9
+DSDUP  MOV  @PASS,R0
+       CI   R0,1
+       JNE  DS9
+       LI   R0,E_DUP
+       BL   @ERRA
+       JMP  DS9
+DSFUL  LI   R0,E_OVF
+       BL   @ERRA
+DS9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* expressions: + - * / and parentheses, strictly left to right
+*----------------------------------------------------------------------
+* LOOKUP - the value of the name in NAMBUF: R0, or 0 with UNRES set when
+* it is not defined (yet).  Uses R0-R7.
+LOOKUP .enter
+       BL   @FINDSYM
+       MOV  R1,R1
+       JGT  LKFND
+       JMP  LKNO
+LKFND  MOV  @8(R5),R0
+       JMP  LK9
+LKNO   SETO @UNRES
+       CLR  R0
+LK9    .leave
+       RT
+
+* TERM - a number (decimal, >hex), 'c' or 'cc', $, a name, (expression),
+* -term, +term, at R8: R0.  Uses R0-R7.
+TERM   .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2800
+       JEQ  TPAR
+       CI   R0,>2D00
+       JEQ  TNEG
+       CI   R0,>2B00
+       JEQ  TPLUS
+       CI   R0,>3000
+       JL   T1
+       CI   R0,>3900
+       JLE  TDEC
+T1     CI   R0,>3E00
+       JEQ  THEX
+       CI   R0,>2700
+       JEQ  TCHR
+       CI   R0,>2400
+       JEQ  TDLR
+       BL   @UPC
+       CI   R0,>4100
+       JL   TERR
+       CI   R0,>5A00
+       JLE  TNAM
+       CI   R0,>5F00
+       JEQ  TNAM
+       CI   R0,>2E00
+       JEQ  TNAM
+TERR   LI   R0,E_EXP
+       BL   @ERR
+       CLR  R0
+       JMP  T9
+TPAR   INC  R8
+       BL   @EXPR
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2900
+       JNE  TERR
+       INC  R8
+       JMP  T9
+TNEG   INC  R8
+       BL   @TERM
+       NEG  R0
+       JMP  T9
+TPLUS  INC  R8
+       BL   @TERM
+       JMP  T9
+TDEC   BL   @DECNUM
+       JMP  T9
+THEX   INC  R8
+       BL   @HEXNUM
+       MOV  R1,R1
+       JEQ  TERR
+       JMP  T9
+TCHR   INC  R8                 'c' or 'cc'
+       CLR  R0
+       MOVB *R8+,R0
+       JEQ  TERR
+       SWPB R0                 R0 = c
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JEQ  TCHR1              one character
+       CLR  R2
+       MOVB *R8+,R2
+       JEQ  TERR
+       SLA  R0,8               c1 c2
+       SWPB R2
+       A    R2,R0
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JNE  TERR
+TCHR1  INC  R8
+       JMP  T9
+TDLR   INC  R8
+       MOV  @LCSTMT,R0
+       JMP  T9
+TNAM   BL   @GETNM
+       MOV  @NAMLEN,R0
+       CI   R0,8
+       JLE  TN1
+       LI   R0,E_LEN
+       BL   @ERR
+TN1    BL   @LOOKUP
+T9     .leave
+       RT
+
+* EXPR - an expression at R8: R0.  Uses R0-R7.
+EXPR   .enter
+       BL   @TERM
+EX1    CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2B00
+       JEQ  EXADD
+       CI   R1,>2D00
+       JEQ  EXSUB
+       CI   R1,>2A00
+       JEQ  EXMUL
+       CI   R1,>2F00
+       JEQ  EXDIV
+       JMP  EX9
+EXADD  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       A    R1,R0
+       JMP  EX1
+EXSUB  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       S    R1,R0
+       JMP  EX1
+EXMUL  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       MPY  R1,R0
+       MOV  R1,R0
+       JMP  EX1
+EXDIV  INC  R8
+       .push R0
+       BL   @TERM
+       MOV  R0,R1
+       .pop R0
+       MOV  R1,R1
+       JNE  EXD1
+       LI   R0,E_EXP
+       BL   @ERR
+       CLR  R0
+       JMP  EX1
+EXD1   MOV  R0,R3
+       CLR  R2
+       DIV  R1,R2
+       MOV  R2,R0
+       JMP  EX1
+EX9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* operands
+*----------------------------------------------------------------------
+* GETREG - R0 = the register number if R8 is at R0-R15, else -1 (and R8
+* has not moved).  Uses R0-R4.
+GETREG .enter
+       MOV  R8,@SAVEN
+       CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       CI   R0,>5200
+       JNE  GRNO
+       INC  R8
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>3000
+       JL   GRNO
+       CI   R0,>3900
+       JH   GRNO
+       BL   @DECNUM
+       CI   R0,15
+       JH   GRNO
+       MOV  R0,R4
+       CLR  R0
+       MOVB *R8,R0
+       BL   @UPC
+       BL   @NAMC
+       MOV  R1,R1
+       JNE  GRNO
+       MOV  R4,R0
+       JMP  GR9
+GRNO   MOV  @SAVEN,R8
+       SETO R0
+GR9    .leave
+       RT
+
+* COMMA - the comma at R8, or an operand error.  Uses R0.
+COMMA  .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JEQ  CM1
+       LI   R0,E_OPR
+       BL   @ERR
+       JMP  CM9
+CM1    INC  R8
+CM9    .leave
+       RT
+
+* OPND - one operand at R8, into the slot R1 selects (0 or 2): OPT is
+* the address mode Ts (0 register, 1 *R, 2 symbolic or indexed, 3 *R+),
+* OPS the register, OPE the address word when OPH is set.  Uses R0-R7.
+OPND   .enter
+       MOV  R1,@OPIDX
+       CLR  @OPH(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2A00
+       JEQ  OPIND
+       CI   R0,>4000
+       JEQ  OPSYM
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       MOV  @OPIDX,R1
+       CLR  @OPT(R1)
+       MOV  R0,@OPS(R1)
+       JMP  OP9
+OPIND  INC  R8
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       MOV  @OPIDX,R1
+       MOV  R0,@OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2B00
+       JNE  OPI1
+       INC  R8
+       LI   R0,3
+       JMP  OPI2
+OPI1   LI   R0,1
+OPI2   MOV  R0,@OPT(R1)
+       JMP  OP9
+OPSYM  INC  R8
+       BL   @EXPR
+       MOV  @OPIDX,R1
+       MOV  R0,@OPE(R1)
+       SETO @OPH(R1)
+       LI   R0,2
+       MOV  R0,@OPT(R1)
+       CLR  @OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2800
+       JNE  OP9
+       INC  R8
+       BL   @GETREG
+       MOV  R0,R0
+       JLT  OPBAD
+       JEQ  OPBAD              R0 itself cannot index
+       MOV  @OPIDX,R1
+       MOV  R0,@OPS(R1)
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2900
+       JNE  OPBAD
+       INC  R8
+       JMP  OP9
+OPBAD  LI   R0,E_OPR
+       BL   @ERR
+OP9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* the image
+*----------------------------------------------------------------------
+* EMITB - the byte in R0's high byte at the location counter (pass 2
+* stores it in OUTBUF); the counter moves on.  Uses R0, R1.
+EMITB  .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  EB8
+       MOV  @ORGSET,@ORGSET
+       JNE  EB1
+       SETO @ORGSET
+       MOV  @LC,@ORGB
+EB1    MOV  @LC,R1
+       S    @ORGB,R1
+       CI   R1,OUTMAX
+       JL   EB2
+       LI   R0,E_OVF
+       BL   @ERR
+       JMP  EB8
+EB2    MOVB R0,@OUTBUF(R1)
+       INC  R1
+       C    R1,@OUTLEN
+       JLE  EB8
+       MOV  R1,@OUTLEN
+EB8    INC  @LC
+       .leave
+       RT
+
+* EMITW - the word R0 (high byte first).  Uses R0, R1.
+EMITW  .enter
+       MOV  R0,@TMPW+4
+       BL   @EMITB
+       MOV  @TMPW+4,R0
+       SWPB R0
+       BL   @EMITB
+       .leave
+       RT
+
+* ALIGN2 - pad to an even location counter.  Uses R0, R1.
+ALIGN2 .enter
+       MOV  @LC,R0
+       ANDI R0,1
+       JEQ  AL29
+       CLR  R0
+       BL   @EMITB
+AL29   .leave
+       RT
+
+* EMITX - the extra address words of the operands, source first.
+EMITX  .enter
+       MOV  @OPH,R0
+       JEQ  EXA1
+       MOV  @OPE,R0
+       BL   @EMITW
+EXA1   MOV  @OPH+2,R0
+       JEQ  EXA9
+       MOV  @OPE+2,R0
+       BL   @EMITW
+EXA9   .leave
+       RT
+
+* DEFLAB - define the line's label at the location counter (pass 1), or
+* check it still has that value (pass 2).  Uses R0-R7.
+DEFLAB .enter
+       MOV  @LABF,@LABF
+       JEQ  DL9
+       LI   R1,LABNM
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  @PASS,R0
+       CI   R0,1
+       JNE  DL2
+       MOV  @LC,R4
+       MOV  @LABLEN,@NAMLEN
+       BL   @DEFSYM
+       JMP  DL9
+DL2    BL   @FINDSYM
+       MOV  R1,R1
+       JGT  DL3
+       JMP  DL9
+DL3    C    @8(R5),@LC
+       JEQ  DL9
+       LI   R0,E_PHS
+       BL   @ERR
+DL9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* instructions
+*----------------------------------------------------------------------
+* The statement is at R8 after its operation; CLASS and OPCODE say what
+* the operation is.  Uses R0-R7.
+INSTR  .enter
+       CLR  @OPH
+       CLR  @OPH+2
+       MOV  @CLASS,R1
+       SLA  R1,1
+       MOV  @ICTAB-2(R1),R1
+       B    *R1
+ICTAB  DATA IC1,IC2,IC3,IC4,IC5,IC6,IC7,IC8,IC9,IC10,IC11,IC12
+* two general operands: opcode | Td<<10 | D<<6 | Ts<<4 | S
+IC1    BL   @SRCDST
+       MOV  @OPCODE,R0
+       MOV  @OPT+2,R1
+       SLA  R1,10
+       SOC  R1,R0
+       MOV  @OPS+2,R1
+       SLA  R1,6
+       SOC  R1,R0
+       BL   @TSBITS
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* a jump: the displacement in words from the next instruction
+IC2    BL   @EXPR
+       MOV  R0,R2
+       MOV  @LCSTMT,R1
+       INCT R1
+       S    R1,R2
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  IC2B
+       MOV  R2,R1
+       ANDI R1,1
+       JNE  IC2E
+       SRA  R2,1
+       CI   R2,-128
+       JLT  IC2E
+       CI   R2,127
+       JGT  IC2E
+       JMP  IC2B
+IC2E   LI   R0,E_JMP
+       BL   @ERR
+       CLR  R2
+IC2B   ANDI R2,>00FF
+       MOV  @OPCODE,R0
+       SOC  R2,R0
+       BL   @EMITW
+       B    @IN9
+* SBO SBZ TB: the signed CRU displacement
+IC3    BL   @EXPR
+       BL   @RANGE8
+       ANDI R0,>00FF
+       SOC  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* COC CZC XOR MPY DIV: a general source and a register
+IC4    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @GETREG
+       CI   R0,-1
+       JNE  IC4A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC4A   SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* XOP: a general source and the level
+IC5    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @EXPR
+       BL   @RANGE15
+       SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* LDCR STCR: a general operand and the bit count 1-16 (16 is 0)
+IC6    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @EXPR
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  IC6A
+       CI   R0,1
+       JL   IC6E
+       CI   R0,16
+       JLE  IC6A
+IC6E   LI   R0,E_VAL
+       BL   @ERR
+       LI   R0,1
+IC6A   ANDI R0,15
+       SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* SLA SRA SRC SRL: a register and the count 0-15
+IC7    BL   @GETREG
+       CI   R0,-1
+       JNE  IC7A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC7A   MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR
+       BL   @RANGE15
+       SLA  R0,4
+       SOC  @TMPW,R0
+       SOC  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* one general operand
+IC8    CLR  R1
+       BL   @OPND
+       MOV  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* no operand
+IC9    MOV  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* LI AI ANDI ORI CI: a register and an immediate word
+IC10   BL   @GETREG
+       CI   R0,-1
+       JNE  IC10A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC10A  SOC  @OPCODE,R0
+       MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR
+       MOV  R0,@TMPW+2
+       MOV  @TMPW,R0
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       B    @IN9
+* LWPI LIMI: an immediate word
+IC11   BL   @EXPR
+       MOV  R0,@TMPW+2
+       MOV  @OPCODE,R0
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       B    @IN9
+* STWP STST: a register
+IC12   BL   @GETREG
+       CI   R0,-1
+       JNE  IC12A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC12A  SOC  @OPCODE,R0
+       BL   @EMITW
+IN9    .leave
+       RT
+
+* SRCDST - the two operands "source,destination" into slots 0 and 2.
+SRCDST .enter
+       CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       LI   R1,2
+       BL   @OPND
+       .leave
+       RT
+
+* TSBITS - R0 |= Ts<<4 | S of operand 0 (TSBITS1 the same, nothing else).
+TSBITS
+TSBITS1 MOV @OPT,R1
+       SLA  R1,4
+       SOC  R1,R0
+       SOC  @OPS,R0
+       RT
+
+* RANGE8 - R0 must be -128..127 (pass 2 checks).  Uses R1.
+RANGE8 .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  RG89
+       CI   R0,-128
+       JLT  RG8E
+       CI   R0,127
+       JGT  RG8E
+       JMP  RG89
+RG8E   LI   R0,E_VAL
+       BL   @ERR
+       CLR  R0
+RG89   .leave
+       RT
+
+* RANGE15 - R0 must be 0-15 (pass 2 checks).  Uses R1.
+RANGE15 .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  RG159
+       CI   R0,15
+       JLE  RG159
+       LI   R0,E_VAL
+       BL   @ERR
+       CLR  R0
+RG159  .leave
+       RT
+
+*----------------------------------------------------------------------
+* directives
+*----------------------------------------------------------------------
+* DDATA - words.
+DDATA  .enter
+DD1    MOV  @LC,@LCSTMT        ($ in a data list is the counter right here)
+       BL   @EXPR
+       BL   @EMITW
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JNE  DD9
+       INC  R8
+       JMP  DD1
+DD9    .leave
+       RT
+
+* DBYTE - bytes.
+DBYTE  .enter
+DB1    MOV  @LC,@LCSTMT
+       BL   @EXPR
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  DB2
+       CI   R0,-128
+       JLT  DBE
+       CI   R0,255
+       JGT  DBE
+       JMP  DB2
+DBE    .push R0
+       LI   R0,E_VAL
+       BL   @ERR
+       .pop R0
+DB2    SWPB R0
+       BL   @EMITB
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JNE  DB9
+       INC  R8
+       JMP  DB1
+DB9    .leave
+       RT
+
+* GETSTR - the quoted string at R8 into STRBUF; R0 = its length.
+* A doubled quote is one quote.  Uses R0-R3.
+GETSTR .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2700
+       JEQ  GS0
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+       JMP  GS9
+GS0    INC  R8
+       CLR  R3
+GS1    CLR  R0
+       MOVB *R8,R0
+       JEQ  GSBAD              the line ended inside the string
+       INC  R8
+       CI   R0,>2700
+       JNE  GS2
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JNE  GSEND              the closing quote
+       INC  R8
+GS2    CI   R3,80
+       JHE  GS1
+       MOVB R0,@STRBUF(R3)
+       INC  R3
+       JMP  GS1
+GSBAD  LI   R0,E_OPR
+       BL   @ERR
+GSEND  MOV  R3,R0
+GS9    .leave
+       RT
+
+* DTEXT / DSTRI - the string's characters (STRI: after its length).
+DTEXT  .enter
+       BL   @GETSTR
+       JMP  DT1
+DSTRI  .enter
+       BL   @GETSTR
+       MOV  R0,@TMPW
+       SWPB R0
+       BL   @EMITB
+       MOV  @TMPW,R0
+DT1    MOV  R0,R3
+       MOV  R3,@TMPW
+       CLR  R2
+DT2    C    R2,@TMPW
+       JHE  DT9
+       MOV  R2,@TMPW+2
+       MOVB @STRBUF(R2),R0
+       BL   @EMITB
+       MOV  @TMPW+2,R2
+       INC  R2
+       JMP  DT2
+DT9    .leave
+       RT
+
+* DBSS - zero bytes.
+DBSS   .enter
+       BL   @EXPR
+       MOV  @UNRES,@UNRES
+       JEQ  DBS1
+       LI   R0,E_EXP
+       BL   @ERRA
+       CLR  R0
+DBS1   MOV  R0,@TMPW+2
+DBS2   MOV  @TMPW+2,@TMPW+2
+       JEQ  DBS9
+       CLR  R0
+       BL   @EMITB
+       DEC  @TMPW+2
+       JMP  DBS2
+DBS9   .leave
+       RT
+
+* DEQU - the line's label gets the value.
+DEQU   .enter
+       BL   @EXPR
+       MOV  R0,R4
+       MOV  @UNRES,@UNRES
+       JNE  DQE
+       MOV  @LABF,@LABF
+       JEQ  DQE
+       MOV  @PASS,R0
+       CI   R0,1
+       JNE  DQ9
+       LI   R1,LABNM
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  @LABLEN,@NAMLEN
+       BL   @DEFSYM
+       JMP  DQ9
+DQE    LI   R0,E_EQU
+       BL   @ERRA
+DQ9    .leave
+       RT
+
+* DAORG - the location counter (and, the first time, the image's base).
+DAORG  .enter
+       BL   @EXPR
+       MOV  @UNRES,@UNRES
+       JEQ  DA1
+       LI   R0,E_ORG
+       BL   @ERRA
+       CLR  R0
+DA1    MOV  R0,@LC
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  DA9
+       MOV  @ORGSET,@ORGSET
+       JNE  DA2
+       SETO @ORGSET
+       MOV  R0,@ORGB
+       JMP  DA9
+DA2    C    R0,@ORGB
+       JHE  DA9
+       LI   R0,E_ORG
+       BL   @ERR
+DA9    .leave
+       RT
+
+* DCOPY - COPY "name": the include's full name into INCNM; COPYF is set
+* unless the name is macros.a99 (the macros are built in).
+DCOPY  .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2200
+       JEQ  DC0
+       LI   R0,E_FIL
+       BL   @ERR
+       JMP  DC9
+DC0    INC  R8
+       LI   R3,STRBUF
+       CLR  R2
+DC1    CLR  R0
+       MOVB *R8,R0
+       JEQ  DC2
+       CI   R0,>2200
+       JEQ  DC2
+       INC  R8
+       BL   @UPC
+       CI   R2,40
+       JHE  DC1
+       MOVB R0,*R3+
+       INC  R2
+       JMP  DC1
+DC2    MOV  R2,@TMPW
+       LI   R1,STRBUF
+       LI   R2,MACNAM
+       LI   R3,10
+       CLR  R0
+       C    @TMPW,R3
+       JNE  DC3
+DC2A   CB   *R1+,*R2+
+       JNE  DC3
+       DEC  R3
+       JNE  DC2A
+       JMP  DC9                the macros are built in: nothing to do
+DC3    BL   @BLDINC
+       SETO @COPYF
+DC9    .leave
+       RT
+MACNAM TEXT 'MACROS.A99'
+       EVEN
+
+* BLDINC - INCNM := the main file's device ("DSK1.") + STRBUF's name, its
+* dots turned into slashes
+* (TMPW its length).  Uses R0-R4.
+BLDINC LI   R1,SRCNAME
+       LI   R2,INCNM+1
+       CLR  R3                 length so far
+       CLR  R4
+       MOVB *R1+,R4            the main name's length
+       SWPB R4
+BI1    MOV  R4,R4
+       JEQ  BI3                no dot: no device prefix
+       CLR  R0
+       MOVB *R1+,R0
+       MOVB R0,*R2+
+       INC  R3
+       DEC  R4
+       CI   R0,>2E00
+       JNE  BI1
+       JMP  BI4
+BI3    CLR  R3
+       LI   R2,INCNM+1
+BI4    LI   R1,STRBUF
+       MOV  @TMPW,R4
+BI5    MOV  R4,R4
+       JEQ  BI6
+       CLR  R0
+       MOVB *R1+,R0
+       CI   R0,>2E00           a TI file name has no dot: "kernel.equ" is
+       JNE  BI5A               the file KERNEL/EQU, as xdm99 stores it
+       LI   R0,>2F00
+BI5A   MOVB R0,*R2+
+       INC  R3
+       DEC  R4
+       JMP  BI5
+BI6    SWPB R3
+       MOVB R3,@INCNM
+       RT
+
+*----------------------------------------------------------------------
+* the kernel's macros, built in
+*----------------------------------------------------------------------
+MENTER .enter
+       LI   R0,>064A           DECT R10
+       BL   @EMITW
+       LI   R0,>C68B           MOV R11,*R10
+       BL   @EMITW
+       .leave
+       RT
+MLEAVE .enter
+       LI   R0,>C2FA           MOV *R10+,R11
+       BL   @EMITW
+       .leave
+       RT
+MPUSH  .enter
+       BL   @GETREG
+       CI   R0,-1
+       JNE  MP1
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+MP1    MOV  R0,@TMPW
+       LI   R0,>064A
+       BL   @EMITW
+       MOV  @TMPW,R0
+       AI   R0,>C680           MOV Rn,*R10
+       BL   @EMITW
+       .leave
+       RT
+MPOP   .enter
+       BL   @GETREG
+       CI   R0,-1
+       JNE  MQ1
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+MQ1    SLA  R0,6
+       AI   R0,>C03A           MOV *R10+,Rn
+       BL   @EMITW
+       .leave
+       RT
+MINTS  .enter
+       LI   R0,>0300           LIMI 2
+       BL   @EMITW
+       LI   R0,2
+       BL   @EMITW
+       LI   R0,>0300           LIMI 0
+       BL   @EMITW
+       CLR  R0
+       BL   @EMITW
+       .leave
+       RT
+MCALLM .enter
+       BL   @EXPR              the page
+       MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR              the entry number
+       SLA  R0,1
+       AI   R0,>C000
+       MOV  R0,@TMPW+2
+       LI   R0,>0200           LI R0,page
+       BL   @EMITW
+       MOV  @TMPW,R0
+       BL   @EMITW
+       LI   R0,>0201           LI R1,>C000+2n
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       LI   R1,MODNM           BL @MODCALL
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       BL   @LOOKUP
+       MOV  R0,@TMPW
+       LI   R0,>06A0
+       BL   @EMITW
+       MOV  @TMPW,R0
+       BL   @EMITW
+       .leave
+       RT
+MODNM  TEXT 'MODCALL '
+
+*----------------------------------------------------------------------
+* a statement
+*----------------------------------------------------------------------
+* FINDOP - R5 = the table entry for the name in NAMBUF, or 0.  By binary
+* search of OPTAB (12 bytes an entry, sorted).  Uses R0-R7.
+FINDOP CLR  R3
+       LI   R4,NOPS-1
+FO1    C    R3,R4
+       JGT  FONO
+       MOV  R3,R5
+       A    R4,R5
+       SRL  R5,1
+       MOV  R5,R6
+       SLA  R6,3
+       MOV  R5,R7
+       SLA  R7,2
+       A    R7,R6
+       AI   R6,OPTAB
+       MOV  R6,R2
+       LI   R1,NAMBUF
+       LI   R0,4
+FO2    C    *R2+,*R1+
+       JL   FOLO
+       JH   FOHI
+       DEC  R0
+       JNE  FO2
+       MOV  R6,R5
+       RT
+FOLO   MOV  R5,R3
+       INC  R3
+       JMP  FO1
+FOHI   MOV  R5,R4
+       DEC  R4
+       JMP  FO1
+FONO   CLR  R5
+       RT
+
+* ASMLINE - the source line in LINE (R8 at its start).  Uses R0-R7.
+ASMLINE .enter
+       CLR  @LABF
+       CLR  @COPYF
+       CLR  @UNRES
+       MOV  @LC,@LCSTMT
+       CLR  R0
+       MOVB *R8,R0
+       JEQ  ALX
+       CI   R0,>2A00
+       JEQ  ALX
+       CI   R0,>3B00
+       JEQ  ALX
+       CI   R0,>2000
+       JEQ  ALOP
+       BL   @GETNM
+       MOV  @NAMLEN,@LABLEN
+       LI   R1,NAMBUF
+       LI   R2,LABNM
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       SETO @LABF
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>3A00
+       JNE  ALOP
+       INC  R8
+ALOP   BL   @SKSP
+       CLR  R0
+       MOVB *R8,R0
+       JNE  AL1
+       BL   @DEFLAB            a label alone
+       JMP  ALX
+AL1    CI   R0,>2A00
+       JEQ  ALX
+       BL   @GETNM
+       BL   @FINDOP
+       MOV  R5,R5
+       JNE  AL2
+       BL   @DEFLAB
+       LI   R0,E_SYN
+       BL   @ERR
+       JMP  ALX
+ALX    .leave
+       RT
+AL2    MOV  @8(R5),@OPCODE
+       MOV  @10(R5),@CLASS
+       BL   @SKSP
+       MOV  @CLASS,R0
+       CI   R0,20
+       JL   AL3                instructions and DATA and the macros are
+       CI   R0,21              aligned to a word before their label
+       JEQ  AL3
+       CI   R0,40
+       JHE  AL3
+       JMP  AL4
+AL3    BL   @ALIGN2
+AL4    MOV  @CLASS,R0
+       CI   R0,26
+       JEQ  ALEQU
+       CI   R0,20
+       JEQ  ALORG
+       BL   @DEFLAB
+       MOV  @LC,@LCSTMT
+       MOV  @CLASS,R0
+       CI   R0,12
+       JLE  ALINS
+       CI   R0,21
+       JEQ  ALDAT
+       CI   R0,22
+       JEQ  ALBYT
+       CI   R0,23
+       JEQ  ALTXT
+       CI   R0,24
+       JEQ  ALSTR
+       CI   R0,25
+       JEQ  ALEVN
+       CI   R0,27
+       JEQ  ALCPY
+       CI   R0,28
+       JEQ  ALEND
+       CI   R0,29
+       JEQ  ALBSS
+       CI   R0,40
+       JEQ  ALM0
+       CI   R0,41
+       JEQ  ALM1
+       CI   R0,42
+       JEQ  ALM2
+       CI   R0,43
+       JEQ  ALM3
+       CI   R0,44
+       JEQ  ALM4
+       CI   R0,45
+       JEQ  ALM5
+       JMP  AL8                LIST UNL TITL IDT PAGE: ignored
+ALINS  BL   @INSTR
+       JMP  AL8
+ALDAT  BL   @DDATA
+       JMP  AL8
+ALBYT  BL   @DBYTE
+       JMP  AL8
+ALTXT  BL   @DTEXT
+       JMP  AL8
+ALSTR  BL   @DSTRI
+       JMP  AL8
+ALEVN  MOV  @LC,R0
+       ANDI R0,1
+       JEQ  AL8
+       CLR  R0
+       BL   @EMITB
+       JMP  AL8
+ALCPY  BL   @DCOPY
+       B    @AL9
+ALEND  SETO @ENDF
+       B    @AL9
+ALBSS  BL   @DBSS
+       JMP  AL8
+ALM0   BL   @MENTER
+       JMP  AL8
+ALM1   BL   @MLEAVE
+       JMP  AL8
+ALM2   BL   @MPUSH
+       JMP  AL8
+ALM3   BL   @MPOP
+       JMP  AL8
+ALM4   BL   @MINTS
+       JMP  AL8
+ALM5   BL   @MCALLM
+       JMP  AL8
+ALEQU  BL   @DEQU
+       JMP  AL8
+ALORG  BL   @DAORG
+       BL   @DEFLAB
+       JMP  AL8
+AL8    MOV  @PASS,R0           pass 2: a name that is still not defined
+       CI   R0,2
+       JNE  AL9
+       MOV  @UNRES,@UNRES
+       JEQ  AL9
+       LI   R0,E_UND
+       BL   @ERR
+AL9    .leave
+       RT
+
+*----------------------------------------------------------------------
+* files and the two passes
+*----------------------------------------------------------------------
+ATEXT  EQU  (RTEXT*16+RBG)*256
+
+* OPENCUR - open the file at this depth for reading (its name is in
+* NAMES).  R0 = 0 or the error.  Uses R0-R9.
+OPENCUR .enter
+       MOV  @DEPTH,R1
+       MOV  R1,R2
+       SLA  R2,3
+       SLA  R1,4
+       A    R1,R2
+       AI   R2,NAMES
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       .leave
+       RT
+
+* ASMFILE - assemble the file whose name is at R2 (length-prefixed), and
+* the files it COPYs, in the current pass.  Uses everything.
+ASMFILE .enter
+       MOV  @DEPTH,R1
+       CI   R1,3
+       JLE  AF0
+       LI   R0,E_FIL
+       BL   @ERR
+       B    @AF99
+AF0    MOV  R1,R3              keep the name at this depth
+       SLA  R3,3
+       MOV  R1,R4
+       SLA  R4,4
+       A    R4,R3
+       AI   R3,NAMES
+       CLR  R4
+       MOVB *R2+,R4
+       SWPB R4
+       CI   R4,23
+       JLE  AF0A
+       LI   R4,23
+AF0A   MOV  R4,R5
+       SWPB R5
+       MOVB R5,*R3+
+AF0B   MOV  R4,R4
+       JEQ  AF0C
+       MOVB *R2+,*R3+
+       DEC  R4
+       JMP  AF0B
+AF0C   SLA  R1,1
+       CLR  @CNTS(R1)
+       BL   @OPENCUR
+       MOV  R0,R0
+       JEQ  AFLP
+       LI   R0,E_FIL
+       BL   @ERRA
+       B    @AF99
+AFLP   MOV  @ENDF,@ENDF
+       JNE  AFCLS
+       LI   R1,LINE
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  AFEOF
+       MOV  R2,@LLEN
+       LI   R1,LINE
+       A    R2,R1
+       CLR  R3
+       MOVB R3,*R1             end the line with a zero
+       MOV  @DEPTH,R1
+       SLA  R1,1
+       INC  @CNTS(R1)
+       MOV  @CNTS(R1),@LNUM
+       LI   R8,LINE
+       BL   @ASMLINE
+       BL   @PROG
+       MOV  @COPYF,@COPYF
+       JEQ  AFLP
+       BL   @FCLOSE            an include: the file is closed, the
+       INC  @DEPTH             include is assembled, and this file is
+       LI   R2,INCNM           opened again and read up to where it was
+       BL   @ASMFILE
+       DEC  @DEPTH
+       MOV  @DEPTH,R1
+       SLA  R1,1
+       MOV  @CNTS(R1),@LNUM
+       BL   @OPENCUR
+       MOV  R0,R0
+       JNE  AFCLS
+       MOV  @DEPTH,R1
+       SLA  R1,1
+       MOV  @CNTS(R1),@TMPW+4
+AFSKP  MOV  @TMPW+4,@TMPW+4
+       JEQ  AFLP
+       LI   R1,LINE
+       BL   @FREAD
+       DEC  @TMPW+4
+       JMP  AFSKP
+AFEOF  CI   R0,FEEOF
+       JEQ  AFCLS
+       LI   R0,E_FIL
+       BL   @ERR
+AFCLS  BL   @FCLOSE
+AF99   .leave
+       RT
+
+* PROG - "pass n line m" on row 28 every 64 lines.
+PROG   .enter
+       MOV  @LNUM,R1
+       ANDI R1,>003F
+       JNE  PRG9
+       LI   R0,28*COLS+2
+       LI   R1,SPRG
+       LI   R2,ATEXT
+       BL   @PUTS
+       LI   R0,28*COLS+8
+       MOV  @PASS,R1
+       LI   R2,ATEXT
+       BL   @DECW
+       LI   R0,28*COLS+15
+       MOV  @LNUM,R1
+       LI   R2,ATEXT
+       BL   @DECW
+PRG9   .leave
+       RT
+SPRG   STRI 'Pass       line'
+       EVEN
+
+* PASSIN - the counters at the start of a pass.
+PASSIN CLR  @LC
+       CLR  @LCSTMT
+       CLR  @DEPTH
+       CLR  @ENDF
+       CLR  @LNUM
+       CLR  @UNRES
+       RT
+
+* ASMGO - assemble SRCNAME.  R0 = the number of errors; OUTLEN, ORGB and
+* OUTBUF hold the image.
+ASMGO  .enter
+       CLR  @NERR
+       CLR  @OUTLEN
+       CLR  @ORGSET
+       CLR  @ORGB
+       LI   R1,OUTBUF
+       LI   R2,OUTMAX/2
+AG1    CLR  *R1+
+       DEC  R2
+       JNE  AG1
+       BL   @MAPSYM
+       LI   R1,SYMBAS
+       LI   R2,4000
+AG2    CLR  *R1+
+       DEC  R2
+       JNE  AG2
+       LI   R0,1
+       MOV  R0,@PASS
+       BL   @PASSIN
+       LI   R2,SRCNAME
+       BL   @ASMFILE
+       LI   R0,2
+       MOV  R0,@PASS
+       BL   @PASSIN
+       CLR  @ORGSET
+       LI   R2,SRCNAME
+       BL   @ASMFILE
+       MOV  @NERR,R0
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* the operations: name (8 characters), opcode, class.  Classes 1-12 are
+* instructions (INSTR), 20 and up directives, 40 and up the macros.
+*----------------------------------------------------------------------
+OPTAB
+       TEXT '.CALLMOD'
+       DATA >0000,45
+       TEXT '.ENTER  '
+       DATA >0000,40
+       TEXT '.INTSVC '
+       DATA >0000,44
+       TEXT '.LEAVE  '
+       DATA >0000,41
+       TEXT '.POP    '
+       DATA >0000,43
+       TEXT '.PUSH   '
+       DATA >0000,42
+       TEXT 'A       '
+       DATA >A000,1
+       TEXT 'AB      '
+       DATA >B000,1
+       TEXT 'ABS     '
+       DATA >0740,8
+       TEXT 'AI      '
+       DATA >0220,10
+       TEXT 'ANDI    '
+       DATA >0240,10
+       TEXT 'AORG    '
+       DATA >0000,20
+       TEXT 'B       '
+       DATA >0440,8
+       TEXT 'BL      '
+       DATA >0680,8
+       TEXT 'BLWP    '
+       DATA >0400,8
+       TEXT 'BSS     '
+       DATA >0000,29
+       TEXT 'BYTE    '
+       DATA >0000,22
+       TEXT 'C       '
+       DATA >8000,1
+       TEXT 'CB      '
+       DATA >9000,1
+       TEXT 'CI      '
+       DATA >0280,10
+       TEXT 'CKOF    '
+       DATA >03C0,9
+       TEXT 'CKON    '
+       DATA >03A0,9
+       TEXT 'CLR     '
+       DATA >04C0,8
+       TEXT 'COC     '
+       DATA >2000,4
+       TEXT 'COPY    '
+       DATA >0000,27
+       TEXT 'CZC     '
+       DATA >2400,4
+       TEXT 'DATA    '
+       DATA >0000,21
+       TEXT 'DEC     '
+       DATA >0600,8
+       TEXT 'DECT    '
+       DATA >0640,8
+       TEXT 'DIV     '
+       DATA >3C00,4
+       TEXT 'END     '
+       DATA >0000,28
+       TEXT 'EQU     '
+       DATA >0000,26
+       TEXT 'EVEN    '
+       DATA >0000,25
+       TEXT 'IDLE    '
+       DATA >0340,9
+       TEXT 'IDT     '
+       DATA >0000,30
+       TEXT 'INC     '
+       DATA >0580,8
+       TEXT 'INCT    '
+       DATA >05C0,8
+       TEXT 'INV     '
+       DATA >0540,8
+       TEXT 'JEQ     '
+       DATA >1300,2
+       TEXT 'JGT     '
+       DATA >1500,2
+       TEXT 'JH      '
+       DATA >1B00,2
+       TEXT 'JHE     '
+       DATA >1400,2
+       TEXT 'JL      '
+       DATA >1A00,2
+       TEXT 'JLE     '
+       DATA >1200,2
+       TEXT 'JLT     '
+       DATA >1100,2
+       TEXT 'JMP     '
+       DATA >1000,2
+       TEXT 'JNC     '
+       DATA >1700,2
+       TEXT 'JNE     '
+       DATA >1600,2
+       TEXT 'JNO     '
+       DATA >1900,2
+       TEXT 'JOC     '
+       DATA >1800,2
+       TEXT 'JOP     '
+       DATA >1C00,2
+       TEXT 'LDCR    '
+       DATA >3000,6
+       TEXT 'LI      '
+       DATA >0200,10
+       TEXT 'LIMI    '
+       DATA >0300,11
+       TEXT 'LIST    '
+       DATA >0000,30
+       TEXT 'LREX    '
+       DATA >03E0,9
+       TEXT 'LWPI    '
+       DATA >02E0,11
+       TEXT 'MOV     '
+       DATA >C000,1
+       TEXT 'MOVB    '
+       DATA >D000,1
+       TEXT 'MPY     '
+       DATA >3800,4
+       TEXT 'NEG     '
+       DATA >0500,8
+       TEXT 'NOP     '
+       DATA >1000,9
+       TEXT 'ORI     '
+       DATA >0260,10
+       TEXT 'PAGE    '
+       DATA >0000,30
+       TEXT 'RSET    '
+       DATA >0360,9
+       TEXT 'RT      '
+       DATA >045B,9
+       TEXT 'RTWP    '
+       DATA >0380,9
+       TEXT 'S       '
+       DATA >6000,1
+       TEXT 'SB      '
+       DATA >7000,1
+       TEXT 'SBO     '
+       DATA >1D00,3
+       TEXT 'SBZ     '
+       DATA >1E00,3
+       TEXT 'SETO    '
+       DATA >0700,8
+       TEXT 'SLA     '
+       DATA >0A00,7
+       TEXT 'SOC     '
+       DATA >E000,1
+       TEXT 'SOCB    '
+       DATA >F000,1
+       TEXT 'SRA     '
+       DATA >0800,7
+       TEXT 'SRC     '
+       DATA >0B00,7
+       TEXT 'SRL     '
+       DATA >0900,7
+       TEXT 'STCR    '
+       DATA >3400,6
+       TEXT 'STRI    '
+       DATA >0000,24
+       TEXT 'STST    '
+       DATA >02C0,12
+       TEXT 'STWP    '
+       DATA >02A0,12
+       TEXT 'SWPB    '
+       DATA >06C0,8
+       TEXT 'SZC     '
+       DATA >4000,1
+       TEXT 'SZCB    '
+       DATA >5000,1
+       TEXT 'TB      '
+       DATA >1F00,3
+       TEXT 'TEXT    '
+       DATA >0000,23
+       TEXT 'TITL    '
+       DATA >0000,30
+       TEXT 'UNL     '
+       DATA >0000,30
+       TEXT 'X       '
+       DATA >0480,8
+       TEXT 'XOP     '
+       DATA >2C00,5
+       TEXT 'XOR     '
+       DATA >2800,4
+NOPS   EQU  92

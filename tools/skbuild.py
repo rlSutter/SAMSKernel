@@ -284,7 +284,7 @@ def main():
     for m in app['modules']:
         src = os.path.join(appdir, m['source'])
         out = os.path.join(bdir, m['name'] + '.bin')
-        b = asm(src, out, incs, os.path.join(bdir, m['name'] + '.lst'))
+        b = asm(src, out, incs, os.path.join(bdir, m['name'] + '.lst'), os.path.join(bdir, m['name'] + '.equ'))   # (the module's symbols: for tests and debugging)
         images.append(b)
         sizes.append((m['name'], len(b)))
     for d in app['data']:

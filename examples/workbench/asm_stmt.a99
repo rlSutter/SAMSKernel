@@ -1,0 +1,473 @@
+
+*----------------------------------------------------------------------
+* instructions
+*----------------------------------------------------------------------
+* The statement is at R8 after its operation; CLASS and OPCODE say what
+* the operation is.  Uses R0-R7.
+INSTR  .enter
+       CLR  @OPH
+       CLR  @OPH+2
+       MOV  @CLASS,R1
+       SLA  R1,1
+       MOV  @ICTAB-2(R1),R1
+       B    *R1
+ICTAB  DATA IC1,IC2,IC3,IC4,IC5,IC6,IC7,IC8,IC9,IC10,IC11,IC12
+* two general operands: opcode | Td<<10 | D<<6 | Ts<<4 | S
+IC1    BL   @SRCDST
+       MOV  @OPCODE,R0
+       MOV  @OPT+2,R1
+       SLA  R1,10
+       SOC  R1,R0
+       MOV  @OPS+2,R1
+       SLA  R1,6
+       SOC  R1,R0
+       BL   @TSBITS
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* a jump: the displacement in words from the next instruction
+IC2    BL   @EXPR
+       MOV  R0,R2
+       MOV  @LCSTMT,R1
+       INCT R1
+       S    R1,R2
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  IC2B
+       MOV  R2,R1
+       ANDI R1,1
+       JNE  IC2E
+       SRA  R2,1
+       CI   R2,-128
+       JLT  IC2E
+       CI   R2,127
+       JGT  IC2E
+       JMP  IC2B
+IC2E   LI   R0,E_JMP
+       BL   @ERR
+       CLR  R2
+IC2B   ANDI R2,>00FF
+       MOV  @OPCODE,R0
+       SOC  R2,R0
+       BL   @EMITW
+       B    @IN9
+* SBO SBZ TB: the signed CRU displacement
+IC3    BL   @EXPR
+       BL   @RANGE8
+       ANDI R0,>00FF
+       SOC  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* COC CZC XOR MPY DIV: a general source and a register
+IC4    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @GETREG
+       CI   R0,-1
+       JNE  IC4A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC4A   SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* XOP: a general source and the level
+IC5    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @EXPR
+       BL   @RANGE15
+       SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* LDCR STCR: a general operand and the bit count 1-16 (16 is 0)
+IC6    CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       BL   @EXPR
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  IC6A
+       CI   R0,1
+       JL   IC6E
+       CI   R0,16
+       JLE  IC6A
+IC6E   LI   R0,E_VAL
+       BL   @ERR
+       LI   R0,1
+IC6A   ANDI R0,15
+       SLA  R0,6
+       SOC  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* SLA SRA SRC SRL: a register and the count 0-15
+IC7    BL   @GETREG
+       CI   R0,-1
+       JNE  IC7A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC7A   MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR
+       BL   @RANGE15
+       SLA  R0,4
+       SOC  @TMPW,R0
+       SOC  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* one general operand
+IC8    CLR  R1
+       BL   @OPND
+       MOV  @OPCODE,R0
+       BL   @TSBITS1
+       BL   @EMITW
+       BL   @EMITX
+       B    @IN9
+* no operand
+IC9    MOV  @OPCODE,R0
+       BL   @EMITW
+       B    @IN9
+* LI AI ANDI ORI CI: a register and an immediate word
+IC10   BL   @GETREG
+       CI   R0,-1
+       JNE  IC10A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC10A  SOC  @OPCODE,R0
+       MOV  R0,@TMPW
+       BL   @COMMA
+       BL   @EXPR
+       MOV  R0,@TMPW+2
+       MOV  @TMPW,R0
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       B    @IN9
+* LWPI LIMI: an immediate word
+IC11   BL   @EXPR
+       MOV  R0,@TMPW+2
+       MOV  @OPCODE,R0
+       BL   @EMITW
+       MOV  @TMPW+2,R0
+       BL   @EMITW
+       B    @IN9
+* STWP STST: a register
+IC12   BL   @GETREG
+       CI   R0,-1
+       JNE  IC12A
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+IC12A  SOC  @OPCODE,R0
+       BL   @EMITW
+IN9    .leave
+       RT
+
+* SRCDST - the two operands "source,destination" into slots 0 and 2.
+SRCDST .enter
+       CLR  R1
+       BL   @OPND
+       BL   @COMMA
+       LI   R1,2
+       BL   @OPND
+       .leave
+       RT
+
+* TSBITS - R0 |= Ts<<4 | S of operand 0 (TSBITS1 the same, nothing else).
+TSBITS
+TSBITS1 MOV @OPT,R1
+       SLA  R1,4
+       SOC  R1,R0
+       SOC  @OPS,R0
+       RT
+
+* RANGE8 - R0 must be -128..127 (pass 2 checks).  Uses R1.
+RANGE8 .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  RG89
+       CI   R0,-128
+       JLT  RG8E
+       CI   R0,127
+       JGT  RG8E
+       JMP  RG89
+RG8E   LI   R0,E_VAL
+       BL   @ERR
+       CLR  R0
+RG89   .leave
+       RT
+
+* RANGE15 - R0 must be 0-15 (pass 2 checks).  Uses R1.
+RANGE15 .enter
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  RG159
+       CI   R0,15
+       JLE  RG159
+       LI   R0,E_VAL
+       BL   @ERR
+       CLR  R0
+RG159  .leave
+       RT
+
+*----------------------------------------------------------------------
+* directives
+*----------------------------------------------------------------------
+* DDATA - words.
+DDATA  .enter
+DD1    MOV  @LC,@LCSTMT        ($ in a data list is the counter right here)
+       BL   @EXPR
+       BL   @EMITW
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JNE  DD9
+       INC  R8
+       JMP  DD1
+DD9    .leave
+       RT
+
+* DBYTE - bytes.
+DBYTE  .enter
+DB1    MOV  @LC,@LCSTMT
+       BL   @EXPR
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  DB2
+       CI   R0,-128
+       JLT  DBE
+       CI   R0,255
+       JGT  DBE
+       JMP  DB2
+DBE    .push R0
+       LI   R0,E_VAL
+       BL   @ERR
+       .pop R0
+DB2    SWPB R0
+       BL   @EMITB
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2C00
+       JNE  DB9
+       INC  R8
+       JMP  DB1
+DB9    .leave
+       RT
+
+* GETSTR - the quoted string at R8 into STRBUF; R0 = its length.
+* A doubled quote is one quote.  Uses R0-R3.
+GETSTR .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2700
+       JEQ  GS0
+       LI   R0,E_OPR
+       BL   @ERR
+       CLR  R0
+       JMP  GS9
+GS0    INC  R8
+       CLR  R3
+GS1    CLR  R0
+       MOVB *R8,R0
+       JEQ  GSBAD              the line ended inside the string
+       INC  R8
+       CI   R0,>2700
+       JNE  GS2
+       CLR  R1
+       MOVB *R8,R1
+       CI   R1,>2700
+       JNE  GSEND              the closing quote
+       INC  R8
+GS2    CI   R3,80
+       JHE  GS1
+       MOVB R0,@STRBUF(R3)
+       INC  R3
+       JMP  GS1
+GSBAD  LI   R0,E_OPR
+       BL   @ERR
+GSEND  MOV  R3,R0
+GS9    .leave
+       RT
+
+* DTEXT / DSTRI - the string's characters (STRI: after its length).
+DTEXT  .enter
+       BL   @GETSTR
+       JMP  DT1
+DSTRI  .enter
+       BL   @GETSTR
+       MOV  R0,@TMPW
+       SWPB R0
+       BL   @EMITB
+       MOV  @TMPW,R0
+DT1    MOV  R0,R3
+       MOV  R3,@TMPW
+       CLR  R2
+DT2    C    R2,@TMPW
+       JHE  DT9
+       MOV  R2,@TMPW+2
+       MOVB @STRBUF(R2),R0
+       BL   @EMITB
+       MOV  @TMPW+2,R2
+       INC  R2
+       JMP  DT2
+DT9    .leave
+       RT
+
+* DBSS - zero bytes.
+DBSS   .enter
+       BL   @EXPR
+       MOV  @UNRES,@UNRES
+       JEQ  DBS1
+       LI   R0,E_EXP
+       BL   @ERRA
+       CLR  R0
+DBS1   MOV  R0,@TMPW+2
+DBS2   MOV  @TMPW+2,@TMPW+2
+       JEQ  DBS9
+       CLR  R0
+       BL   @EMITB
+       DEC  @TMPW+2
+       JMP  DBS2
+DBS9   .leave
+       RT
+
+* DEQU - the line's label gets the value.
+DEQU   .enter
+       BL   @EXPR
+       MOV  R0,R4
+       MOV  @UNRES,@UNRES
+       JNE  DQE
+       MOV  @LABF,@LABF
+       JEQ  DQE
+       MOV  @PASS,R0
+       CI   R0,1
+       JNE  DQ9
+       LI   R1,LABNM
+       LI   R2,NAMBUF
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  @LABLEN,@NAMLEN
+       BL   @DEFSYM
+       JMP  DQ9
+DQE    LI   R0,E_EQU
+       BL   @ERRA
+DQ9    .leave
+       RT
+
+* DAORG - the location counter (and, the first time, the image's base).
+DAORG  .enter
+       BL   @EXPR
+       MOV  @UNRES,@UNRES
+       JEQ  DA1
+       LI   R0,E_ORG
+       BL   @ERRA
+       CLR  R0
+DA1    MOV  R0,@LC
+       MOV  @PASS,R1
+       CI   R1,2
+       JNE  DA9
+       MOV  @ORGSET,@ORGSET
+       JNE  DA2
+       SETO @ORGSET
+       MOV  R0,@ORGB
+       JMP  DA9
+DA2    C    R0,@ORGB
+       JHE  DA9
+       LI   R0,E_ORG
+       BL   @ERR
+DA9    .leave
+       RT
+
+* DCOPY - COPY "name": the include's full name into INCNM; COPYF is set
+* unless the name is macros.a99 (the macros are built in).
+DCOPY  .enter
+       CLR  R0
+       MOVB *R8,R0
+       CI   R0,>2200
+       JEQ  DC0
+       LI   R0,E_FIL
+       BL   @ERR
+       JMP  DC9
+DC0    INC  R8
+       LI   R3,STRBUF
+       CLR  R2
+DC1    CLR  R0
+       MOVB *R8,R0
+       JEQ  DC2
+       CI   R0,>2200
+       JEQ  DC2
+       INC  R8
+       BL   @UPC
+       CI   R2,40
+       JHE  DC1
+       MOVB R0,*R3+
+       INC  R2
+       JMP  DC1
+DC2    MOV  R2,@TMPW
+       LI   R1,STRBUF
+       LI   R2,MACNAM
+       LI   R3,10
+       CLR  R0
+       C    @TMPW,R3
+       JNE  DC3
+DC2A   CB   *R1+,*R2+
+       JNE  DC3
+       DEC  R3
+       JNE  DC2A
+       JMP  DC9                the macros are built in: nothing to do
+DC3    BL   @BLDINC
+       SETO @COPYF
+DC9    .leave
+       RT
+MACNAM TEXT 'MACROS.A99'
+       EVEN
+
+* BLDINC - INCNM := the main file's device ("DSK1.") + STRBUF's name, its
+* dots turned into slashes
+* (TMPW its length).  Uses R0-R4.
+BLDINC LI   R1,SRCNAME
+       LI   R2,INCNM+1
+       CLR  R3                 length so far
+       CLR  R4
+       MOVB *R1+,R4            the main name's length
+       SWPB R4
+BI1    MOV  R4,R4
+       JEQ  BI3                no dot: no device prefix
+       CLR  R0
+       MOVB *R1+,R0
+       MOVB R0,*R2+
+       INC  R3
+       DEC  R4
+       CI   R0,>2E00
+       JNE  BI1
+       JMP  BI4
+BI3    CLR  R3
+       LI   R2,INCNM+1
+BI4    LI   R1,STRBUF
+       MOV  @TMPW,R4
+BI5    MOV  R4,R4
+       JEQ  BI6
+       CLR  R0
+       MOVB *R1+,R0
+       CI   R0,>2E00           a TI file name has no dot: "kernel.equ" is
+       JNE  BI5A               the file KERNEL/EQU, as xdm99 stores it
+       LI   R0,>2F00
+BI5A   MOVB R0,*R2+
+       INC  R3
+       DEC  R4
+       JMP  BI5
+BI6    SWPB R3
+       MOVB R3,@INCNM
+       RT
