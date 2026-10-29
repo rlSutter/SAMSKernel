@@ -6,6 +6,23 @@
 * Shows the file service (FOPEN of "DSK1.", FREAD, FCNUM, FCLOSE) and
 * module switching.
 *======================================================================
+* TWO MODULES AND A DISK CATALOG.  This is a program in two modules
+* (browse.a99 and view.a99, each at >C000 in its own SAMS pages; shared.a99
+* holds what they both include).  Only one module is mapped at a time.  They
+* cooperate in two ways: through variables at fixed addresses in APPRAM, which
+* stay put when the module changes (shared.a99 lists them), and through GOMOD,
+* which switches modules and hands the new one a number (its INIT's R1).  The
+* browser sends the viewer the file's number; the viewer returns with GOMOD
+* PREVPG ('whoever ran before me').
+*
+* The catalog trick.  There is no 'list the files' call: the TI disk system
+* makes the catalog look like a file.  Open the device name alone ('DSK1.') as
+* INTERNAL, FIXED, record length 38 and read it like any file.  The first
+* record describes the disk (its name, its size in sectors, the free sectors);
+* each following record describes one file (its name, a type code, its size)
+* and an empty name ends the list.  The numbers inside the records are stored
+* in the console's floating-point radix-100 form, which FCNUM turns into an
+* integer.
        COPY "kernel.equ"
        COPY "macros.a99"
        COPY "shared.a99"

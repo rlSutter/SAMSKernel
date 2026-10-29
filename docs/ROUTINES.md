@@ -46,7 +46,7 @@ set VRAM read address.  R0 = address
 
 ### `VMBW`
 
-block write.  R0 = VRAM address, R1 = source, R2 = byte count
+block write.  R0 = VRAM address, R1 = source, R2 = byte count VMBW is the workhorse (all text drawing ends in it).  The inner loop is unrolled 16 times: each MOVB *R1+,@VDPWD costs a fixed time, and the loop test and jump would otherwise cost as much again per byte, so unrolling makes block writes nearly twice as fast.  The remainder (fewer than 16 bytes) goes one at a time.
 
 ### `VMBR`
 
@@ -62,7 +62,7 @@ single byte write.  R0 = VRAM address, R1 = byte (high)
 
 ### `VSYNC`
 
-wait for the next vertical blank.  Interrupts are allowed in only here, long enough for the console ISR to tick its frame counter (and play any sound list); masked everywhere else.  The screen-blank timer is not cleared here but on each key (KPUT), so the console blanks the screen after nine idle minutes.  Adds 1 to FRAME.  Uses R0.
+wait for the next vertical blank.  Interrupts are allowed in only here, long enough for the console ISR to tick its frame counter (and play any sound list); masked everywhere else.  The screen-blank timer is not cleared here but on each key (KPUT), so the console blanks the screen after nine idle minutes.  Adds 1 to FRAME.  Uses R0. The console's own interrupt routine (in its ROM) runs once per video frame, when the chip raises its interrupt: it adds to the frame counter byte at >8379 and plays sound lists.  VSYNC lets that happen deliberately: it notes the counter, enables interrupts (LIMI 2), waits for the byte to change (the interrupt has run once), and masks again.  So the main loop is locked to the 60 (or 50) Hz frame, and FRAME, the kernel's own 16-bit counter, counts frames since start.
 
 ### `VSBR`
 

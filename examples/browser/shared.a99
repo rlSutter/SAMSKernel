@@ -3,12 +3,19 @@
 * variables they share in slot A.  Included by both.  (Modules share
 * state only through slot A addresses fixed like this.)
 *======================================================================
+* Colour attributes for both modules, written out once so that they agree (see
+* examples/hello for what an attribute is).
 ANORM  EQU  (RTEXT*16+RBG)*256
 ABAR   EQU  (RBARFG*16+RBARBG)*256
 ASEL   EQU  (RSELFG*16+RSELBG)*256
 AMARK  EQU  (RMARK*16+RBG)*256
 AERR   EQU  (RERROR*16+RBG)*256
 
+* Modules cannot see each other's labels, only the numbers both have been
+* given, so shared state is declared once in a file both COPY, at fixed
+* addresses in APPRAM.  APPRAM is not cleared or moved when the kernel
+* switches modules, so these keep their values across a trip through the
+* viewer.  The browser's variables are first, the viewer's follow them.
 * the browser's variables (APPRAM, so they survive a trip through the viewer)
 NFILES EQU  APPRAM+0           files found in the catalog (at most MAXF)
 SEL    EQU  APPRAM+2           the selected one

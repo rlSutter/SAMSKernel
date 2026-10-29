@@ -6,7 +6,30 @@
 * access (VREG) and the DMA row mover (VSHIFT).  The kernel includes it;
 * the loader does not.  docs/VIDEO-MODES.md is the guide.
 *======================================================================
+* MODES AND COLOUR SCHEMES.  A video MODE is a combination of the chip's
+* registers: how the name table is read (as characters, as tile numbers), how
+* many columns and rows, how colour is chosen, and where in VRAM each table
+* sits.  VMODE takes a base mode and a set of option bits, writes every
+* register the mode needs, loads the tables to the right VRAM addresses,
+* clears the screen and sets the variables the text routines use (TXCOLS,
+* TXROWS, NAMBAS, ATRTAB ...).  That last part is the point of the design: the
+* text routines (text.a99) and every program that uses COLS and TXCOLS follow
+* the mode without knowing which it is.
+*
+* A COLOUR SCHEME is sixteen palette entries, one per ROLE (kdefs.a99, 'Colour
+* roles').  Cells say 'role 2 on role 1', never 'white on blue'; the scheme
+* says what each role looks like.  Changing the scheme (SETSCH) rewrites only
+* the palette, sixteen words in the F18A, and every cell on the screen changes
+* colour at once without being redrawn.  The five schemes are in the data bank
+* (databank.a99), a SAMS page the kernel maps into slot B only for the moment
+* it reads them.
 
+* LDSCHM is the pattern to copy whenever a routine needs a window that is not
+* its own.  It first saves the pages slot B holds now (CURBE, CURBF) on the
+* software stack; maps the data bank with PAGEB; does its work; and restores
+* slot B with SETPB, so the caller finds its window exactly as it left it.
+* Without that, a program that has a page of its own at >E000 would find it
+* replaced by the font after any colour change.
 * LDSCHM - load colour scheme SCHEME (0-4) into palette entries 0-15.  In
 * an enhanced colour mode (tiles) entry 1 is then made the text colour
 * (the scheme's entry 2), so that attribute 0 shows text on the page: with

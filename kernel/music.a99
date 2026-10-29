@@ -17,6 +17,23 @@
 *   >40->7F    write (command AND >3F) to the chip: a tone's second byte
 *   >80->FF    write the byte to the chip: a latch, volume or noise byte
 *======================================================================
+* MUSIC WITHOUT A TIMER.  The sound chip plays whatever it was last told until
+* it is told something else, so a song is a list of 'tell the chip this, then
+* wait N frames' commands.  The TI has no timer interrupt to rely on; the
+* kernel's main loop already runs once per video frame, so the player is just
+* a routine called once per frame (MUTICK) that counts down the current wait
+* and, when it reaches zero, reads commands from the song until the next wait.
+* Songs therefore play at a steady 60 (or 50) frames a second whatever else
+* the program does, as long as the program lets the frame loop turn: a loop
+* that never returns to the main loop and never calls KIDLE stalls the music.
+*
+* Where the song is: in SAMS pages, so a song can be many times larger than
+* slot A.  The player maps its page into window E when it needs to read a
+* command and puts the window back as it found it (GETPB / SETPB style), so
+* music never disturbs the application's own paging.  A command's number tells
+* what it is: >01 to >3F a wait, >40 to >7F the second byte of a tone, >80 to
+* >FF a raw byte for the chip (a tone's first byte, a volume, noise) and >00
+* the end or the loop.
 
 * MUPLAY - start the song whose first SAMS page is R0 (the song's pages
 * must be consecutive).  Any song playing is replaced.  R0 = 0 if it began,

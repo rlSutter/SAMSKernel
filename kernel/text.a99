@@ -6,6 +6,22 @@
 * (foreground role << 4 | background role).  Attributes are passed in the
 * high byte.
 *======================================================================
+* THE TEXT SCREEN.  In the text modes the screen is a grid of cells.  Each
+* cell has a byte in the NAME TABLE (which glyph to draw) and, in the modes
+* with per-cell colour, a byte in the ATTRIBUTE TABLE (which colours).  Both
+* tables live in VRAM, so every routine here ends in a VRAM write (VMBW,
+* VFILL, VSBW).  A POSITION is a number, row * columns + column, counting from
+* 0 at the top left: the same number indexes both tables.  NAMBAS and ATRTAB
+* are the tables' VRAM addresses, and TXCOLS, TXROWS, TXATTR (non-zero when
+* the mode has an attribute table) describe the current mode; VMODE sets them
+* all.  So these routines work unchanged in Text 80, Text 40 and Graphics I.
+*
+* Arguments follow one convention throughout: a position in R0, a string
+* address in R1, an attribute in R2 (in the HIGH byte, like every byte
+* argument on this CPU).  The attribute holds two ROLE numbers (foreground in
+* the high nibble, background in the low) which the colour scheme turns into
+* colours; see kdefs.a99, 'Colour roles'.  Each routine's header lists the
+* registers it changes: callers rely on that list.
 
 * The text routines follow the video mode (VMODE sets TXCOLS, TXROWS,
 * TXCELLS, TXATTR, NAMBAS): a position is row * TXCOLS + column, and in a
@@ -14,6 +30,10 @@
 * "attribute" is the ECM attribute byte (docs/VIDEO-MODES.md).  They are for
 * the modes whose names are glyphs: Text 80, Text 40 and Graphics I.
 
+* PUTS is the routine most programs call most.  A string is a length byte
+* followed by the characters (what STRI assembles); PUTS writes the glyphs to
+* the name table with one block write, then paints the same cells' attributes
+* with one fill, so a string costs two VRAM transfers however long it is.
 * PUTS - length-prefixed string at R1 to position R0, attribute R2.
 * Uses R0-R7.
 PUTS   .enter
@@ -46,6 +66,14 @@ FLA1   AI   R0,ATRTAB
 FILLN  A    @NAMBAS,R0
        B    @VFILL
 
+* How a number becomes digits: the classic divide-by-ten loop.  DIV R7,R4
+* divides the 32-bit number R4:R5 by R7 (here 10): the quotient goes to R4 and
+* the remainder, 0 to 9, to R5; adding >30 makes it the ASCII digit.  Digits
+* come out last-first, so they are stored backwards from the end of a small
+* buffer (TXBUF) and a length byte is put in front, which makes the result an
+* ordinary length-prefixed string for PUTS.  The loop ends when the quotient
+* reaches 0, so a number never has leading zeros (and zero itself prints as
+* '0').
 * DECW - R1 as an unsigned decimal number at R0, attribute R2, no leading
 * zeros.  Returns R3 = the number of digits.  Uses R0-R8.
 DECW   .enter

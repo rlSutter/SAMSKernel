@@ -11,6 +11,20 @@
 * Shows GOMOD's argument, the pool, paging data through slot B, and
 * reading a file with the file service.
 *======================================================================
+* THE SIMPLEST MULTI-PAGE PROGRAM.  A text file is read into SAMS pages and
+* shown from there.  If you are learning how to use SAMS memory, read this
+* file first and the workbench editor (examples/workbench/ed.a99 and the
+* guide's appendix C) second: this is the same idea with the least machinery.
+*
+* The idea: 51 lines of 80 bytes (4,080 bytes) fit in one 4K page.  Line n
+* lives in page n / 51 of the file, at offset (n mod 51) * 80.  The program
+* keeps a table, VPAGES, of the pool page that holds each block of 51 lines.
+* To read or show line n it divides n by 51 (DIV: quotient the page index,
+* remainder the place), looks the page number up in VPAGES, maps that page
+* into the window at >E000 (MAPE) and finds the line at >E000 + place * 80.
+* It takes pages from the pool one at a time as lines arrive (PALLOC), at most
+* MAXPG of them: 408 lines.  The editor does exactly this, adding a table of
+* line order so that lines can be inserted.
        COPY "kernel.equ"
        COPY "macros.a99"
        COPY "shared.a99"

@@ -41,6 +41,13 @@ TYEND  EQU  28*80
 TYSIZE EQU  7*80
 
        AORG >C000
+* The entry table can be longer than four words: entries from number 4 on are
+* the module's own, for other modules to call.  Another module cannot call
+* this module's routines directly (this module is not mapped while it runs),
+* so it asks the kernel: .callmod PG_DIAG,4 (macros.a99) maps this module for
+* one call, runs entry 4, maps the caller back and returns whatever the
+* routine left in R0.  The self-test module uses it to prove the mechanism
+* works: the number >1234 coming back means the call went in and came back.
 * entries 0-3 as always; 4: for MODCALL
        DATA  DGINIT,DGTICK,DGDRAW,0,DGPING
 

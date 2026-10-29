@@ -9,13 +9,33 @@
 * macros .enter .leave .push .pop .intsvc .callmod built in (COPY of
 * macros.a99 is accepted and ignored), and expressions of + - * / and
 * parentheses evaluated strictly left to right, as xas99 does.  Symbols are
-* case-insensitive and 8 characters long.  docs/WORKBENCH.md has the rest.
+* case-insensitive and 12 characters long.  docs/WORKBENCH.md has the rest.
 *
 * Call it with MODCALL entry 4 (ASMGO): SRCNAME holds the file name (a
 * length-prefixed string, "DSK1.HELLO"); it returns R0 = the number of
 * errors and R1 = the image's length; the image is at OUTBUF, its first
 * byte at address ORGB.  The error list is in ERRTAB.
 *======================================================================
+* HOW AN ASSEMBLER WORKS, in the form this one takes.  An assembler turns
+* lines of text into the bytes of a program.  The difficulty is the FORWARD
+* REFERENCE: a line may use a label that is defined further down (JMP DONE ...
+* DONE), so its address is unknown when the line is first read.  The classic
+* answer, used here, is two passes over the source.  PASS 1 reads every line,
+* works out how many bytes each will make (so it knows the address of every
+* label) and records each label and its address in the SYMBOL TABLE; no bytes
+* are produced.  PASS 2 reads the file again and now produces the bytes,
+* looking each name up in the table.  The source is simply read twice from the
+* disk, because a source file may be much larger than the RAM there is to hold
+* it.
+*
+* The pieces, in the order the program is organised: the helpers that take a
+* line apart (case, names, numbers); the error list; the symbol table; the
+* expression evaluator (asm_expr.a99); the statement and operand parser and
+* the instruction encoder (asm_stmt.a99); the pass driver and COPY handling
+* (asm_main.a99, asm_io.a99).  The result is the program image in OUTBUF (a 4K
+* buffer in slot A), the address it was assembled for in ORGB and a list of up
+* to 24 errors in ERRTAB with their line numbers; the workbench shell shows
+* them and, if there are none, can run the image.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -204,6 +224,11 @@ HX9    MOV  R3,R1
 *----------------------------------------------------------------------
 * errors
 *----------------------------------------------------------------------
+* Errors are collected rather than stopping the assembly: ERR stores the line
+* number and an error code in the next free slot of ERRTAB (two words each, 24
+* slots) and the count in NERR.  Only pass 2 records errors that both passes
+* would find, so a mistake is not listed twice; pass 1 is the only place that
+* can find a duplicate label, so it uses ERRA, which records in either pass.
 * ERR - note error R0 on this line.  Errors that both passes would find
 * are noted in pass 2 only.  Leaf.  Uses R0-R2.
 ERR    MOV  @PASS,R1
@@ -225,10 +250,28 @@ ERR9   RT
 ERRA   B    @ERR1
 
 *----------------------------------------------------------------------
-* the symbol table: 800 slots of 10 bytes in two SAMS pages, mapped at
-* >E000: 8 name characters, a value word.  A slot whose first byte is 0
-* is free.
+* the symbol table: 580 slots of 14 bytes in two SAMS pages, mapped at
+* >E000 and >F000: 12 name characters (six words), a value word.  A slot
+* whose first byte is 0 is free.
 *----------------------------------------------------------------------
+* THE SYMBOL TABLE IS A HASH TABLE, kept in SAMS because it is too big for the
+* 7K of RAM.  It has 580 slots of 14 bytes (a 12-character name stored as six
+* words, then the value word) in the two adjacent windows at >E000 and >F000,
+* which together form one contiguous 8K area: the table runs straight across
+* the boundary between the windows and the code does not care.  MAPSYM maps
+* the two pages (PGFREE and PGFREE+1, below the editor's pool) and every
+* routine that touches the table calls it first, because other code may have
+* remapped the windows.
+*
+* To look a name up, FINDSYM computes a number from the name (a HASH: here the
+* six words of the name combined by multiply-by-3-and-add), takes it modulo
+* 580 and starts at that slot; if the slot is empty the name is not in the
+* table (and this is where to put it), if it holds the same six words the name
+* is found, and otherwise it tries the next slot, wrapping at the end (LINEAR
+* PROBING), up to 580 tries (then the table is full).  A slot whose first byte
+* is 0 is empty, which is why a name may not start with a zero byte.  A good
+* hash makes the usual lookup one or two probes, so the whole table is
+* searched only in the worst case.
 * MAPSYM - the symbol table pages in slot B.  Uses R0-R3, R12.
 MAPSYM .enter
        LI   R0,PGFREE
@@ -335,6 +378,24 @@ DS9    .leave
        RT
 
 *----------------------------------------------------------------------
+* EXPRESSIONS are evaluated strictly left to right with no operator
+* precedence: 2+3*4 is (2+3)*4 = 20, as xas99 does (a program written for one
+* assembler must mean the same in the other, and the tests assemble every
+* example with both and compare the bytes).  Parentheses override.  EXPR loops
+* 'a term, an operator, a term' and applies each operator to the running
+* value.  TERM reads one operand of an expression: a decimal number, a
+* hexadecimal number written with a leading >, a character constant 'c' or
+* 'cc', the symbol $ (the location counter, the address of the statement being
+* assembled), a name looked up in the symbol table, or a parenthesised
+* expression.
+*
+* FORWARD REFERENCES in pass 1: a name not yet defined cannot be looked up, so
+* LOOKUP returns 0 and sets UNRES.  Pass 1 does not need the value, only the
+* size of the statement, and a statement's size never depends on a forward
+* label (an address operand is always one extra word). The two directives that
+* need a value at once, BSS and EQU, report an error if the name is not yet
+* defined. Pass 2 repeats the lookup, finds the value, and a name that is still
+* undefined then becomes an error.
 * expressions: + - * / and parentheses, strictly left to right
 *----------------------------------------------------------------------
 * LOOKUP - the value of the name in NAMBUF: R0, or 0 with UNRES set when
@@ -497,6 +558,18 @@ EX9    .leave
        RT
 
 *----------------------------------------------------------------------
+* THE FIVE WAYS THE TMS9900 NAMES A VALUE.  An operand is a 2-bit address MODE
+* and a 4-bit register number packed into six bits of the instruction.  Mode
+* 0, Rn: the register itself.  Mode 1, *Rn: the memory word the register
+* points at.  Mode 2: with a register, @address(Rn), memory at address + the
+* register (indexed), and with R0 meaning 'no register', @address alone
+* (symbolic, absolute); this mode is followed by a word holding the address.
+* Mode 3, *Rn+: like *Rn, then the register is increased by 2 (word) or 1
+* (byte instruction).  That is why 'R0 is not an index register': @TABLE(R0)
+* is encoded as register 0, which the CPU reads as 'plain address'.  OPND
+* picks the operand apart into OPT (the mode), OPS (the register) and OPE (the
+* extra address word, if any); the instruction encoder in asm_stmt.a99 puts
+* them together.
 * operands
 *----------------------------------------------------------------------
 * GETREG - R0 = the register number if R8 is at R0-R15, else -1 (and R8
@@ -611,6 +684,12 @@ OP9    .leave
        RT
 
 *----------------------------------------------------------------------
+* THE IMAGE is built in OUTBUF by the location counter LC: each byte or word
+* emitted goes at the address LC, and LC moves on.  In pass 1 nothing is
+* stored (only LC moves), so the same encoder routines serve both passes; in
+* pass 2 each byte is stored too.  DEFLAB gives a line's label the value of LC
+* in pass 1 and in pass 2 checks it still has that value, which would catch a
+* statement whose size differed between the passes.
 * the image
 *----------------------------------------------------------------------
 * EMITB - the byte in R0's high byte at the location counter (pass 2
@@ -704,6 +783,24 @@ DL9    .leave
        RT
 
 *----------------------------------------------------------------------
+* HOW A TMS9900 INSTRUCTION IS ENCODED.  Every instruction is one 16-bit word,
+* followed by 0, 1 or 2 address words, and there are only a dozen shapes
+* ('classes' here, numbered 1 to 12).  The shape decides how the word is built
+* from the opcode and the operands.  The main ones: format I, two general
+* operands (A, MOV, C, S, SOC, SZC and their byte forms): the opcode in the
+* top four bits, the destination's mode and register, then the source's, i.e.
+* opcode | Td<<10 | D<<6 | Ts<<4 | S; jumps: an opcode byte and a signed 8-bit
+* displacement counted in words from the next instruction (so a jump reaches
+* about 128 words either way, the 'jump out of range' error); one-operand
+* instructions (B, BL, INV, INC, CLR ...): an opcode and one six-bit operand;
+* register-and-immediate (LI, AI, CI, ANDI, ORI) and shifts, CRU and the rest
+* in their own layouts.
+*
+* INSTR is a jump table: the class number indexes ICTAB, a table of the
+* addresses of the twelve encoders, and the routine jumps through it (MOV
+* @ICTAB-2(R1),R1 / B *R1: R1 holds twice the class, so the table is addressed
+* from one word before its start).  This is the standard way to write a multi-
+* way switch on this CPU.
 * instructions
 *----------------------------------------------------------------------
 * The statement is at R8 after its operation; CLASS and OPCODE say what
@@ -1231,6 +1328,16 @@ DOTC   BYTE >2E
        EVEN
 
 *----------------------------------------------------------------------
+* THE MACROS ARE PART OF THE ASSEMBLER.  A real assembler expands a macro by
+* substituting its text and assembling the result; this one has no macro
+* processor (a TI has little memory for one), so the six macros the kernel's
+* source files use (.enter .leave .push .pop .intsvc .callmod) are encoded
+* here by hand: each routine emits the machine words the macro stands for, the
+* instruction's value shown beside it.  >064A is DECT R10, >C68B is MOV
+* R11,*R10 and so on.  A COPY of macros.a99 is therefore accepted and ignored.
+* If you add a macro to kernel/macros.a99 for use on the TI, add its encoder
+* here too: the test that compares this assembler with xas99
+* (tests/asm/probe2.a99) will tell you if they disagree.
 * the kernel's macros, built in
 *----------------------------------------------------------------------
 MENTER .enter
@@ -1318,6 +1425,15 @@ MCALLM .enter
 MODNM  TEXT 'MODCALL     '
 
 *----------------------------------------------------------------------
+* A SOURCE LINE has the form  label  operation  operands  comment.  A label
+* starts in column 1; the operation is the first word after it (or the first
+* word on the line if it is indented); the operands follow; a line whose first
+* character is * is a comment and one that is blank is skipped.  ASMLINE scans
+* the label (defines it), finds the operation in the table OPTAB with FINDOP,
+* and dispatches on the operation's class: an instruction to INSTR, a
+* directive to its own routine, a built-in macro to its encoder.  FINDOP is a
+* binary search: the table is sorted by name, 12 bytes an entry, so the search
+* halves the range each step instead of reading every entry.
 * a statement
 *----------------------------------------------------------------------
 * FINDOP - R5 = the table entry for the name in NAMBUF, or 0.  By binary
@@ -1504,6 +1620,22 @@ AL9    .leave
        RT
 
 *----------------------------------------------------------------------
+* THE PASSES AND THE INCLUDES.  ASMGO is the module's entry (MODCALL entry 4):
+* it clears the symbol table, runs pass 1 over the main file, runs pass 2, and
+* returns the number of errors.  Each pass calls ASMFILE, which reads one file
+* a line at a time with the kernel's file service; a COPY line makes ASMFILE
+* call itself for the included file (so includes nest, to a depth the arrays
+* allow) and then go on with the line after the COPY.
+*
+* Because the file service changes R6-R9 and an open file is a place in the
+* disk system, ASMFILE keeps its state in memory (the name and the count of
+* records read for each depth) and reopens a file after an include by reading
+* and skipping records up to where it was: a design chosen because it was the
+* simplest that worked on the TI disk controller, even though the kernel now
+* allows several files open at once.  Include names are looked for beside the
+* main file first and then on the device alone (BLDINC in asm_stmt.a99), which
+* is why the same source assembles whether it sits on a disk, a TIPI directory
+* or a CF7+.
 * files and the two passes
 *----------------------------------------------------------------------
 ATEXT  EQU  (RTEXT*16+RBG)*256
@@ -1686,6 +1818,13 @@ AG2    CLR  *R1+
        RT
 
 *----------------------------------------------------------------------
+* THE OPERATION TABLE.  OPTAB has one 12-byte entry per operation: the name in
+* eight characters padded with blanks, the opcode as a word, the class as a
+* word.  The classes say how the rest of the line is read (see INSTR).  The
+* entries are in alphabetical order because FINDOP searches by halving; adding
+* an operation means putting it in the right place.  The list covers every
+* TMS9900 instruction the examples use, the assembler directives and the
+* kernel macros.
 * the operations: name (8 characters), opcode, class.  Classes 1-12 are
 * instructions (INSTR), 20 and up directives, 40 and up the macros.
 *----------------------------------------------------------------------

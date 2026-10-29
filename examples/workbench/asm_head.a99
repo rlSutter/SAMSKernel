@@ -9,13 +9,33 @@
 * macros .enter .leave .push .pop .intsvc .callmod built in (COPY of
 * macros.a99 is accepted and ignored), and expressions of + - * / and
 * parentheses evaluated strictly left to right, as xas99 does.  Symbols are
-* case-insensitive and 8 characters long.  docs/WORKBENCH.md has the rest.
+* case-insensitive and 12 characters long.  docs/WORKBENCH.md has the rest.
 *
 * Call it with MODCALL entry 4 (ASMGO): SRCNAME holds the file name (a
 * length-prefixed string, "DSK1.HELLO"); it returns R0 = the number of
 * errors and R1 = the image's length; the image is at OUTBUF, its first
 * byte at address ORGB.  The error list is in ERRTAB.
 *======================================================================
+* HOW AN ASSEMBLER WORKS, in the form this one takes.  An assembler turns
+* lines of text into the bytes of a program.  The difficulty is the FORWARD
+* REFERENCE: a line may use a label that is defined further down (JMP DONE ...
+* DONE), so its address is unknown when the line is first read.  The classic
+* answer, used here, is two passes over the source.  PASS 1 reads every line,
+* works out how many bytes each will make (so it knows the address of every
+* label) and records each label and its address in the SYMBOL TABLE; no bytes
+* are produced.  PASS 2 reads the file again and now produces the bytes,
+* looking each name up in the table.  The source is simply read twice from the
+* disk, because a source file may be much larger than the RAM there is to hold
+* it.
+*
+* The pieces, in the order the program is organised: the helpers that take a
+* line apart (case, names, numbers); the error list; the symbol table; the
+* expression evaluator (asm_expr.a99); the statement and operand parser and
+* the instruction encoder (asm_stmt.a99); the pass driver and COPY handling
+* (asm_main.a99, asm_io.a99).  The result is the program image in OUTBUF (a 4K
+* buffer in slot A), the address it was assembled for in ORGB and a list of up
+* to 24 errors in ERRTAB with their line numbers; the workbench shell shows
+* them and, if there are none, can run the image.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -204,6 +224,11 @@ HX9    MOV  R3,R1
 *----------------------------------------------------------------------
 * errors
 *----------------------------------------------------------------------
+* Errors are collected rather than stopping the assembly: ERR stores the line
+* number and an error code in the next free slot of ERRTAB (two words each, 24
+* slots) and the count in NERR.  Only pass 2 records errors that both passes
+* would find, so a mistake is not listed twice; pass 1 is the only place that
+* can find a duplicate label, so it uses ERRA, which records in either pass.
 * ERR - note error R0 on this line.  Errors that both passes would find
 * are noted in pass 2 only.  Leaf.  Uses R0-R2.
 ERR    MOV  @PASS,R1
@@ -225,10 +250,28 @@ ERR9   RT
 ERRA   B    @ERR1
 
 *----------------------------------------------------------------------
-* the symbol table: 800 slots of 10 bytes in two SAMS pages, mapped at
-* >E000: 8 name characters, a value word.  A slot whose first byte is 0
-* is free.
+* the symbol table: 580 slots of 14 bytes in two SAMS pages, mapped at
+* >E000 and >F000: 12 name characters (six words), a value word.  A slot
+* whose first byte is 0 is free.
 *----------------------------------------------------------------------
+* THE SYMBOL TABLE IS A HASH TABLE, kept in SAMS because it is too big for the
+* 7K of RAM.  It has 580 slots of 14 bytes (a 12-character name stored as six
+* words, then the value word) in the two adjacent windows at >E000 and >F000,
+* which together form one contiguous 8K area: the table runs straight across
+* the boundary between the windows and the code does not care.  MAPSYM maps
+* the two pages (PGFREE and PGFREE+1, below the editor's pool) and every
+* routine that touches the table calls it first, because other code may have
+* remapped the windows.
+*
+* To look a name up, FINDSYM computes a number from the name (a HASH: here the
+* six words of the name combined by multiply-by-3-and-add), takes it modulo
+* 580 and starts at that slot; if the slot is empty the name is not in the
+* table (and this is where to put it), if it holds the same six words the name
+* is found, and otherwise it tries the next slot, wrapping at the end (LINEAR
+* PROBING), up to 580 tries (then the table is full).  A slot whose first byte
+* is 0 is empty, which is why a name may not start with a zero byte.  A good
+* hash makes the usual lookup one or two probes, so the whole table is
+* searched only in the worst case.
 * MAPSYM - the symbol table pages in slot B.  Uses R0-R3, R12.
 MAPSYM .enter
        LI   R0,PGFREE

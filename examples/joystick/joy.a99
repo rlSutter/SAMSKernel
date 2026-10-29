@@ -12,6 +12,27 @@
 * keyboard buffer, with the keyboard's repeat, so a menu written for keys
 * works with a joystick too.
 *======================================================================
+* STATE AND EVENTS: THE TWO WAYS TO READ A SWITCH.  A joystick is five
+* switches: fire, left, right, down, up.  A program can ask two different
+* questions of each: what is down NOW (a state: is the player holding left?)
+* and what has been pressed since I last looked (an event: has fire been
+* pressed, even briefly, even between two frames?).  JOYGET answers both at
+* once: R1 is the state, five bits (JFIRE 1, JLEFT 2, JRIGHT 4, JDOWN 8, JUP
+* 16, ORed together), and R2 is the events, the bits that went from up to down
+* since the last call, cleared by the call.  Movement usually wants the state
+* (keep walking while held); a button usually wants the event (fire once per
+* press).
+*
+* The kernel samples the joysticks once per frame, in the keyboard poll, so a
+* press shorter than a frame could be missed in principle, but a mechanical
+* switch is never that quick.  Notice that the program does not wait for
+* anything: it asks, uses the answer and returns, like all programs here.
+*
+* JOYKEY is the other route: write 1, 2 or 3 to it and the kernel itself types
+* KUP, KDOWN, KLEFT, KRIGHT and KENTER codes into the keyboard buffer when the
+* chosen joystick moves or fires, with the keyboard's repeat.  A program
+* written for keys then works with a joystick with no change, which is how the
+* Reversi and browser examples take a joystick.
        COPY "kernel.equ"
        COPY "macros.a99"
 

@@ -19,6 +19,31 @@
 *
 * The refusal messages and BANKTB are written by tools/skbuild.py.
 *======================================================================
+* WHAT HAPPENS WHEN THE CARTRIDGE STARTS.  The console looks at >6000 for a
+* cartridge header: a byte >AA says 'a program is here', and a list of
+* programs gives each a name (what appears on the console's menu) and an entry
+* address.  The header below is that, and START is the entry the menu calls.
+* This code is the only thing in bank 0 that runs from the cartridge ROM
+* itself; everything else is copied to RAM first.
+*
+* Why copy to SAMS: a cartridge appears in only 8K of the address space
+* (>6000-7FFF) and the program is far bigger, in several BANKS: a FinalGROM
+* (or any bank-switched cartridge) shows a different 8K image there when the
+* program writes to >6000 + 2 x the bank number.  Running code straight from
+* banks would mean the code that switches a bank vanishes when the bank
+* changes.  So START copies each bank into SAMS pages, one after another, and
+* from then on the program runs entirely from SAMS RAM, mapped where it needs
+* to be.  The copier that does the switching is itself copied to scratchpad
+* RAM (SCRTCH) first, because the cartridge ROM it is running from disappears
+* at each switch.
+*
+* The checks come first so that a machine that cannot run the program says why
+* instead of crashing: a SAMS card must answer and be big enough (the
+* application states how many pages it needs in app.json), every page it has
+* must hold what is written to it (a bad RAM chip is found here, not in the
+* middle of a user's work), and an F18A must answer.  The refusal screen uses
+* the console's own font, copied from GROM, in the plain 40-column mode that
+* any video chip can show.
        COPY "kdefs.a99"
 
        AORG >6000

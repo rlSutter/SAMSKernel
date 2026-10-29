@@ -1,5 +1,23 @@
 
 *----------------------------------------------------------------------
+* HOW A TMS9900 INSTRUCTION IS ENCODED.  Every instruction is one 16-bit word,
+* followed by 0, 1 or 2 address words, and there are only a dozen shapes
+* ('classes' here, numbered 1 to 12).  The shape decides how the word is built
+* from the opcode and the operands.  The main ones: format I, two general
+* operands (A, MOV, C, S, SOC, SZC and their byte forms): the opcode in the
+* top four bits, the destination's mode and register, then the source's, i.e.
+* opcode | Td<<10 | D<<6 | Ts<<4 | S; jumps: an opcode byte and a signed 8-bit
+* displacement counted in words from the next instruction (so a jump reaches
+* about 128 words either way, the 'jump out of range' error); one-operand
+* instructions (B, BL, INV, INC, CLR ...): an opcode and one six-bit operand;
+* register-and-immediate (LI, AI, CI, ANDI, ORI) and shifts, CRU and the rest
+* in their own layouts.
+*
+* INSTR is a jump table: the class number indexes ICTAB, a table of the
+* addresses of the twelve encoders, and the routine jumps through it (MOV
+* @ICTAB-2(R1),R1 / B *R1: R1 holds twice the class, so the table is addressed
+* from one word before its start).  This is the standard way to write a multi-
+* way switch on this CPU.
 * instructions
 *----------------------------------------------------------------------
 * The statement is at R8 after its operation; CLASS and OPCODE say what

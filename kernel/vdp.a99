@@ -7,6 +7,30 @@
 * Interrupts are masked (LIMI 0) everywhere but inside VSYNC: an interrupt
 * between the two bytes of a VDP address write would corrupt it.
 *======================================================================
+* HOW THE TI TALKS TO ITS VIDEO CHIP.  The screen is drawn by a separate chip
+* (the TMS9918A, here the F18A that imitates it and does much more) with its
+* own 16K of memory, VRAM, which the CPU cannot address directly.  The CPU
+* sees only two ports: an ADDRESS port (VDPWA, >8C02) and a DATA port (VDPWD
+* >8C00 for writing, VDPRD >8800 for reading).  To write to VRAM you send a
+* 14-bit address to the address port as two bytes (low byte first, then the
+* high byte with bit 6 set to say 'write'), after which every byte sent to the
+* data port goes to that address and the chip adds one to its address by
+* itself.  That auto-increment is why the block routines are loops of
+* identical MOVBs.  Reading is the same with the write bit clear.  A register
+* of the chip is written by sending the data byte and then >80 + the register
+* number to the address port.
+*
+* Why interrupts are off: the address is two separate byte writes, and the
+* console's interrupt routine also uses the address port (to read the sound
+* list in VRAM).  An interrupt between the two halves of an address would
+* corrupt it, so the kernel runs with interrupts masked (LIMI 0) and lets them
+* in only inside VSYNC, which is called between the transfers, never in the
+* middle of one.
+*
+* Why SWPB: the TMS9900's byte instructions work only on the HIGH byte of a
+* register.  An address in R0 has its high byte at the top; the chip wants the
+* LOW byte first, so the routines SWPB (swap the two bytes), send the high
+* byte, SWPB back, and send the other.
 
 * VDPWR - write a VDP register.
 *   R0 = >RRDD  where RR = >80 | register number, DD = data
@@ -33,6 +57,11 @@ VRAD   SWPB R0                 read address: same dance without bit 14
        RT
 
 * VMBW - block write.  R0 = VRAM address, R1 = source, R2 = byte count
+* VMBW is the workhorse (all text drawing ends in it).  The inner loop is
+* unrolled 16 times: each MOVB *R1+,@VDPWD costs a fixed time, and the loop
+* test and jump would otherwise cost as much again per byte, so unrolling
+* makes block writes nearly twice as fast.  The remainder (fewer than 16
+* bytes) goes one at a time.
 VMBW   SWPB R0                 inline VWAD (leaf: no BL, R11 untouched)
        MOVB R0,@VDPWA
        SWPB R0
@@ -102,6 +131,13 @@ VSBW   SWPB R0
 * (and play any sound list); masked everywhere else.  The screen-blank
 * timer is not cleared here but on each key (KPUT), so the console blanks
 * the screen after nine idle minutes.  Adds 1 to FRAME.  Uses R0.
+* The console's own interrupt routine (in its ROM) runs once per video frame,
+* when the chip raises its interrupt: it adds to the frame counter byte at
+* >8379 and plays sound lists.  VSYNC lets that happen deliberately: it notes
+* the counter, enables interrupts (LIMI 2), waits for the byte to change (the
+* interrupt has run once), and masks again.  So the main loop is locked to the
+* 60 (or 50) Hz frame, and FRAME, the kernel's own 16-bit counter, counts
+* frames since start.
 VSYNC  MOVB @ISRTMR,R0         the console ISR advances >8379 every frame ...
 VSYN1  LIMI 2                  ... while interrupts are allowed in here
        CB   @ISRTMR,R0

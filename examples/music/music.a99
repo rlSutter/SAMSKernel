@@ -11,6 +11,22 @@
 * the build puts them in pages named PD_TUNE and PD_SCALE (app.json); MUPLAY
 * takes the first page.  The kernel's main loop steps the player each frame.
 *======================================================================
+* DATA IN PAGES, AND WORK THAT DOES NOT STOP THE MUSIC.  This example shows
+* the two ideas behind the player.  (1) A song is DATA, not code:
+* tools/skmusic.py compiles a text score or a MIDI file into a stream of sound
+* commands (docs/MUSIC.md), and the build places that stream in SAMS pages and
+* gives the first page a name, PD_TUNE.  The build names every data file this
+* way (PD_ and the file's name in capitals) and exports the name, so the
+* program refers to it with an ordinary equate: MUPLAY takes the page number.
+* Data costs the program's 7K of RAM nothing, because the pages are only
+* mapped while the player reads them.  (2) The song is played by the kernel's
+* main loop, once a frame.  A program's own long loop (the 'W work' key) would
+* normally freeze the music; the fix is to call KIDLE in the loop, which
+* notices that a frame has passed, polls the keyboard and steps the song.
+*
+* Because this program needs PD_TUNE it is a PC-route program: the workbench
+* cannot build data pages.  SNDTONE (examples/workbench/programs/beep.a99) is
+* the part that works on both routes.
        COPY "kernel.equ"
        COPY "macros.a99"
 

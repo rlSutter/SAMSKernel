@@ -1,5 +1,15 @@
 
 *----------------------------------------------------------------------
+* THE MACROS ARE PART OF THE ASSEMBLER.  A real assembler expands a macro by
+* substituting its text and assembling the result; this one has no macro
+* processor (a TI has little memory for one), so the six macros the kernel's
+* source files use (.enter .leave .push .pop .intsvc .callmod) are encoded
+* here by hand: each routine emits the machine words the macro stands for, the
+* instruction's value shown beside it.  >064A is DECT R10, >C68B is MOV
+* R11,*R10 and so on.  A COPY of macros.a99 is therefore accepted and ignored.
+* If you add a macro to kernel/macros.a99 for use on the TI, add its encoder
+* here too: the test that compares this assembler with xas99
+* (tests/asm/probe2.a99) will tell you if they disagree.
 * the kernel's macros, built in
 *----------------------------------------------------------------------
 MENTER .enter
@@ -87,6 +97,15 @@ MCALLM .enter
 MODNM  TEXT 'MODCALL     '
 
 *----------------------------------------------------------------------
+* A SOURCE LINE has the form  label  operation  operands  comment.  A label
+* starts in column 1; the operation is the first word after it (or the first
+* word on the line if it is indented); the operands follow; a line whose first
+* character is * is a comment and one that is blank is skipped.  ASMLINE scans
+* the label (defines it), finds the operation in the table OPTAB with FINDOP,
+* and dispatches on the operation's class: an instruction to INSTR, a
+* directive to its own routine, a built-in macro to its encoder.  FINDOP is a
+* binary search: the table is sorted by name, 12 bytes an entry, so the search
+* halves the range each step instead of reading every entry.
 * a statement
 *----------------------------------------------------------------------
 * FINDOP - R5 = the table entry for the name in NAMBUF, or 0.  By binary

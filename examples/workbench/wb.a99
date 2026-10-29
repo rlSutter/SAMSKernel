@@ -14,9 +14,28 @@
 *       CLR  R1
 *       BL   @GOMOD
 *======================================================================
+* A PROGRAM THAT IS A SMALL OPERATING SYSTEM.  The workbench is three modules
+* cooperating: this shell (the menu, the file name, the catalog, running
+* programs), the assembler (asm.a99, a module of its own because it is too
+* large to share a page with anything) and the editor (ed.a99).  The shell is
+* the boot module, so it is the first thing the kernel runs; the others are
+* entered with GOMOD (the editor) or called as a subroutine with .callmod (the
+* assembler), and they share state through fixed addresses in APPRAM, listed
+* in docs/WORKBENCH.md part 5 so that no two modules claim the same bytes.
+*
+* The shell is a state machine driven by TICK: MODE says what the keys mean
+* now (0 the menu, 1 typing a file name, 2 the catalog), and TICK sends each
+* key to the routine for the current mode.  This is the standard shape of an
+* interactive program on this kernel: one variable for the state, one dispatch
+* at the top of TICK.
        COPY "kernel.equ"
        COPY "macros.a99"
 
+* The shell's variables are the first 256 bytes of APPRAM, the file name above
+* all: SRCNAME is a length-prefixed string at APPRAM+0 that the shell, the
+* editor and the assembler all read (the assembler opens it, the editor loads
+* and saves it).  Other offsets belong to the assembler and editor;
+* docs/WORKBENCH.md has the map.
 * storage shared with asm.a99 (APPRAM+0 up to +255 is the shell's)
 SRCNAME EQU APPRAM             the file name, length-prefixed (32 bytes)
 NAMLN  EQU  APPRAM+32          (the typed name's length is SRCNAME's first byte)
@@ -51,6 +70,10 @@ ASEL   EQU  (RSELFG*16+RSELBG)*256
        AORG >C000
        DATA INIT,TICK,REDRAW,0
 
+* INIT is called each time the shell is switched to: at boot (R1 = 0) and
+* every time another module hands control back (the editor's CTRL A returns
+* with R1 = 1, meaning 'assemble the file now').  The first time through,
+* SRCNAME is empty and is given the default device 'DSK1.'.
 INIT   .enter
        MOV  R1,@INARG
        MOV  @MODE,@MODE        first start: the default device
@@ -284,6 +307,11 @@ TKN9   CLR  @MODE
 TKN8   BL   @REDRAW
        B    @TK9
 
+* Calling the assembler: .callmod PG_ASM,4 maps the assembler module for one
+* call to its entry number 4 (ASMGO), then maps the shell back, so the
+* assembler runs in the same window the shell lives in without either losing
+* its place.  The assembler leaves the number of errors in NERR (an APPRAM
+* word the shell also knows) and the shell shows what happened from that.
 * ASSEMB - assemble SRCNAME with the native assembler.
 ASSEMB .enter
        LI   R0,3*COLS+2
@@ -301,6 +329,15 @@ AS1    MOV  R1,@RESULT
        .leave
        RT
 
+* How a program runs: the assembler's output is an image at OUTBUF in APPRAM
+* with the address it was assembled for (ORGB, always >C000 for a module).
+* RUN checks it fits in the two pages that will hold a module (>C000 to
+* >DFFF), clears them, copies the image in through slot B (two SAMS pages
+* mapped at >E000 and >F000, the same pages that will be at >C000 and >D000
+* when the module runs) and then switches to them with GOMOD.  The program is
+* therefore a real kernel module for as long as it runs; it returns with GOMOD
+* PG_WB.  Because the image is in SAMS, not in a cartridge, it exists only
+* while the workbench does.
 * RUN - the assembled program into its two pages, and switch to it.
 RUN    .enter
        MOV  @EDDIRT,@EDDIRT    unsaved changes in the editor's buffer would be

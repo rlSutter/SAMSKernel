@@ -1,5 +1,21 @@
 
 *----------------------------------------------------------------------
+* THE PASSES AND THE INCLUDES.  ASMGO is the module's entry (MODCALL entry 4):
+* it clears the symbol table, runs pass 1 over the main file, runs pass 2, and
+* returns the number of errors.  Each pass calls ASMFILE, which reads one file
+* a line at a time with the kernel's file service; a COPY line makes ASMFILE
+* call itself for the included file (so includes nest, to a depth the arrays
+* allow) and then go on with the line after the COPY.
+*
+* Because the file service changes R6-R9 and an open file is a place in the
+* disk system, ASMFILE keeps its state in memory (the name and the count of
+* records read for each depth) and reopens a file after an include by reading
+* and skipping records up to where it was: a design chosen because it was the
+* simplest that worked on the TI disk controller, even though the kernel now
+* allows several files open at once.  Include names are looked for beside the
+* main file first and then on the device alone (BLDINC in asm_stmt.a99), which
+* is why the same source assembles whether it sits on a disk, a TIPI directory
+* or a CF7+.
 * files and the two passes
 *----------------------------------------------------------------------
 ATEXT  EQU  (RTEXT*16+RBG)*256
@@ -182,6 +198,13 @@ AG2    CLR  *R1+
        RT
 
 *----------------------------------------------------------------------
+* THE OPERATION TABLE.  OPTAB has one 12-byte entry per operation: the name in
+* eight characters padded with blanks, the opcode as a word, the class as a
+* word.  The classes say how the rest of the line is read (see INSTR).  The
+* entries are in alphabetical order because FINDOP searches by halving; adding
+* an operation means putting it in the right place.  The list covers every
+* TMS9900 instruction the examples use, the assembler directives and the
+* kernel macros.
 * the operations: name (8 characters), opcode, class.  Classes 1-12 are
 * instructions (INSTR), 20 and up directives, 40 and up the macros.
 *----------------------------------------------------------------------

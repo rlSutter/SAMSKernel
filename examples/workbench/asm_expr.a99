@@ -1,5 +1,23 @@
 
 *----------------------------------------------------------------------
+* EXPRESSIONS are evaluated strictly left to right with no operator
+* precedence: 2+3*4 is (2+3)*4 = 20, as xas99 does (a program written for one
+* assembler must mean the same in the other, and the tests assemble every
+* example with both and compare the bytes).  Parentheses override.  EXPR loops
+* 'a term, an operator, a term' and applies each operator to the running
+* value.  TERM reads one operand of an expression: a decimal number, a
+* hexadecimal number written with a leading >, a character constant 'c' or
+* 'cc', the symbol $ (the location counter, the address of the statement being
+* assembled), a name looked up in the symbol table, or a parenthesised
+* expression.
+*
+* FORWARD REFERENCES in pass 1: a name not yet defined cannot be looked up, so
+* LOOKUP returns 0 and sets UNRES.  Pass 1 does not need the value, only the
+* size of the statement, and a statement's size never depends on a forward
+* label (an address operand is always one extra word). The two directives that
+* need a value at once, BSS and EQU, report an error if the name is not yet
+* defined. Pass 2 repeats the lookup, finds the value, and a name that is still
+* undefined then becomes an error.
 * expressions: + - * / and parentheses, strictly left to right
 *----------------------------------------------------------------------
 * LOOKUP - the value of the name in NAMBUF: R0, or 0 with UNRES set when
@@ -162,6 +180,18 @@ EX9    .leave
        RT
 
 *----------------------------------------------------------------------
+* THE FIVE WAYS THE TMS9900 NAMES A VALUE.  An operand is a 2-bit address MODE
+* and a 4-bit register number packed into six bits of the instruction.  Mode
+* 0, Rn: the register itself.  Mode 1, *Rn: the memory word the register
+* points at.  Mode 2: with a register, @address(Rn), memory at address + the
+* register (indexed), and with R0 meaning 'no register', @address alone
+* (symbolic, absolute); this mode is followed by a word holding the address.
+* Mode 3, *Rn+: like *Rn, then the register is increased by 2 (word) or 1
+* (byte instruction).  That is why 'R0 is not an index register': @TABLE(R0)
+* is encoded as register 0, which the CPU reads as 'plain address'.  OPND
+* picks the operand apart into OPT (the mode), OPS (the register) and OPE (the
+* extra address word, if any); the instruction encoder in asm_stmt.a99 puts
+* them together.
 * operands
 *----------------------------------------------------------------------
 * GETREG - R0 = the register number if R8 is at R0-R15, else -1 (and R8
@@ -276,6 +306,12 @@ OP9    .leave
        RT
 
 *----------------------------------------------------------------------
+* THE IMAGE is built in OUTBUF by the location counter LC: each byte or word
+* emitted goes at the address LC, and LC moves on.  In pass 1 nothing is
+* stored (only LC moves), so the same encoder routines serve both passes; in
+* pass 2 each byte is stored too.  DEFLAB gives a line's label the value of LC
+* in pass 1 and in pass 2 checks it still has that value, which would catch a
+* statement whose size differed between the passes.
 * the image
 *----------------------------------------------------------------------
 * EMITB - the byte in R0's high byte at the location counter (pass 2

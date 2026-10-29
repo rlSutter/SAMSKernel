@@ -3,6 +3,22 @@
 * The Lantern Coast; version read and the power-up restore added for
 * Press 2.0)
 *======================================================================
+* THE F18A IS A 9918A WITH A SECRET DOOR.  It is a small circuit board that
+* replaces the TI's video chip, behaves like the original until the program
+* 'unlocks' it, and then offers more: 80-column text, 30 rows, a palette of 64
+* colours chosen from 4,096, extra colour modes, more sprites, and a small
+* graphics processor (the GPU).  The extra registers are numbered above 7 (up
+* to 58); writing them is only possible after the unlock, which is a write of
+* >1C to register 57 twice.
+*
+* Why unlocking needs care: any write to register 57 while the chip is already
+* unlocked LOCKS it again, and an F18A stays unlocked through the console's
+* reset.  So the kernel first asks the chip whether it is unlocked (reading
+* status register 1 returns an ID pattern only an unlocked F18A answers) and
+* sends the unlock only if not.  This one bug cost the Lantern Coast a game's
+* title screen; the comment on F18UNL tells the story.  A plain 9918A treats
+* the same writes as ordinary, harmful ones (they land on register 1 and blank
+* the screen), which is why the kernel refuses to run without an F18A.
 
 * F18UNL - unlock the F18A extended registers, unless they are unlocked
 * already.  An F18A stays unlocked through the console's reset (a Quit), and
