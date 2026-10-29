@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg native nativemods workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 native nativemods workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -147,6 +147,15 @@ def browser():
     check(lines(m)[2].strip() == 'line 4' and 'Line 4 of 129' in lines(m)[29], 'DOWN scrolls (lines read into pool pages, drawn through MAPE)')
     m, cpu, halt = sim9900.run(c, keys='<F-x><F-x><ENTER><WAIT 200><F-9><WAIT 100>', frames=900, setup=setup)
     check('Disk browser' in lines(m)[0], 'BACK returns to the browser (PREVPG)')
+
+def sams16():
+    """A SAMS card of 16M, whose registers are 12 bits (the even byte the low 8, the odd byte bits 8-11, as in
+    js99er): the kernel boots and its self-test passes, using the first 256 pages (1M)."""
+    c = build('diag')
+    wide = lambda m: setattr(m, 'wide_regs', True)
+    m, cpu, halt = sim9900.run(c, keys='<C-t><WAIT 700>', frames=1000, pages=4096, setup=wide)
+    ln = [l.strip() for l in lines(m)[2:12] if l.strip()]
+    check(halt is None and ln and all('PASS' in l for l in ln[:8]) and '256' in ln[0], '16M card: the self-test passes and the kernel uses 256 pages: %s' % ln[0])
 
 def rom_music():
     import skmusic
@@ -523,7 +532,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

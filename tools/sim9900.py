@@ -115,6 +115,7 @@ class Machine:
         self.pages = pages           # physical pages actually present
         self.map = list(range(16))   # window -> page
         self.ams_regs_visible = False
+        self.wide_regs = False       # True: the card's registers are 12 bits (a 16M SAMS)
         self.ams_mapping = False
         self.f18a = f18a
         self.vram = bytearray(16384)
@@ -232,7 +233,11 @@ class Machine:
             return
         if addr < 0x6000:
             if self.sams and self.ams_regs_visible and addr < 0x4020:
-                self.map[(addr - 0x4000) >> 1] = val & 0xFF
+                i = (addr - 0x4000) >> 1
+                if self.wide_regs:       # a card of more than 1M: 12 bits, the even byte the low 8, the odd byte bits 8-11 (as js99er)
+                    self.map[i] = (self.map[i] & 0x0FF) | ((val & 0x0F) << 8) if addr & 1 else (self.map[i] & 0xF00) | val
+                else:
+                    self.map[i] = val & 0xFF
             elif self.tifdc is not None and self.tifdc.rom_on:
                 self.tifdc.write(addr, val)
             return
