@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """guide_pdf.py - build the PDFs in docs/ from their Markdown.
 
-    python3 tools/guide_pdf.py [guide|video|music|workbench|ti]       (no argument: both)
+    python3 tools/guide_pdf.py [guide|video|music|workbench|checklist|ti]       (no argument: both)
 
 Needs pandoc, wkhtmltopdf, and the Python packages pypdf and reportlab (page
 numbers, bookmarks, document properties are added afterwards: the unpatched
@@ -46,6 +46,7 @@ DOCS = {
     'guide': ('PROGRAMMERS-GUIDE', "# SAMS Kernel: the programmer's guide", "The programmer's guide: writing TI-99/4A applications in assembly", "SAMS Kernel programmer's guide"),
     'music': ('MUSIC', "# SAMS Kernel: music and sound", "Music and sound: the player, the compiler, the song format", "SAMS Kernel music"),
     'workbench': ('WORKBENCH', "# SAMS Kernel: the workbench", "The workbench: editing, assembling and running on the TI", "SAMS Kernel workbench"),
+    'checklist': ('HARDWARE-CHECKLIST', "# SAMS Kernel: what has been run on real hardware, and how to try the rest", "What has run on real hardware, and how to try the rest", "SAMS Kernel hardware checklist"),
     'ti': ('DEVELOPING-ON-A-TI', "# SAMS Kernel: developing with a real TI", "Developing with a real TI: running, debugging, editing", "SAMS Kernel on a real TI"),
     'video': ('VIDEO-MODES', "# SAMS Kernel: the F18A's display modes", "The F18A's display modes: every mode and option, with pictures", "SAMS Kernel video modes"),
 }
@@ -104,7 +105,7 @@ def build(key):
     print('wrote %s: %d pages, %d headings not found for bookmarks' % (out, len(src.pages), miss))
 
 def main():
-    which = sys.argv[1:] or ['guide', 'video', 'music', 'workbench', 'ti']
+    which = sys.argv[1:] or ['guide', 'video', 'music', 'workbench', 'checklist', 'ti']
     for k in which:
         build(k)
 

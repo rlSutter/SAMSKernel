@@ -195,5 +195,6 @@ assemble the loader, the data bank and the modules; check each fits in 8K; conca
   `GOMOD`, the page pool, `FCNUM` and the loader's table-driven copy are new.
 - Whether a real DSR clears the previous call's error bits itself (the file service clears them regardless; the check is not decisive with TI's controller).
 - Whether the console always leaves `>83FC`'s high byte non-zero (the kernel sets it regardless). TI's disk controller DSR was watched and never wrote it.
-- Sound: only the console's sound-list player is available; no tests exercise it.
-- Cards over 1M, and the PICO9918's quirks beyond what Press found.
+- Sound: the player's bytes, timing and pitch are tested (against a model of the chip), but how it sounds on a real TI is not; the console's sound-list player is untested and unmixed with it.
+- Cards over 1M on real hardware (the simulator models 12-bit registers as js99er does), real joysticks, file handles on devices other than TI's disk controller, the workbench's real assembly time, and the PICO9918's quirks beyond what Press found.
+  docs/HARDWARE-CHECKLIST.md lists every one of these with how to try it.

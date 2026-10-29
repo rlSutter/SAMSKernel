@@ -25,7 +25,7 @@ card, its size or the F18A is missing.
 | --- | --- |
 | Screen | boots in 80 x 30 text (F18A "Text 80", a colour per character cell; 256 six-by-eight glyphs; 15 colour *roles* and five colour schemes; DMA row moves); `VMODE` sets **any F18A mode**: Text 80/40, Graphics I and II, Multicolor, enhanced colour, sprites, tile layer 2, the bitmap layer (part 5 and VIDEO-MODES.md) |
 | Keyboard | 64-key buffer, auto-repeat, SHIFT / CTRL / FCTN / ALPHA LOCK chords decoded to one byte each |
-| Memory | 7K of RAM that is always there (slot A), 8K of your code in the window at `>C000`, and up to 1M of SAMS pages you map into `>E000-FFFF`; a page pool to hand them out |
+| Memory | 7K of RAM that is always there (slot A), 8K of your code in the window at `>C000`, and up to 16M of SAMS pages you map into `>E000-FFFF`; a page pool to hand them out |
 | Structure | a main loop that calls your module once a frame; up to dozens of 8K modules; `GOMOD` to switch, `MODCALL` to call into another module and come back |
 | Files | open, read, write, close, delete through any DSR (disk controller, TIPI, ...) |
 | Music | play a song from SAMS pages (a register-log player, stepped every frame), tone effects; songs compile from MIDI or a text score (MUSIC.md) |
@@ -427,8 +427,7 @@ variable in `>A000-FFFF`**: those windows are remapped.
 
 ### SAMS pages for big data
 
-The SAMS card gives you 4K pages, numbered from 0 (128 of them on a 512K card, 256 on 1M
-or more). The kernel and the build own some; the rest are yours:
+The SAMS card gives you 4K pages, numbered from 0 (128 of them on a 512K card, 256 on 1M, up to 4,096 on a 16M card). The kernel and the build own some; the rest are yours:
 
 | Pages | Use |
 | --- | --- |
@@ -823,7 +822,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
     **Music steps with the frames you let through**: a long loop that never calls `KIDLE` (or returns to the main loop) stalls the song.
 16. **It works in the simulator** is the beginning of a test, not the end: js99er, then the real machine.
 
-## 15. What the kernel does not do (version 1.1)
+## 15. What the kernel does not do (version 1.5)
 
 - Video: every F18A mode is reachable (`VMODE`, `VREG`), but the kernel only *draws* for you in the glyph modes
   (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite

@@ -1,5 +1,10 @@
 # Changes
 
+## 1.5.1 (29 October 2026)
+
+Documentation only; no code or image changed. `docs/HARDWARE-CHECKLIST.md` (what has and has not run on a real machine, and a twelve-step walk through the rest, with what to expect and what to report); stale statements corrected (the guide said 1M and "version 1.1";
+the architecture notes listed cards over 1M and sound as untested for the wrong reasons); the README's status says what is old and what is new.
+
 ## 1.5.0 (29 October 2026)
 
 - **Joysticks.** `KPOLL` reads both joysticks (keyboard columns 6 and 7) every frame: `JOYGET` (R0 = 1 or 2) returns what is down and the presses since the last look, `JOY1`/`JOY2` hold the states, and `JOYKEY` makes the kernel type

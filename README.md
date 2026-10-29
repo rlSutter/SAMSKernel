@@ -25,6 +25,7 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 | [docs/VIDEO-MODES.md](docs/VIDEO-MODES.md) | every F18A display mode `VMODE` sets, with pictures: Text 80/40, Graphics I/II, Multicolor, enhanced colour, sprites, tile layer 2, the bitmap layer |
 | [docs/WORKBENCH.md](docs/WORKBENCH.md) | the workbench: an editor, a native assembler and a launcher that run on the TI itself |
 | [docs/MUSIC.md](docs/MUSIC.md) | music and sound: the player, the compiler (MIDI or a text score to songs), the song format |
+| [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md) | **what has and has not been run on real hardware**, and how to try each thing on a real TI (or js99er): the list to work through next |
 | [docs/DEVELOPING-ON-A-TI.md](docs/DEVELOPING-ON-A-TI.md) | working with a real TI: the first-run ladder, refusal messages, debugging, editing on the TI, and what is not possible yet |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the kernel works inside; memory maps |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | the machine's facts the kernel relies on; the key-code table |
@@ -36,7 +37,7 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 
 | | |
 | --- | --- |
-| `examples/hello` | one module, 196 bytes: prints, echoes keys, quits |
+| `examples/hello` | one module, 194 bytes: prints, echoes keys, quits |
 | `examples/diag` | two modules: a key/glyph/colour diagnostic, and a self-test of the kernel's services (CTRL T). Run it first on new hardware |
 | `examples/modes` | one module, fifteen screens: every display mode and option (keys `1-9 0 A-E`); the pixel tests render them |
 | `examples/workbench` | the workbench: edit, assemble and run programs on the TI (an editor, a native assembler checked against xas99, a launcher) |
@@ -47,7 +48,7 @@ You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside 
 ## Tests
 
 ```
-python3 tests/test_kernel.py            sources dbg joystick files2 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+python3 tests/test_kernel.py            sources dbg sams16 joystick files2 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 TI_CONSOLE_ROM=/path/to/console-rom TIFDC_ROM=/path/to/disk-controller-rom python3 tests/test_kernel.py rom realdsr
 ```
 
@@ -57,8 +58,9 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.5.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
-ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have; `GOMOD`, the page pool, `FCNUM`, the
-table-driven loader and the packaging are new. Run `examples/diag` and press CTRL T on the first real machine.
+Version 1.5.1. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
+else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
+CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).
 
 MIT License, (c) 2026 Rebecca Sutter.
