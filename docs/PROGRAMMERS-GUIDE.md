@@ -31,21 +31,53 @@ card, its size or the F18A is missing.
 | Music | play a song from SAMS pages (a register-log player, stepped every frame), tone effects; songs compile from MIDI or a text score (MUSIC.md) |
 | Safety | the loader's checks, a clean power-up state, a clean exit to the TI title screen |
 
-**What you need on the PC:** Python 3, and [xdt99](https://github.com/endlos99/xdt99)
+**What you need on the PC** (the **[PC]** route): Python 3, and [xdt99](https://github.com/endlos99/xdt99)
 (`xas99.py` is the assembler). Put xdt99 beside this directory (`../xdt99`), or set
 `XAS99` to the path of `xas99.py`. A web browser with js99er.net for running; the
 headless simulator in `tools/` for testing.
 
+### What you need on the TI
+
+**[TI]** The workbench cartridge image (`images/workbench8.bin`, on a FinalGROM 99 or in js99er) and its disk (`images/workbench.dsk`, in DSK1), on a TI with an F18A and a SAMS card. A PC is needed once, to make those two
+(they are prebuilt in the distribution); after that you can edit, assemble and run on the TI alone. WORKBENCH.md is the manual.
+
+**Two ways to work, marked throughout these documents.**
+
+| Mark | Where | What you use |
+| --- | --- | --- |
+| **[PC]** | on a PC with Python 3 and [xdt99](https://github.com/endlos99/xdt99) | any editor; `skbuild.py` builds a cartridge image; the simulator, js99er or a real TI runs it; `skdisk.py`, `skmusic.py` and the tests help |
+| **[TI]** | on the TI-99/4A itself (or js99er playing one), with the workbench cartridge and its disk | the workbench's editor, assembler and launcher: nothing else |
+| **[PC or TI]** | either | the same either way: the assembly source and every kernel call |
+
+A block is tagged when it belongs to one route only. Assembly source is **[PC or TI]** unless a note says otherwise (the **[TI]** route assembles one module of up to 4,096 bytes, at `>C000`: see the table below).
+Shell commands are **[PC]**; key sequences like "N, type a name, ENTER" are **[TI]**.
+
+| | **[PC]** | **[TI]** |
+| --- | --- | --- |
+| Write the source | any editor | the workbench editor (80 columns, up to 800 lines) |
+| Assemble | xas99: the full dialect, user macros, large programs | the workbench's native assembler: xas99's dialect without user macros (`.defm`) or forward `EQU`; image up to 4,096 bytes; symbols up to 12 characters |
+| Modules | as many as you like (`app.json`); `GOMOD` and `.callmod` between them | one module; the only switch is back to the workbench (`GOMOD PG_WB`) |
+| Data in SAMS pages (`data`), music compiled at build (`from`), `PD_` equates | yes | no |
+| Your own font and colour schemes (`databank.a99`) | yes | no |
+| Every kernel routine (`PUTS`, `VMODE`, `FOPEN`, `FSEL`, `JOYGET`, `PINIT`, `SNDTONE` ...) | yes | yes (`MUPLAY` needs a song in SAMS pages, so it is **[PC]**) |
+| Output | a cartridge image (`NAME8.bin`) for js99er, FinalGROM or a real TI | the program runs inside the workbench; no cartridge (a TI cannot write a FinalGROM) |
+| Run | simulator (`sk.py run`), js99er, real machine | `R` in the workbench, at once |
+| Test | Python against the simulator: key scripts in, screen and memory out; the kernel's own test groups | run it and look; the `DBG` routine and screen breadcrumbs; `docs/HARDWARE-CHECKLIST.md` |
+
 ## 1. Hello, kernel
 
-Build and run the smallest example:
+**[PC]** Build and run the smallest example:
 
 ```
 python3 tools/skbuild.py examples/hello
 python3 tools/sim9900.py build/hello/hello8.bin --keys "<ALPHA>hello" --frames 200
 ```
 
-The first command assembles the kernel, the loader and your module and writes
+**[TI]** The same program, on the TI: load `workbench8.bin` with `workbench.dsk` in DSK1, then press **N**, type `DSK1.HELLO/A99`, **ENTER** (TI file names have no dots: `hello.a99` is `HELLO/A99`),
+**A** (the screen says "Assembled: 194 bytes at >C000"), **R** (the program runs: type, and FCTN = quits). **E** shows the source in the editor. To type a program in yourself: **N**, `DSK1.MINE/A99`, **ENTER**, **E**, type it,
+**CTRL A** (saves and assembles), then **R**. (The anatomy below walks through `hello.a99`, line by line; WORKBENCH.md part 2a has a complete worked example, typed on the TI and built on the PC.)
+
+The **[PC]** commands assemble the kernel, the loader and your module and writes
 `build/hello/hello8.bin`, a cartridge image. The second runs it in the simulator and
 prints the screen as text. To run it in js99er, load `hello8.bin` as a FinalGROM/cartridge
 image with the F18A and a SAMS card (512K or more) switched on in its settings.
@@ -324,6 +356,9 @@ that scrolls should redraw rows itself in that case.
 
 ### Other display modes
 
+**[TI]** `programs/mode.a99` on the workbench disk switches between Text 80 and Text 40 with `VMODE` and redraws with positions computed from `TXCOLS` (assemble it, run it, press 1 or 2; FCTN 9 returns). Only those two modes are tested on the TI route.
+**[PC]** `examples/modes` shows all fifteen screens, with the pictures in VIDEO-MODES.md. The source of either is the same kind of code: `LI R0,VMT40 / LI R1,VO30+VOPOS / BL @VMODE`.
+
 `VMODE` switches the F18A to any of its modes: R0 = the base mode (`VMT80`, `VMT40`, `VMGM1` Graphics I, `VMGM2` Graphics II, `VMMC` Multicolor), R1 = the options added together (`VO30` 30
 rows, `VOPOS` a colour attribute per position, `VOTE1-3` / `VOSE1-3` enhanced colour for tiles / sprites, `VOSPR` sprites on, `VOS16`, `VOSMG`):
 
@@ -345,6 +380,8 @@ There is no hardware cursor: draw one by giving a cell the accent attribute
 `(RBG*16+RACCNT)*256` (`ACUR` in `diag.a99`) and putting the old cell's attribute back when it moves.
 
 ## 6. The keyboard
+
+**[PC or TI]** The code is the same on both routes. **[TI]** `hello` (echoes keys), `examples/joystick/joy.a99` (key codes and both joysticks) and `programs/beep.a99` (keys 1-8 play notes) are on the workbench disk.
 
 A **key code** is one byte. The kernel decodes the whole chord (key + modifiers) to a
 single code, so your program never tracks SHIFT or CTRL itself:
@@ -427,6 +464,9 @@ variable in `>A000-FFFF`**: those windows are remapped.
 
 ### SAMS pages for big data
 
+**[TI]** `programs/paging.a99` on the workbench disk takes four pages from the pool, writes each page's own number into it through slot B, checks them, and puts slot B back with `GETPB`/`SETPB`: this part's code, running. **[PC]** the same code
+builds with `skbuild.py` (change the return to the workbench, which exists only on the TI route). Data files that the build puts into pages for you (`data` in `app.json`, the `PD_` equates) are **[PC]** only.
+
 The SAMS card gives you 4K pages, numbered from 0 (128 of them on a 512K card, 256 on 1M, up to 4,096 on a 16M card). The kernel and the build own some; the rest are yours:
 
 | Pages | Use |
@@ -486,6 +526,8 @@ lines of a file, and draws from them:
 be bigger than `min_pages`, never smaller (the loader refuses it).
 
 ## 8. Several modules
+
+**[PC] only.** The TI route has one module: the workbench runs your program as a module and the only switch it offers is back (`LI R0,PG_WB / CLR R1 / BL @GOMOD`). Everything in this part is for programs built with `skbuild.py` from an `app.json` that lists more than one.
 
 List them in `app.json`; the build assigns pages and writes their names as equates:
 
@@ -551,6 +593,9 @@ routine runs with *its* module in slot C, so it may not touch your code or data 
   needs its entry table the same either way.
 
 ## 9. Files
+
+**[TI]** `programs/copy.a99` on the workbench disk copies `DSK1.SRC` to `DSK1.DST` through two handles at once: the file calls below, running. **[PC]** `tests/apps/files2` is the same idea as a cartridge, checked against TI's own disk controller ROM in the simulator.
+**[PC or TI]** The code is identical.
 
 The file service speaks to any device through the console's device service routines: the
 disk controller (`DSK1.`), TIPI (`PI.`), a printer port (`PIO`), and so on. It can hold up to three files open at once (part 9, "Several files").
@@ -703,12 +748,15 @@ there is no exit hook.
 
 ## 12. Building
 
+**[PC]** This part is the PC route: `skbuild.py` and `app.json`. **[TI]** The workbench builds for you, with none of this: one module, `AORG >C000`, an entry table first, `COPY "kernel.equ"` (the file KERNEL/EQU on the disk); **A** assembles it and **R** runs it. There is no
+`app.json`, no `data`, no second module and no cartridge image on the TI route (WORKBENCH.md part 5).
+
 `python3 tools/skbuild.py APPDIR` reads `APPDIR/app.json`:
 
 ```json
 {
   "name": "MY APP",             menu name and refusal screens (20 characters)
-  "min_pages": 128,             SAMS pages required: 32, 64, 128 or 256
+  "min_pages": 128,             SAMS pages required: 32, 64, 128 ... 4096
   "modules": [
     {"name": "main",  "source": "main.a99"},
     {"name": "other", "source": "other.a99", "page": "0x20"}
@@ -740,7 +788,8 @@ The build runs `tools/font.py` and `tools/keytab.py` first (they write `gen/font
 
 ## 13. Testing
 
-You can run and test an application without a TI.
+**[PC]** You can run and test an application without a TI (this part). **[TI]** On the TI you test by running it and looking: put `COPY "dbg.a99"` in your module and `BL @DBG` anywhere, to show R0-R3 and wait for a key (every register kept), draw a heartbeat
+(`@FRAME` in a corner), and work through `docs/HARDWARE-CHECKLIST.md`. The assembler itself is tested on the PC, against xas99, in the simulator.
 
 ```
 python3 tools/sim9900.py build/myapp/myapp8.bin --keys "<ALPHA>hello<ENTER>" --frames 300
@@ -824,6 +873,9 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 
 ## 15. What the kernel does not do (version 1.5)
 
+
+**[TI]** adds its own limits (the table above): one module of up to 4,096 bytes at `>C000`; no `data` pages, no music compiled at build (`MUPLAY` needs a song in pages; `SNDTONE` works), no databank of your own, no user macros or forward `EQU`, no cartridge image; variables in `APPRAM+5760` and above, so a program does not
+overwrite the workbench's own state (WORKBENCH.md part 5).
 - Video: every F18A mode is reachable (`VMODE`, `VREG`), but the kernel only *draws* for you in the glyph modes
   (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite
   library, no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.

@@ -1,5 +1,7 @@
 # SAMS Kernel: hardware notes
 
+Reference for both routes: the machine's facts are the same whether a program is built on a **[PC]** or assembled on the **[TI]**. The simulator and the model of the sound chip are **[PC]** tools.
+
 What the kernel does with each piece of hardware, and why. The F18A facts were taken from
 js99er's source (`src/app/emulator/classes/f18a.ts`, the reference emulator) and the keyboard
 facts from its `cru.ts` and `key-mapper.ts`; the code in this kernel is the code that ran The

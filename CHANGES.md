@@ -1,5 +1,13 @@
 # Changes
 
+## 1.5.2 (29 October 2026)
+
+Every document now shows both ways of working, marked **[PC]**, **[TI]** or **[PC or TI]** (the legend and a comparison table are in the programmer's guide part 0 and the README; each document has a route note and the parts that differ carry their own).
+
+- New programs on the workbench's disk, one for each area the guide covers, each assembled and run on the simulated TI by the new test group `tiprograms`: `MODE/A99` (`VMODE`, Text 80 / Text 40), `PAGING/A99` (the page pool, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once), and `examples/joystick/joy.a99`, which now also assembles on the TI (its variables sit at `APPRAM+5760`, clear of the workbench's own state; so do those of the other programs).
+- `WORKBENCH.md` part 2a: one program, typed and run on the TI, built and run on the PC; the same 50 bytes.
+- The conventions list the extra rules of the TI route; the hardware checklist marks its steps by route; the skill states the routes.
+
 ## 1.5.1 (29 October 2026)
 
 Documentation only; no code or image changed. `docs/HARDWARE-CHECKLIST.md` (what has and has not run on a real machine, and a twelve-step walk through the rest, with what to expect and what to report); stale statements corrected (the guide said 1M and "version 1.1";

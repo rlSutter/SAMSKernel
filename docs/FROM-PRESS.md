@@ -1,5 +1,7 @@
 # From Press to the SAMS Kernel
 
+History and rebasing notes, for the **[PC]** route (a program of Press's size is many modules and data pages).
+
 The kernel is Press 2.0's resident kernel generalised: everything an application needs, nothing that only a word processor does. This note says what
 moved, what was renamed, what was left in Press, and what rebasing Press (or F18Base, TXA) on the kernel would involve. **Press itself has not been
 changed**; nothing here has been tried against it.

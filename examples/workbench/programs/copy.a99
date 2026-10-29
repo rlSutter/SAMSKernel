@@ -1,0 +1,153 @@
+*======================================================================
+* copy.a99 - a program for the workbench's disk: two files open at once.
+* ENTER copies DSK1.SRC to DSK1.DST a record at a time, through file
+* handles 0 and 1 (FSEL), and says how many records it copied; FCTN 9
+* returns to the workbench, FCTN = quits.  Put a text file called SRC on
+* the disk first.  Assemble it with A, run it with R.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+* (free when run from the workbench: see docs/WORKBENCH.md)
+WORK   EQU   APPRAM+5760
+NREC   EQU  WORK+0             records copied
+ERRO   EQU  WORK+2             the first error (0 = none)
+RLEN   EQU  WORK+4             the length of the record in hand
+BUF    EQU  WORK+100
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+TICK   .enter
+       MOV  R0,R9
+       JEQ  T9
+       CI   R9,KQUIT*256
+       JNE  T1
+       SETO @QUITF
+       JMP  T9
+T1     CI   R9,KBACK*256
+       JNE  T2
+       LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R9,KENTER*256
+       JNE  T9
+       BL   @COPY
+       BL   @REPORT
+T9     .leave
+       RT
+
+* COPY - SRC (handle 0, input) to DST (handle 1, output), record by record.
+* The loop's state is in memory: the file service changes R6-R9.
+COPY   .enter
+       CLR  @NREC
+       CLR  @ERRO
+       CLR  R0
+       BL   @FSEL
+       LI   R2,SRC
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@ERRO
+       JNE  CP9
+       LI   R0,1
+       BL   @FSEL
+       LI   R2,DST
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@ERRO
+       JEQ  CP1
+       CLR  R0                 the output would not open: close the input
+       BL   @FSEL
+       BL   @FCLOSE
+       JMP  CP9
+CP1    CLR  R0
+       BL   @FSEL
+       LI   R1,BUF
+       BL   @FREAD             R0 = 0, or 5 at the end of the file
+       MOV  R0,R0
+       JNE  CP2
+       MOV  R2,@RLEN
+       LI   R0,1
+       BL   @FSEL
+       LI   R1,BUF
+       MOV  @RLEN,R2
+       BL   @FWRITE
+       MOV  R0,R0
+       JNE  CP3
+       INC  @NREC
+       JMP  CP1
+CP2    CI   R0,FEEOF           the end of the file is not an error
+       JEQ  CP4
+CP3    MOV  R0,@ERRO
+CP4    CLR  R0
+       BL   @FSEL
+* (TI's controller has already closed it at the end)
+       BL    @FCLOSE
+       LI   R0,1
+       BL   @FSEL
+       BL   @FCLOSE
+CP9    .leave
+       RT
+
+* REPORT - what happened.
+REPORT .enter
+       LI   R0,4*COLS+2
+       LI   R1,SBLANK
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @ERRO,R0
+       JEQ  RP1
+       LI   R0,4*COLS+2
+       LI   R1,SERR
+       LI   R2,AERR
+       BL   @PUTS
+       LI   R0,4*COLS+14
+       MOV  @ERRO,R1
+       LI   R2,AERR
+       BL   @DECW
+       JMP  RP9
+RP1    LI   R0,4*COLS+2
+       MOV  @NREC,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+5
+       LI   R1,SDONE
+       LI   R2,ANORM
+       BL   @PUTS
+RP9    .leave
+       RT
+
+STITLE STRI ' Copy   a program made on the TI'
+SHELP  STRI 'ENTER copies DSK1.SRC to DSK1.DST   FCTN 9 back'
+SBLANK STRI '                                        '
+SERR   STRI 'error'
+SDONE  STRI 'records copied'
+SRC    STRI 'DSK1.SRC'
+DST    STRI 'DSK1.DST'
+       EVEN

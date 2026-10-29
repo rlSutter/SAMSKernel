@@ -4,6 +4,8 @@ The rules the kernel's code follows and an application should. Each exists becau
 session in The Lantern Coast or Press. The programmer's guide explains them for application authors; this is the compact
 list for people changing the kernel.
 
+**Routes.** **Two ways to work: [PC] / [TI] / [PC or TI].** **[PC]** is a PC with Python 3 and xdt99 (build with `skbuild.py`, run in the simulator or js99er); **[TI]** is the TI itself with the workbench cartridge (editor, assembler, launcher); **[PC or TI]** is the same either way. The full table is in PROGRAMMERS-GUIDE.md part 0.
+
 ## Memory
 
 - Fixed windows: slot A (`>2000-3FFF`, pages `>02-03`) is never remapped; the kernel (`>A000-BFFF`, pages `>0A-0B`) is never
@@ -66,3 +68,9 @@ list for people changing the kernel.
 2. `python3 tests/test_kernel.py` (set `TI_CONSOLE_ROM` to your own console ROM to include the real-interrupt group).
 3. `python3 tools/docindex.py --check`, then `python3 tools/docindex.py`.
 4. Update the documents, `CHANGES.md`, and `VERSION` for anything an application can see.
+
+## Programs for the workbench (the **[TI]** route)
+
+The rules above apply to both routes. A program assembled on the TI adds: one module, `AORG >C000`, the entry table first; at most 4,096 bytes; `COPY "kernel.equ"` (the file KERNEL/EQU, from the same build as the workbench cartridge);
+symbols of at most 12 characters, no user macros and no forward `EQU`; variables at `APPRAM+5760` and above (below that is the workbench's own state: its file name, the assembled image, the editor's buffer); come back with
+`LI R0,PG_WB / CLR R1 / BL @GOMOD`; no `PD_` equates, no data pages, no second module. The programs in `examples/workbench/programs/` follow these rules.

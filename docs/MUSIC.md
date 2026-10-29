@@ -9,6 +9,10 @@ produced), the pitch of what a model of the sound chip makes of those writes (a 
 The compiler's choices of notes and the model of the noise generator are approximations you should *hear* before you trust them: `skmusic.py --wav` writes a preview, and
 the real test is a real TI.
 
+**Routes.** **Two ways to work: [PC] / [TI] / [PC or TI].** **[PC]** is a PC with Python 3 and xdt99 (build with `skbuild.py`, run in the simulator or js99er); **[TI]** is the TI itself with the workbench cartridge (editor, assembler, launcher); **[PC or TI]** is the same either way. The full table is in PROGRAMMERS-GUIDE.md part 0.
+Here: **compiling** songs (`skmusic.py`, the `"from"` entry in `app.json`) and putting them into SAMS pages is **[PC]**; **playing** one (`MUPLAY`, `MUPAUSE`, `MUSTOP`) is **[PC or TI]** code but needs the song in pages, so it runs from a cartridge built on the **[PC]**;
+**tones** (`SNDTONE`, `SNDOFF`) are **[PC or TI]** and are the music route on the **[TI]**: `programs/beep.a99` on the workbench disk plays a note on each of keys 1-8 (assemble it with A, run it with R). The simulator checks and the WAV preview are **[PC]**.
+
 ## 1. The sound chip in brief
 
 The TMS9919 (SN76489 family) has **three tone voices and one noise voice**. You write it a byte at a time at `SOUND` (`>8400`):
@@ -34,6 +38,8 @@ coarse. Dividers for the notes of equal temperament:
 (Octave 4 is middle C's octave; A4 is 254, 440.4 Hz. The chip has no envelope: a note's volume changes only when you write it.)
 
 ## 2. Playing a song
+
+**[PC]** (the `app.json` entry and `skbuild.py`); the calls are **[PC or TI]** code.
 
 Put the song in the build, then play it:
 
@@ -78,6 +84,8 @@ the application has mapped.
 and shares the chip in the same way; the player and the lists have not been mixed in a test.
 
 ## 3. The compiler
+
+**[PC]** only: `skmusic.py` is Python.
 
 ```
 python3 tools/skmusic.py tune.mml -o tune.skm --loop --wav tune.wav --info
@@ -143,6 +151,8 @@ A song may be up to 65,535 bytes; its pages must be consecutive, which the build
 To make songs another way, write the bytes yourself: the format is the whole interface.
 
 ## 5. Try it
+
+**[PC]** the commands below. **[TI]** `examples/music` needs songs in SAMS pages, so it is a cartridge; on the TI use `programs/beep.a99` (workbench disk) for tones.
 
 ```
 python3 tools/skmusic.py examples/music/songs/tune.mml --loop --wav /tmp/tune.wav --info     hear it on the PC first

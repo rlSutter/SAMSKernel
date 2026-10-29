@@ -7,6 +7,22 @@ on the TI, with no PC in the loop once the workbench is installed.
 byte-identical to xas99's for every example module and for two probe sources that use every instruction in every operand form; the editor, the catalog, the assembling and the running are
 exercised by key scripts. **It has not run on a real TI-99/4A**, and I have not measured how long an assembly takes on one (part 6 gives instruction counts).
 
+**Routes.** This document is the **[TI]** route. Each **[TI]** step has a **[PC]** counterpart:
+
+| **[TI]** in the workbench | **[PC]** |
+| --- | --- |
+| N, a file name; E to edit | any editor on a file |
+| A assembles it | `python3 tools/skbuild.py APPDIR` (xas99) |
+| R runs it | `python3 tools/sim9900.py build/APP/APP8.bin --keys ...`, js99er, or a real TI |
+| the disk catalog (C) | your file manager; `xdm99.py disk.dsk` lists a disk image |
+| `COPY "kernel.equ"` reads `KERNEL/EQU` on the disk | the build writes `kernel.equ`; `COPY "kernel.equ"` reads that |
+
+The same source assembles on both: it is [PC or TI] code, with the **[TI]** limits in part 4 and part 5.
+
+**Programs on the workbench disk** (each assembles and runs on the TI; the tests do exactly that): `HELLO/A99` (keys echoed), `BEEP/A99` (notes on keys 1-8: `SNDTONE`), `MODE/A99` (Text 80 / Text 40: `VMODE`, `TXCOLS`),
+`PAGING/A99` (SAMS pages from the pool: `PINIT`, `PALLOC`, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once: `FSEL`; the sample `SRC` on the disk is what it copies), `JOY/A99` (both joysticks: `JOYGET`, `JOYKEY`), `MODES/A99` (fifteen display screens) and
+`PROBE1/A99` (an assembler test). Each is the example for one part of PROGRAMMERS-GUIDE.md (parts 1, 5, 6, 7, 9).
+
 ## 1. Getting it onto the TI
 
 A PC is needed once, to make two things:
@@ -17,7 +33,7 @@ python3 tools/skdisk.py work.dsk --kernel-equ build/workbench/kernel.equ example
                                                      a disk image holding KERNEL/EQU and your sources
 ```
 
-`images/workbench8.bin` and `images/workbench.dsk` in the distribution are these, prebuilt (the disk holds KERNEL/EQU, hello, beep, modes and a probe source). Put the cartridge image where your cartridge
+`images/workbench8.bin` and `images/workbench.dsk` in the distribution are these, prebuilt (the disk holds KERNEL/EQU, the programs listed below, and a sample text file `SRC` for `COPY/A99`). Put the cartridge image where your cartridge
 device wants it, and the disk in DSK1 (a TIPI, a CF7+ or a floppy; how the image gets there depends on your hardware, and I have tried none of them). **KERNEL/EQU must come from the same build as the
 workbench cartridge**: it holds the addresses of the kernel's routines and equates in that build, and a program assembled against another build's addresses will not run.
 
@@ -40,6 +56,39 @@ You need the same machine as for any SAMS Kernel program: an F18A and 512K of SA
 | FCTN = | quit |
 
 TI file names have no dots, so a source file called `hello.a99` on a PC is `HELLO/A99` on the TI (xdm99 and `skdisk.py` do this): the name to type is `DSK1.HELLO/A99`.
+
+## 2a. A worked example: the same program on both routes
+
+The program (50 bytes once assembled, identical on both routes; it prints a line and does nothing else):
+
+```
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       LI   R0,2*COLS+2
+       LI   R1,MSG
+       LI   R2,(RTEXT*16+RBG)*256
+       BL   @PUTS
+       .leave
+       RT
+TICK   RT
+MSG    STRI 'Built on the TI'
+```
+
+**[TI]** In the workbench: **N**, type `DSK1.MINE/A99`, **ENTER**; **E**; type the program above, ENTER at the end of each line (indentation is spaces: the editor does not indent for you; a typing mistake is mended with CTRL H or FCTN 1, as the status bar shows);
+**CTRL A** saves it and assembles it (the menu says "Assembled: 50 bytes at >C000"; a mistake is listed with its line number: **E**, fix, CTRL A again); **R** runs it: "Built on the TI" appears on row 2 (on a TI the keyboard types capitals unless you
+lower ALPHA LOCK, so the line reads BUILT ON THE TI). `tests/test_kernel.py workbenchfull` does exactly these keystrokes.
+
+**[PC]** Make a directory `mine/` holding the same text as `main.a99` and an `app.json`:
+
+```
+{"name": "MINE", "min_pages": 128, "modules": [{"name": "main", "source": "main.a99"}]}
+```
+
+then `python3 tools/skbuild.py mine` and `python3 tools/sim9900.py build/mine/mine8.bin --frames 100`: the screen prints with "Built on the TI" on row 2. The image `build/mine/mine8.bin` is a cartridge for js99er, a FinalGROM or a real TI,
+which the **[TI]** route cannot make.
 
 ## 3. The editor
 

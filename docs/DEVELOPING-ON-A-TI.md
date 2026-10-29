@@ -9,6 +9,8 @@ the xdt99 assembler), and the kernel itself loads from a cartridge into SAMS; bo
 | **B. The TI as the editor too** | write the source on the TI, move the files to the PC to build | yes; the sources are kept safe for it (part 4) |
 | **C. Everything on the TI** | edit, assemble and run with no PC, in the workbench | **yes, for one-module programs, in the simulator** (part 5, and WORKBENCH.md); not on real hardware yet |
 
+**Which route is which.** **Two ways to work: [PC] / [TI] / [PC or TI].** **[PC]** is a PC with Python 3 and xdt99 (build with `skbuild.py`, run in the simulator or js99er); **[TI]** is the TI itself with the workbench cartridge (editor, assembler, launcher); **[PC or TI]** is the same either way. The full table is in PROGRAMMERS-GUIDE.md part 0. The three levels above: A and B are **[PC]** builds with the **[TI]** as the test machine or the editor; C is the **[TI]** route entirely.
+
 **What is verified.** All of this project is verified in a simulator (a TMS9900, the F18A, SAMS, a keyboard, TI's own console ROM and disk controller ROM), not on a real TI-99/4A. No
 image from this project has yet been run on a real FinalGROM 99 or a real F18A and SAMS card. Treat the first run on real hardware as a test, and use the ladder in part 2.
 

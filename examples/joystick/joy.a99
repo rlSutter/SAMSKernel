@@ -21,15 +21,18 @@ ABOLD  EQU  (RBOLD*16+RBG)*256
 ADIM   EQU  (RDIM*16+RBG)*256
 AMARK  EQU  (RMARK*16+RBG)*256
 
-CNT1   EQU  APPRAM+0           fire presses seen on joystick 1
-CNT2   EQU  APPRAM+2           ... on joystick 2
-LASTK  EQU  APPRAM+4           the last key code that was not 0-3
-NKEYS  EQU  APPRAM+6           keys received
-SEEN1  EQU  APPRAM+8           every direction joystick 1 has shown
-SEEN2  EQU  APPRAM+10
-ST1    EQU  APPRAM+12          the states now
-ST2    EQU  APPRAM+14
-TMP    EQU  APPRAM+16
+* the variables sit high in APPRAM, clear of the workbench's own state
+WORK   EQU   APPRAM+5760
+*                              (the program also runs from the workbench's disk)
+CNT1   EQU  WORK+0             fire presses seen on joystick 1
+CNT2   EQU  WORK+2           ... on joystick 2
+LASTK  EQU  WORK+4           the last key code that was not 0-3
+NKEYS  EQU  WORK+6           keys received
+SEEN1  EQU  WORK+8           every direction joystick 1 has shown
+SEEN2  EQU  WORK+10
+ST1    EQU  WORK+12          the states now
+ST2    EQU  WORK+14
+TMP    EQU  WORK+16
 
        AORG >C000
        DATA INIT,TICK,REDRAW,0

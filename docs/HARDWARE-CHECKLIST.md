@@ -8,6 +8,9 @@ none of the hardware's surprises. This list is the honest boundary, in the order
 SAMS paging with a 1M-or-smaller card, the keyboard decode, the F18A 80-column text screen and colour roles, files through TI's disk controller, the FinalGROM "8" image format and bank switching. **Not** run on real hardware in this
 form: the loader as rewritten, the module system, the page pool, and everything below. js99er with a 16M SAMS has run the kernel (which found the QUIT bug in 1.3.0, fixed in 1.3.1).
 
+**Routes.** Steps 1-8 run prebuilt images (`images/`), which need a **[PC]** only to have been made: copy them to the cartridge and the disk and you can do them with no PC. Step 9 has two forms below: **[PC]** builds `tests/apps/files2`;
+**[TI]** runs `COPY/A99` from the workbench disk (the same test, two files open at once). Steps 10 and 11 are **[TI]** by nature (the workbench itself).
+
 ## The walk
 
 | # | Do | You should see | If not, tell me |
@@ -20,7 +23,7 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 | 6 | `images/music8.bin`: `1`, SPACE, SPACE, `S`, `2`, `B`, `W` | the tune (three voices and a beat, about 16 s, looping), silent while paused and then the same note, an A (440 Hz), a beep, and the tune playing through a two-second "work" loop | the tune is too fast or slow, a wrong note, a hiss or click, or the noise voice too loud (a PAL console needs `"fps": 50`) |
 | 7 | `images/joystick8.bin`, each joystick in each direction, and fire | the matching label goes bold; the fire count rises once a press; `1`, `2`, `3` make joystick 1, 2 or both type keys (the "Keys typed" count and the last code change; UP, DOWN, LEFT, RIGHT, ENTER are `C5 D8 D3 C4 0D`) | the wrong direction or joystick, a key that sticks, ghosting with a key held |
 | 8 | `images/diskbrowser8.bin` with a disk in DSK1 | the catalog; ENTER on a text file shows it; scroll; FCTN 9 back | a hang, a wrong size or type, a garbled name |
-| 9 | Several files: build `tests/apps/files2` (`python3 tools/skbuild.py tests/apps/files2`) and make a disk from two text files named `src` and `src2` (`python3 tools/skdisk.py d.dsk src src2`), then load `build/files2/files28.bin` with that disk in DSK1 | nothing on the screen; afterwards the disk holds `DST`, a copy of `SRC` (check it in your usual disk manager) | the disk controller or TIPI in use; whether `DST` is complete |
+| 9 | Several files, **[TI]**: in the workbench (the disk has a sample `SRC`), N `DSK1.COPY/A99` ENTER, A, R, ENTER; the disk then holds `DST`. **[PC]**: build `tests/apps/files2` (`python3 tools/skbuild.py tests/apps/files2`) and make a disk from two text files named `src` and `src2` (`python3 tools/skdisk.py d.dsk src src2`), then load `build/files2/files28.bin` with that disk in DSK1 | nothing on the screen; afterwards the disk holds `DST`, a copy of `SRC` (check it in your usual disk manager) | the disk controller or TIPI in use; whether `DST` is complete |
 | 10 | `images/workbench8.bin` with `images/workbench.dsk` in DSK1: N `DSK1.HELLO/A99` ENTER, A, then R | "Assembled: 194 bytes at >C000", then the hello program; **time the assembly with a watch and tell me** (the simulator ran 1.9 million instructions); then restart (hello has no way back) and `BEEP/A99`: A, R, keys 1-8 play a scale, FCTN 9 returns to the workbench | the time; any error list; a hang |
 | 11 | In the workbench: E on `HELLO/A99`, type a line, CTRL S, CTRL A | the edit saves and re-assembles; a mistyped mnemonic is reported with its line | an editor key that does the wrong thing |
 | 12 | Cards above 1M, if you have one: step 2 again, then 6 and 10 | the page count is right and everything else as before | the first thing that differs |

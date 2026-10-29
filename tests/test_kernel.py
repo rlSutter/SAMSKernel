@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 joystick files2 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -269,7 +269,7 @@ def joystick():
     """Both joysticks, read as keyboard columns 6 and 7: what is down, the presses between looks, and JOYKEY, which
     types arrow keys and ENTER for a joystick with the keyboard's repeat."""
     c = build('joystick')
-    b = 0x2300
+    b = 0x2300 + 5760
     keys = '<WAIT 5><J1-FIRE><WAIT 6><J1-FIRE><WAIT 6><J1-LEFT+UP><WAIT 6><J1-RIGHT><WAIT 6><J1-DOWN><WAIT 6><J2-FIRE><WAIT 6><J2-LEFT><WAIT 10>'
     m, cpu, halt = sim9900.run(c, keys=keys, frames=260)
     check(m.rw(b) == 2 and m.rw(b + 2) == 1, 'fire presses counted per joystick, each press once (J1 %d, J2 %d)' % (m.rw(b), m.rw(b + 2)))
@@ -467,7 +467,38 @@ def nativedisk():
     b = [x for (src, i, x) in m.chip_log if src == 'cpu']
     check(b[-3:] == [0x8E, 0x0F, 0x90], 'beep, assembled and run on the TI: key 6 plays A on voice 1 (SNDTONE: >8E >0F >90): %s' % [hex(x) for x in b[-3:]])
 
-DISK_SOURCES = ['examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/modes/modes.a99', 'tests/asm/probe1.a99']
+DISK_SOURCES = ['examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/workbench/programs/mode.a99',
+                'examples/workbench/programs/copy.a99', 'examples/workbench/programs/paging.a99', 'examples/joystick/joy.a99',
+                'examples/modes/modes.a99', 'tests/asm/probe1.a99']
+
+def tiprograms():
+    """The programs on the workbench's disk, assembled on the simulated TI and run there: the TI-side examples the
+    documentation points to (mode, paging, copy, joystick)."""
+    import asmharness, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    P = os.path.join(ROOT, 'examples/workbench/programs/')
+    def go(name, extra, tail, frames):
+        keys = '<WAIT 10>n%s<ENTER><WAIT 10>a<WAIT 2300>r<WAIT 60>%s' % (name, tail)
+        return asmharness.workbench_ui(keys, frames, extra)
+    m, img = go('MODE/A99', [P + 'mode.a99'], '2<WAIT 40>', 2900)
+    check(m.rw(0x20EC) == 40, 'mode: key 2 set Text 40 (%d columns)' % m.rw(0x20EC))
+    m, img = go('MODE/A99', [P + 'mode.a99'], '2<WAIT 40>1<WAIT 40>', 3000)
+    check(m.rw(0x20EC) == 80, 'mode: key 1 set Text 80 again (%d columns)' % m.rw(0x20EC))
+    m, img = go('MODE/A99', [P + 'mode.a99'], '2<WAIT 40><F-9><WAIT 80>', 3100)
+    ln = lines(m)
+    check(m.rw(0x20EC) == 80 and 'workbench' in ln[0], 'mode: FCTN 9 restores Text 80 and returns to the workbench: %r' % ln[0].strip())
+    m, img = go('PAGING/A99', [P + 'paging.a99'], '<ENTER><WAIT 60>', 2900)
+    ln = [l.strip() for l in lines(m)[:10]]
+    check('4 of 4 pages kept their own number' in ln and 'OK' in ln, 'paging: four pool pages each kept their own number, and slot B was put back: %s' % [l for l in ln if l][-2:])
+    open('/tmp/src', 'w').write('first record\nsecond record\nthird\nfourth\n')
+    m, img = go('COPY/A99', [P + 'copy.a99', '/tmp/src'], '<ENTER><WAIT 120>', 3000)
+    check(tifdc.read_file(img, 'DST') == tifdc.read_file(img, 'SRC') and len(tifdc.read_file(img, 'DST')) == 4, 'copy: two files open at once, SRC copied to DST record for record on the TI: %s' % tifdc.read_file(img, 'DST'))
+    m, img = go('JOY/A99', [os.path.join(ROOT, 'examples/joystick/joy.a99')], '<J1-FIRE><WAIT 8><J1-FIRE><WAIT 8>', 2800)
+    check(m.rw(0x2300 + 5760) == 2, 'joystick: the program assembled on the TI counts two fire presses (%d)' % m.rw(0x2300 + 5760))
+
+DISK_SOURCES_PLACEHOLDER = None
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -609,7 +640,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

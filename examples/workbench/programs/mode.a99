@@ -1,0 +1,112 @@
+*======================================================================
+* mode.a99 - a program for the workbench's disk: 1 shows the screen in Text 80,
+* 2 in Text 40 (VMODE sets the mode; the text routines follow it), FCTN 9
+* returns to the workbench, FCTN = quits.  Positions are row * TXCOLS + column,
+* so the same code draws in either mode.  Assemble it with A, run it with R.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       BL   @DRAW
+       .leave
+       RT
+
+* DRAW - the screen, in whatever mode is set.
+DRAW   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       MOV  @TXCOLS,R2         the bar is one row of this mode's columns
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2
+       BL   @POS
+       LI   R1,SCOLS
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,2
+       BL   @POS
+       AI   R0,10              the number, after the word
+       MOV  @TXCOLS,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,3
+       BL   @POS
+       LI   R1,SROWS
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,3
+       BL   @POS
+       AI   R0,10
+       MOV  @TXROWS,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,5
+       BL   @POS
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+* POS - R0 = a row: R0 = the position of column 2 on it, in this mode.
+POS    MOV  R0,R1
+       MPY  @TXCOLS,R1         R2 = row * columns
+       AI   R2,2
+       MOV  R2,R0
+       RT
+
+* SETM - R0 = the base mode, R1 = its options: set it and draw.
+SETM   .enter
+       BL   @VMODE
+       BL   @DRAW
+       .leave
+       RT
+
+TICK   .enter
+       MOV  R0,R9
+       JEQ  T9
+       CI   R9,KQUIT*256
+       JNE  T1
+       SETO @QUITF
+       JMP  T9
+T1     CI   R9,KBACK*256
+       JNE  T2
+       LI   R0,VMT80           back to the workbench's own mode first
+       LI   R1,VO30+VOPOS
+       BL   @VMODE
+       LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R9,>3100           1: Text 80
+       JNE  T3
+       LI   R0,VMT80
+       LI   R1,VO30+VOPOS
+       BL   @SETM
+       JMP  T9
+T3     CI   R9,>3200           2: Text 40
+       JNE  T9
+       LI   R0,VMT40
+       LI   R1,VO30+VOPOS
+       BL   @SETM
+T9     .leave
+       RT
+
+STITLE STRI ' Mode   a program made on the TI'
+SCOLS  STRI 'Columns:'
+SROWS  STRI 'Rows:'
+SHELP  STRI '1 Text 80  2 Text 40  FCTN 9 back'
+       EVEN

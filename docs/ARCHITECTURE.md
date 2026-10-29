@@ -1,5 +1,7 @@
 # SAMS Kernel: how it works
 
+Reference for both routes: how the kernel works inside is the same whether a program is built on a **[PC]** or assembled on the **[TI]**.
+
 For people who want to know what happens between power-on and `TICK`, why the kernel is shaped as it is, and what to
 change when it must change. Application authors need only the [programmer's guide](PROGRAMMERS-GUIDE.md).
 

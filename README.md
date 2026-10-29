@@ -8,13 +8,36 @@ What you write is a *module*: up to 8K of code that the kernel calls once a fram
 screen with colour per cell, a decoded keyboard, every F18A display mode (`VMODE`), a music player, a workbench that builds programs on the TI itself, SAMS paging and a page pool, modules that switch and call each other, and disk files, plus a loader
 that checks the machine, a clean power-up state and a clean exit.
 
+## Two ways to work
+
+**[PC]** On a PC (Python 3 and [xdt99](https://github.com/endlos99/xdt99): put it beside this directory, or set `XAS99` to `xas99.py`):
+
 ```
 python3 tools/newapp.py myapp --name "MY APP"      a working one-module program
 python3 tools/skbuild.py myapp                     build/myapp/myapp8.bin
 python3 tools/sim9900.py build/myapp/myapp8.bin --keys "<ALPHA>hello" --frames 200
 ```
 
-You need Python 3 and [xdt99](https://github.com/endlos99/xdt99) (put it beside this directory, or set `XAS99` to `xas99.py`).
+**[TI]** On the TI itself: put `images/workbench8.bin` in the cartridge slot (a FinalGROM 99, or js99er with F18A and SAMS on) and `images/workbench.dsk` in DSK1, then press **N**, type `DSK1.HELLO/A99`, **ENTER**,
+**E** to edit, **A** to assemble, **R** to run. Make your own program with **N** `DSK1.MINE/A99` ENTER, **E**, type, **CTRL A**, **R**. No PC is needed once the cartridge and disk exist.
+
+**[PC or TI]** The assembly source and every kernel call are the same on both routes. Documents mark what belongs to one route only:
+
+| Mark | Where | What you use |
+| --- | --- | --- |
+| **[PC]** | on a PC with Python 3 and [xdt99](https://github.com/endlos99/xdt99) | any editor; `skbuild.py` builds a cartridge image; the simulator, js99er or a real TI runs it; `skdisk.py`, `skmusic.py` and the tests help |
+| **[TI]** | on the TI-99/4A itself (or js99er playing one), with the workbench cartridge and its disk | the workbench's editor, assembler and launcher: nothing else |
+| **[PC or TI]** | either | the same either way: the assembly source and every kernel call |
+
+
+| | **[PC]** | **[TI]** |
+| --- | --- | --- |
+| Modules | as many as you like | one (up to 4,096 bytes, at `>C000`) |
+| Data pages, compiled music, own font | yes | no |
+| Output | a cartridge image | runs inside the workbench |
+| Test | the simulator and key scripts | run it and look |
+
+The full comparison is in [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md) part 0.
 
 ## Read
 
@@ -58,7 +81,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.5.1. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.5.2. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

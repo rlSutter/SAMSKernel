@@ -1,0 +1,179 @@
+*======================================================================
+* paging.a99 - a program for the workbench's disk: SAMS pages from the
+* page pool.  ENTER takes four pages from the pool, writes each page's own
+* number into it through slot B (>E000), maps them back one by one to check
+* every page kept its own, and puts slot B back as it found it (GETPB and
+* SETPB).  FCTN 9 returns to the workbench, FCTN = quits.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+* (free when run from the workbench: see docs/WORKBENCH.md)
+WORK   EQU   APPRAM+5760
+PGS    EQU  WORK+0             the four pages (words)
+GOOD   EQU  WORK+8             pages that kept their number
+IDX    EQU  WORK+10            pages allocated
+CHK    EQU  WORK+12            the page being checked (memory: not R6-R9)
+TMPP   EQU  WORK+14            a page number in hand
+POOLP  EQU  PGFREE+30          the pool starts above the workbench's own pages
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SCARD
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,2*COLS+16
+       MOV  @NPAGES,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,3*COLS+2
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+TICK   .enter
+       MOV  R0,R9
+       JEQ  T9
+       CI   R9,KQUIT*256
+       JNE  T1
+       SETO @QUITF
+       JMP  T9
+T1     CI   R9,KBACK*256
+       JNE  T2
+       LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R9,KENTER*256
+       JNE  T9
+       BL   @TEST
+T9     .leave
+       RT
+
+* TEST - four pages from the pool, each filled with its own number, then
+* checked.
+TEST   .enter
+       BL   @GETPB             slot B as it is now: R0, R1 (kept on the stack)
+       .push R0
+       .push R1
+       LI   R0,POOLP
+       MOV  @NPAGES,R1
+       BL   @PINIT             the pool: every page from POOLP up
+       CLR  @IDX
+TS1    BL   @PALLOC            R0 = a page (0: none left)
+       MOV  R0,R0
+       JEQ  TS2
+       MOV  R0,@TMPP
+       MOV  @IDX,R1
+       SLA  R1,1
+       MOV  R0,@PGS(R1)        (R1 is changed by MAPE: the index is reloaded)
+       MOV  @TMPP,R0
+       BL   @MAPE              the page appears at >E000
+       MOV  @TMPP,@>E000       and takes its own number as its first word
+       INC  @IDX
+       MOV  @IDX,R1
+       CI   R1,4
+       JL   TS1
+TS2    CLR  @GOOD
+       CLR  @CHK
+TS4    MOV  @CHK,R1
+       C    R1,@IDX            as many as were allocated
+       JHE  TS6
+       SLA  R1,1
+       MOV  @PGS(R1),R0
+       MOV  R0,@TMPP
+       BL   @MAPE
+       C    @>E000,@TMPP       still its own number?
+       JNE  TS5
+       INC  @GOOD
+TS5    INC  @CHK
+       JMP  TS4
+TS6    .pop R1
+       .pop R0
+       BL   @SETPB             slot B back as it was
+       BL   @SHOW
+       .leave
+       RT
+
+* SHOW - the page numbers and the verdict.
+SHOW   .enter
+       LI   R0,5*COLS+2
+       LI   R1,SPAGES
+       LI   R2,ANORM
+       BL   @PUTS
+       CLR  R9
+SW1    C    R9,@IDX
+       JHE  SW2
+       MOV  R9,R3
+       SLA  R3,1
+       MOV  @PGS(R3),R1
+       MOV  R9,R0
+       SLA  R0,2
+       A    R9,R0
+       AI   R0,5*COLS+24       five columns a page number
+       LI   R2,ABOLD
+       BL   @HEX4
+       INC  R9
+       JMP  SW1
+SW2    LI   R0,7*COLS+2
+       MOV  @GOOD,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,7*COLS+4
+       LI   R1,SOF
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,7*COLS+7
+       MOV  @IDX,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,7*COLS+9
+       LI   R1,SKEPT
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @GOOD,R1
+       C    R1,@IDX
+       JNE  SW3
+       CI   R1,4
+       JNE  SW3
+       LI   R0,8*COLS+2
+       LI   R1,SOK
+       LI   R2,ABOLD
+       BL   @PUTS
+       JMP  SW9
+SW3    LI   R0,8*COLS+2
+       LI   R1,SBAD
+       LI   R2,AERR
+       BL   @PUTS
+SW9    .leave
+       RT
+
+STITLE STRI ' Paging   a program made on the TI'
+SCARD  STRI 'Card pages:'
+SHELP  STRI 'ENTER: four pool pages, each given its own number   FCTN 9 back'
+SPAGES STRI 'Pool pages:'
+SOF    STRI 'of'
+SKEPT  STRI 'pages kept their own number'
+SOK    STRI 'OK'
+SBAD   STRI 'FAILED'
+       EVEN

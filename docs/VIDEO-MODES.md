@@ -9,6 +9,10 @@ text routines do in it, and what to watch for. The screenshots are drawn by `too
 are those of js99er's F18A emulation, itself written from the F18A's documentation. I have not checked them against a real F18A, and
 parts the demo does not exercise (listed in part 12) I have not checked at all.
 
+**Routes.** **Two ways to work: [PC] / [TI] / [PC or TI].** **[PC]** is a PC with Python 3 and xdt99 (build with `skbuild.py`, run in the simulator or js99er); **[TI]** is the TI itself with the workbench cartridge (editor, assembler, launcher); **[PC or TI]** is the same either way. The full table is in PROGRAMMERS-GUIDE.md part 0.
+Here: `VMODE` and `VREG` calls are **[PC or TI]** code. **[TI]** `programs/mode.a99` on the workbench disk switches Text 80 / Text 40 (tested); any other mode is a different `VMODE` line in the same program, untested on the TI route.
+**[PC]** `examples/modes` shows all fifteen screens, and the pictures in this document are rendered on the PC (`tools/f18render.py`, `tools/mkshots.py`).
+
 ## 1. The modes at a glance
 
 Five *base modes*, chosen by `VMODE`'s first argument, each in 24 or 30 rows (except Graphics II), with options for the colour of tiles
