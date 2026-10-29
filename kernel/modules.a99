@@ -28,7 +28,7 @@
 * (macros.a99) loads R0 and R1 for you.  Uses everything the called
 * routine does.
 MODCALL .enter
-       MOV  @CURPC,R2          the calling module's slot C pages ...
+       MOV  @CURCC,R2          the calling module's first page ...
        .push R2                ... kept
        MOV  R1,@MCENT          (the entry's address)
        BL   @PAGEC             map the module
@@ -37,7 +37,6 @@ MODCALL .enter
        BL   *R1                call it
        MOV  R0,@MCRET          its result, kept
        .pop R0
-       SRL  R0,8               (the page: the high byte)
        BL   @PAGEC             map the caller back
        MOV  @MCRET,R0          the result
        .leave

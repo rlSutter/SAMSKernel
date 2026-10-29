@@ -11,7 +11,7 @@ what js99er and Classic99 load.
 app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
-    "min_pages": 128,                  SAMS pages required: 32, 64, 128 or 256
+    "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
     "modules": [                       each an 8K bank of code run in slot C
       {"name": "hello", "source": "hello.a99"},
       {"name": "more",  "source": "more.a99", "page": "0x20"}   (optional page)
@@ -99,8 +99,8 @@ def load_app(appdir):
         die('"name" is required, 20 characters at most')
     app['name'] = name
     app.setdefault('min_pages', 128)
-    if app['min_pages'] not in (32, 64, 128, 256):
-        die('"min_pages" must be 32, 64, 128 or 256')
+    if app['min_pages'] not in (32, 64, 128, 256, 512, 1024, 2048, 4096):
+        die('"min_pages" must be 32, 64, 128, 256 ... 4096')
     if not app.get('modules'):
         die('"modules" needs at least one module')
     names = [m['name'] for m in app['modules']]
@@ -305,6 +305,8 @@ def main():
     out = os.path.join(bdir, app['name'].lower().replace(' ', '') + '8.bin')
     open(out, 'wb').write(image)
     print('kernel %d bytes (ends >%04X, %d free)' % (len(kernel), 0xA000 + len(kernel), BANK - len(kernel)))
+    if 0xA000 + len(kernel) > 0xBE00:
+        die('the kernel (%d bytes) runs into the page-pool bitmap at >BE00: it may be at most 7,680 bytes' % len(kernel))
     for (nme, sz) in sizes[3:]:
         print('  %-16s %5d bytes' % (nme, sz))
     print('wrote %s: %dK, %d banks, SAMS pages needed: %d (pool from >%02X)' %

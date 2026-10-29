@@ -149,16 +149,20 @@ def browser():
     check('Disk browser' in lines(m)[0], 'BACK returns to the browser (PREVPG)')
 
 def sams16():
-    """A SAMS card of 16M, whose registers are 12 bits (the even byte the low 8, the odd byte bits 8-11, as in
-    js99er): the kernel boots and its self-test passes, using the first 256 pages (1M)."""
+    """SAMS cards of 512K to 16M, whose registers are 12 bits (the even byte the low 8, the odd byte bits 8-11, as in
+    js99er): the kernel sizes the card, its self-test passes (paging above page 255 and the pool's last pages included),
+    and FCTN = quits with the mapping off.  Cards of 128K and 1M: as before."""
     c = build('diag')
     wide = lambda m: setattr(m, 'wide_regs', True)
-    m, cpu, halt = sim9900.run(c, keys='<C-t><WAIT 700>', frames=1000, pages=4096, setup=wide)
-    ln = [l.strip() for l in lines(m)[2:12] if l.strip()]
-    check(halt is None and ln and all('PASS' in l for l in ln[:8]) and '256' in ln[0], '16M card: the self-test passes and the kernel uses 256 pages: %s' % ln[0])
-    m, cpu, halt = sim9900.run(c, keys='<WAIT 10><F-=>', frames=400, pages=4096, setup=wide)
+    for pages, setup, label in ((128, None, '128 pages'), (256, None, '1M'), (512, wide, '2M (12-bit registers)'), (4096, wide, '16M (12-bit registers)')):
+        big = pages > 256                     # the page test at power-up takes longer on a big card
+        m, cpu, halt = sim9900.run(c, keys='<WAIT %d><C-t><WAIT 900>' % (1500 if big else 100), frames=3500 if big else 1300, pages=pages, setup=setup)
+        ln = [l.strip() for l in lines(m)[2:12] if l.strip()]
+        check(halt is None and len(ln) >= 8 and all('PASS' in l for l in ln[:8]) and ln[0].endswith(str(pages)),
+              '%s: the kernel finds %d pages and the self-test passes: %s' % (label, pages, ln[0] if ln else ln))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 1500><F-=>', frames=2200, pages=4096, setup=wide)
     r = getattr(m, 'at_reset', None)
-    check(halt is None and r is not None and not r[2], '16M card: FCTN = resets the console with the mapping off (the kernel runs on to the reset): halt %s, reset %s' % (halt, r is not None))
+    check(halt is None and r is not None and not r[2], '16M: FCTN = resets the console with the mapping off (the kernel runs on to the reset): halt %s, reset %s' % (halt, r is not None))
 
 def rom_music():
     import skmusic

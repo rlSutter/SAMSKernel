@@ -194,9 +194,11 @@ CHW0   CLR  R0
        RT
 
 * CKPAGE - two pages written through slot B hold their contents when
-* other pages have been in between; CURPB follows; SETPB puts it back.
+* other pages have been in between; CURBE/CURBF follow; SETPB puts them back;
+* and on a card of more than 1M, pages above 255 are pages of their own.
 CKPAGE .enter
-       MOV  @CURPB,@TSSAVE     slot B as it is now
+       MOV  @CURBE,@TSSAVE+4   slot B as it is now
+       MOV  @CURBF,@TSSAVE+6
        LI   R0,>30
        BL   @MAPE
        LI   R0,>31
@@ -223,20 +225,91 @@ CKPAGE .enter
        LI   R1,>5A5A
        C    @>F000,R1
        JNE  CPG0
-       MOV  @CURPB,R1          CURPB records both pages
-       CI   R1,>3031
+       MOV  @CURBE,R1          CURBE and CURBF record both pages
+       CI   R1,>30
        JNE  CPG0
-       MOV  @TSSAVE,R0         SETPB: slot B as it was
+       MOV  @CURBF,R1
+       CI   R1,>31
+       JNE  CPG0
+       MOV  @TSSAVE+4,R0       SETPB: slot B as it was
+       MOV  @TSSAVE+6,R1
        BL   @SETPB
-       MOV  @CURPB,R1
-       C    R1,@TSSAVE
+       MOV  @CURBE,R1
+       C    R1,@TSSAVE+4
        JNE  CPG0
+       MOV  @CURBF,R1
+       C    R1,@TSSAVE+6
+       JNE  CPG0
+       BL   @CKBIG
+       MOV  R0,R0
+       JEQ  CPG0
        LI   R0,1
        JMP  CPG9
-CPG0   MOV  @TSSAVE,R0
+CPG0   MOV  @TSSAVE+4,R0
+       MOV  @TSSAVE+6,R1
        BL   @SETPB
        CLR  R0
 CPG9   .leave
+       RT
+
+* CKBIG - R0 = 1 if the pages above 255 (a card of more than 1M) are pages of
+* their own: >100, half the card and the last page each take a signature and
+* page >30 still has its own.  Always 1 on a card of 1M or less.
+CKBIG  .enter
+       MOV  @NPAGES,R1
+       CI   R1,256
+       JH   CB0
+       LI   R0,1
+       JMP  CB9
+CB0    MOV  R1,R2
+       DEC  R2
+       MOV  R2,@TSSAVE+10      the last page
+       SRL  R1,1
+       MOV  R1,@TSSAVE+8       half the card
+       LI   R0,>30
+       BL   @MAPE
+       LI   R1,>A5A5           page >30 holds its marker
+       MOV  R1,@>E000
+       LI   R0,>100
+       BL   @MAPE
+       LI   R1,>0100+>5A5A
+       MOV  R1,@>E000
+       MOV  @TSSAVE+8,R0
+       BL   @MAPE
+       MOV  @TSSAVE+8,R1
+       AI   R1,>5A5A
+       MOV  R1,@>E000
+       MOV  @TSSAVE+10,R0
+       BL   @MAPE
+       MOV  @TSSAVE+10,R1
+       AI   R1,>5A5A
+       MOV  R1,@>E000
+       LI   R0,>30             all four hold what was put there ...
+       BL   @MAPE
+       LI   R1,>A5A5
+       C    @>E000,R1
+       JNE  CB1
+       LI   R0,>100
+       BL   @MAPE
+       LI   R1,>0100+>5A5A
+       C    @>E000,R1
+       JNE  CB1
+       MOV  @TSSAVE+8,R0
+       BL   @MAPE
+       MOV  @TSSAVE+8,R1
+       AI   R1,>5A5A
+       C    @>E000,R1
+       JNE  CB1
+       MOV  @TSSAVE+10,R0
+       BL   @MAPE
+       MOV  @TSSAVE+10,R1
+       AI   R1,>5A5A
+       C    @>E000,R1
+       JNE  CB1
+       LI   R0,1
+       JMP  CB9
+CB1    CLR  R0
+CB9    .leave
        RT
 
 * CKPOOL - PINIT, PALLOC in order, empty at the end, PRELS (twice, and a
@@ -275,20 +348,65 @@ CPL1   BL   @PALLOC
        BL   @PALLOC
        CI   R0,>34
        JNE  CPL0
+       BL   @CKPOOL2
+       MOV  R0,R0
+       JEQ  CPL0
        LI   R0,1
        JMP  CPL9
 CPL0   CLR  R0
 CPL9   .leave
        RT
 
+* CKPOOL2 - on a card of more than 1M the pool hands out pages above 255: the
+* last four pages of the card, in order, then none, and the last one back.
+CKPOOL2 .enter
+       MOV  @NPAGES,R1
+       CI   R1,256
+       JH   CQ0
+       LI   R0,1
+       JMP  CQ9
+CQ0    MOV  R1,R0
+       AI   R0,-4
+       BL   @PINIT
+       MOV  @FREECT,R0
+       CI   R0,4
+       JNE  CQ1
+       CLR  @TSSAVE+12
+CQ2    BL   @PALLOC
+       MOV  @NPAGES,R1
+       AI   R1,-4
+       A    @TSSAVE+12,R1
+       C    R0,R1
+       JNE  CQ1
+       INC  @TSSAVE+12
+       MOV  @TSSAVE+12,R1
+       CI   R1,4
+       JL   CQ2
+       BL   @PALLOC            nothing left: 0
+       MOV  R0,R0
+       JNE  CQ1
+       MOV  @NPAGES,R0
+       DEC  R0
+       BL   @PRELS
+       BL   @PALLOC
+       MOV  @NPAGES,R1
+       DEC  R1
+       C    R0,R1
+       JNE  CQ1
+       LI   R0,1
+       JMP  CQ9
+CQ1    CLR  R0
+CQ9    .leave
+       RT
+
 * CKMOD - MODCALL into the diagnostic module (entry 4 returns >1234) and
 * back: the result arrives, and slot C holds this module again.
 CKMOD  .enter
-       MOV  @CURPC,@TSSAVE
+       MOV  @CURCC,@TSSAVE
        .callmod PG_DIAG,4
        CI   R0,>1234
        JNE  CMD0
-       MOV  @CURPC,R1
+       MOV  @CURCC,R1
        C    R1,@TSSAVE
        JNE  CMD0
        LI   R0,1

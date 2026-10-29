@@ -20,10 +20,12 @@
 
 * MUPLAY - start the song whose first SAMS page is R0 (the song's pages
 * must be consecutive).  Any song playing is replaced.  R0 = 0 if it began,
-* 1 if the pages do not hold a song.  Uses R0-R4, R12.
+* 1 if the pages do not hold a song.  Uses R0-R5, R12.
 MUPLAY .enter
        MOV  R0,@MUPAGE
-       MOV  @CURPB,R4
+       MOV  @CURBE,R4
+       .push R4
+       MOV  @CURBF,R4
        .push R4
        BL   @MAPE              the header, through window >E000
        MOV  @>E000,R1
@@ -50,11 +52,11 @@ MUP2   CLR  *R1+
        CLR  R0
        JMP  MUP9
 MUP8   LI   R0,1
-MUP9   .pop R4
-       MOV  R0,R3              (the result, kept across SETPB)
-       MOV  R4,R0
+MUP9   MOV  R0,R5              (the result, kept across SETPB)
+       .pop R1
+       .pop R0
        BL   @SETPB
-       MOV  R3,R0
+       MOV  R5,R0
        .leave
        RT
 
@@ -115,7 +117,9 @@ MUT0A  MOV  @MUWAIT,@MUWAIT
        DEC  @MUWAIT
        RT
 MUT1   .enter
-       MOV  @CURPB,R0
+       MOV  @CURBE,R0
+       .push R0
+       MOV  @CURBF,R0
        .push R0
        LI   R8,256             commands one frame may read: a song with no
 MUT2   MOV  @MUPOS,R1          waits would otherwise never return
@@ -161,7 +165,8 @@ MUTEND MOV  @MULOOP,R1
        JMP  MUT2
 MUTSTP CLR  @MUSTAT
        BL   @MUSIL
-MUT9   .pop R0
+MUT9   .pop R1
+       .pop R0
        BL   @SETPB
        .leave
        RT

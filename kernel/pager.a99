@@ -12,21 +12,20 @@
 * calls another with MODCALL, which are the kernel's); nothing remaps
 * slot A (the stack lives there).
 *
-* CURPA, CURPB and CURPC record what each slot holds, as (first page << 8)
-* | second page.  Every routine here keeps them in step, so code that
-* borrows slot B (LDSCHM, a library routine) can save CURPB and put it
-* back with SETPB.  Never write a mapper register by any other route.
+* A page is a number 0-4095 (a SAMS card of up to 16M).  CURA2/CURA3,
+* CURBE/CURBF and CURCC/CURCD record the page each window of the slots holds.
+* Every routine here keeps them in step, so code that borrows slot B (LDSCHM,
+* a library routine) can save the pages with GETPB and put them back with
+* SETPB.  Never write a mapper register by any other route.
 *======================================================================
 
 * PAGEC - map pages R0 and R0+1 into slot C (>C000, >D000): a module.
-* Recorded in CURPC.  Kernel use only (see above).  Uses R0-R4, R7, R12.
+* Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R7, R12.
 PAGEC  .enter
-       MOV  R0,R4
-       SLA  R4,8
+       MOV  R0,@CURCC
        MOV  R0,R7
        INC  R7
-       SOC  R7,R4
-       MOV  R4,@CURPC
+       MOV  R7,@CURCD
        LI   R1,>C              window >C000
        BL   @MAPPG
        MOV  R7,R0
@@ -36,13 +35,14 @@ PAGEC  .enter
        RT
 
 * MAPPG - map one page into one window.
-*   R0 = page (0-255), R1 = window (0-15)
-* Uses R2, R3, R12.  Leaf.  Does not update CURPA/B/C: use it for windows
-* you track yourself; PAGEB, MAPE and MAPF track slot B.
-MAPPG  MOV  R0,R2              the page in the high byte (the even address):
-       SLA  R2,8               the low byte (bits 8-11 of a big card's page)
-*                              stays 0, so the page is exactly R0 on a card of
-*                              any size
+*   R0 = page (0-4095), R1 = window (0-15)
+* Uses R2, R3, R12.  Leaf.  Does not update the tracking words: use it for
+* windows you track yourself; PAGEB, MAPE and MAPF track slot B.
+* The register takes the page's low 8 bits in the even byte and bits 8-11 in
+* the odd byte (a card of 1M or less ignores the odd byte): the page with its
+* bytes swapped.
+MAPPG  MOV  R0,R2
+       SWPB R2
        MOV  R1,R3              window number ...
        SLA  R3,1               ... times two = register offset
        AI   R3,AMSREG          register address
@@ -53,14 +53,12 @@ MAPPG  MOV  R0,R2              the page in the high byte (the even address):
        RT
 
 * PAGEB - map pages R0 and R0+1 into slot B (>E000, >F000), recorded in
-* CURPB.  Uses R0-R4, R7, R12.
+* CURBE/CURBF.  Uses R0-R3, R7, R12.
 PAGEB  .enter
-       MOV  R0,R4
-       SLA  R4,8
+       MOV  R0,@CURBE
        MOV  R0,R7
        INC  R7
-       SOC  R7,R4
-       MOV  R4,@CURPB          remember what slot B holds
+       MOV  R7,@CURBF
        LI   R1,>E              window >E000
        BL   @MAPPG
        MOV  R7,R0
@@ -69,35 +67,37 @@ PAGEB  .enter
        .leave
        RT
 
-* MAPE / MAPF - map page R0 into window >E000 / >F000 alone, unless CURPB
-* says it is there already; recorded in CURPB.  Leaves.  Use R1-R3, R12
-* (R1 only, when the page is already mapped).
-MAPE   MOV  R0,R1
-       SWPB R1                 the page in the high byte, as CURPB has it
-       CB   R1,@CURPB          already in >E000?
+* MAPE / MAPF - map page R0 into window >E000 / >F000 alone, unless it is
+* there already; recorded in CURBE / CURBF.  Leaves.  Use R1-R3, R12 (nothing,
+* when the page is already mapped).
+MAPE   C    R0,@CURBE           already in >E000?
        JEQ  MAP9
-       MOVB R1,@CURPB
+       MOV  R0,@CURBE
        LI   R1,>E
        B    @MAPPG             (MAPPG returns for us)
-MAPF   MOV  R0,R1
-       SWPB R1
-       CB   R1,@CURPB+1        already in >F000?
+MAPF   C    R0,@CURBF           already in >F000?
        JEQ  MAP9
-       MOVB R1,@CURPB+1        (the low byte of CURPB: window >F000)
+       MOV  R0,@CURBF
        LI   R1,>F
        B    @MAPPG
 MAP9   RT
 
-* SETPB - put slot B back as R0 says, (page for >E000 << 8) | page for
-* >F000: a CURPB value saved earlier (the two pages need not be
-* consecutive).  Uses R0-R3, R12.
+* GETPB - the pages slot B holds now: R0 = the page in >E000, R1 = the page in
+* >F000.  Save them to put slot B back later with SETPB.  Leaf.
+GETPB  MOV  @CURBE,R0
+       MOV  @CURBF,R1
+       RT
+
+* SETPB - put slot B back as it was: R0 = the page for >E000, R1 = the page
+* for >F000 (what GETPB gave; the two pages need not be consecutive).  Uses
+* R0-R4, R12.
 SETPB  .enter
-       MOV  R0,@CURPB
-       SRL  R0,8
+       MOV  R0,@CURBE
+       MOV  R1,@CURBF
+       MOV  R1,R4
        LI   R1,>E
        BL   @MAPPG
-       MOV  @CURPB,R0
-       ANDI R0,>00FF
+       MOV  R4,R0
        LI   R1,>F
        BL   @MAPPG
        .leave

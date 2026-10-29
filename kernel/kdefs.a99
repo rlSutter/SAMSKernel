@@ -87,15 +87,12 @@ WS     EQU  >8300            the one workspace: R0-R15 (LWPI WS)
 HOT    EQU  >8340            kernel hot variables
 * 16-bit frame counter (VSYNC and the idle polls add 1)
 FRAME  EQU   HOT+0
-* pages mapped in slot A (>2000,>3000), (first<<8)|second
-CURPA  EQU   HOT+2
-CURPB  EQU  HOT+4            pages mapped in slot B (>E000,>F000)
-CURPC  EQU  HOT+6            pages mapped in slot C (>C000,>D000)
+* (HOT+2, +4, +6: free; they held the packed slot words before 1.4.0)
 * >0001 if an F18A answered (the loader refuses otherwise)
 F18FLG EQU   HOT+8
 * F18A firmware version (status register 14), e.g. >0019
 F18VER EQU   HOT+10
-* SAMS pages present: 32, 64, 128 or 256 (256 = 1M or more)
+* SAMS pages present: 32, 64, 128, 256 ... 4096 (a 16M card)
 NPAGES EQU   HOT+12
 * non-zero: the application asks to quit to the TI title
 QUITF  EQU   HOT+14
@@ -142,8 +139,9 @@ TXCELLS EQU >20F0            columns x rows
 TXATTR EQU   >20F2
 * the name table's VRAM address (NAMTAB, or NAMGM2 in Graphics II)
 NAMBAS EQU   >20F4
-* 32 bytes: page-pool bitmap, a bit per page (1 = free)
-POOLBM EQU   >20C0
+* 512 bytes: the page-pool bitmap, a bit per page of 4096 (1 = free), in the
+* kernel's own pages (the build refuses a kernel that grows into it)
+POOLBM EQU   >BE00
 POOLLO EQU  >20E0            pool: the first page it manages
 POOLHI EQU  >20E2            pool: the page after its last
 FREECT EQU  >20E4            pool: free pages
@@ -159,6 +157,14 @@ MULAT  EQU  >21CC            the sound register the last latch byte chose (0-7)
 * 8 bytes: each register's last latch byte (for resuming)
 MUSHL  EQU   >21CE
 MUSHD  EQU  >21D6            8 bytes: each frequency register's last data byte
+
+* The page each window holds, tracked by the pager (a page is 0-4095):
+CURA2  EQU  >21E0            window >2000 (slot A)
+CURA3  EQU  >21E2            window >3000
+CURBE  EQU  >21E4            window >E000 (slot B)
+CURBF  EQU  >21E6            window >F000
+CURCC  EQU  >21E8            window >C000 (slot C: the running module's first page)
+CURCD  EQU  >21EA            window >D000
 
 * File service (files.a99): >2100->21FF
 FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
@@ -177,7 +183,7 @@ FLEN   EQU  >217C            the last record's length
 * the name in use (address of a length-prefixed string)
 FNMP   EQU   >217E
 FPAB   EQU  >2180            64 bytes: the PAB as built
-*                            >21E0->21FF: free for the kernel's growth
+*                            >21EC->21FF: free for the kernel's growth
 
 * 256 bytes of scratch for the running module (not kept across a module switch)
 MODRAM EQU   >2200

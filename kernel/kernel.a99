@@ -33,7 +33,7 @@ KSTART LIMI 0
        CLR  @GOARG
        CLR  @PREVPG
        BL   @T80INI            Text 80, the font, colour scheme 0, display on
-* the boot module is the first switch: from "no module" (CURPC = 0)
+* the boot module is the first switch: from "no module" (CURCC = 0)
        LI   R0,PGBOOT
        MOV  R0,@NEXTPG
        JMP  KCHK
@@ -47,9 +47,7 @@ KCHK   MOV  @QUITF,R0          a quit asked for?
        JNE  KEXIT
        MOV  @NEXTPG,R0         a switch asked for (R0 = the module's page)?
        JEQ  KMAIN
-       MOV  @CURPC,R2          the module that was running
-       SRL  R2,8
-       MOV  R2,@PREVPG
+       MOV  @CURCC,@PREVPG     the module that was running
        CLR  @NEXTPG
        BL   @PAGEC             the new module into slot C
        MOV  @PREVPG,R0         INIT's arguments: the old module's page ...

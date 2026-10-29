@@ -14,7 +14,9 @@
 * Maps the data bank into slot B and puts back what was there.  Uses
 * R0-R4, R7, R12.
 LDSCHM .enter
-       MOV  @CURPB,R0
+       MOV  @CURBE,R0
+       .push R0
+       MOV  @CURBF,R0
        .push R0
        LI   R0,PGDATA
        BL   @PAGEB
@@ -33,7 +35,8 @@ LDSCHM .enter
        LI   R0,1
        LI   R2,1
        BL   @F18PAL
-LDS1   .pop R0                 slot B back, as it was
+LDS1   .pop R1                 slot B back, as it was
+       .pop R0
        BL   @SETPB
        .leave
        RT
@@ -218,7 +221,9 @@ VT1A   MOV  @VMNUM,R0          Graphics I's own colour table: text on the page
        LI   R1,(RTEXT*16+RBG)*256
        LI   R2,32
        BL   @VFILL
-VT1B   MOV  @CURPB,R0          the glyphs, from the data bank
+VT1B   MOV  @CURBE,R0          the glyphs, from the data bank
+       .push R0
+       MOV  @CURBF,R0
        .push R0
        LI   R0,PGDATA
        BL   @PAGEB
@@ -226,6 +231,7 @@ VT1B   MOV  @CURPB,R0          the glyphs, from the data bank
        LI   R1,DGLYPH
        LI   R2,2048
        BL   @VMBW
+       .pop R1
        .pop R0
        BL   @SETPB
        MOV  @VMOPT,R0          planes 1 and 2 of the pattern table, blank

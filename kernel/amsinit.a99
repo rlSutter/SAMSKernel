@@ -39,20 +39,26 @@ AMSI1  MOV  R1,R2              identity: window n gets page n, in the high
        JL   AMSI1
        SBO  1                  mapping mode on
        SBZ  0                  hide registers (they share DSR space)
-       LI   R0,PGLOWA*256+PGLOWA+1
-       MOV  R0,@CURPA
-       LI   R0,PGLOWB*256+PGLOWB+1
-       MOV  R0,@CURPB
+       RT
+
+* CURINI - record what the identity map put in each window (the tracking
+* words live in slot A, so this runs after the loader has cleared it).
+CURINI LI   R0,PGLOWA
+       MOV  R0,@CURA2
+       INC  R0
+       MOV  R0,@CURA3
+       LI   R0,PGLOWB
+       MOV  R0,@CURBE
+       INC  R0
+       MOV  R0,@CURBF
        RT
 
 * PAGEA - map pages R0 and R0+1 into slot A (>2000, >3000).
 PAGEA  .enter
-       MOV  R0,R4              first page ...
-       SLA  R4,8               ... in the high byte
+       MOV  R0,@CURA2          remember what slot A holds
        MOV  R0,R7              second page = first + 1
        INC  R7
-       SOC  R7,R4              R4 = (p<<8)|(p+1)
-       MOV  R4,@CURPA          remember what slot A holds
+       MOV  R7,@CURA3
        LI   R1,2               window >2000
        BL   @MAPPG
        MOV  R7,R0
@@ -61,13 +67,12 @@ PAGEA  .enter
        .leave
        RT
 
-* AMSSIZ - how many pages the card has: R0 = 32, 64, 128 or 256 (256
-* meaning 1M or more; larger cards are used as 1M for now).  Writes a
-* marker to page >10 and checks whether a write to page >10+32, +64 or
-* +128 lands on it (the card decodes only as many page bits as it has).
-* Run after AMSINI and before anything is loaded: it overwrites the first
-* word of pages >10, >30, >50 and >90.  Leaf apart from MAPPG (R11 kept
-* in R6).  Uses R0-R6, R12.
+* AMSSIZ - how many pages the card has: R0 = 32, 64, 128 ... up to 4096 (a
+* 16M card).  Writes a marker to page >10 and checks whether a write to page
+* >10+32, +64 ... +2048 lands on it (the card decodes only as many page bits
+* as it has).  Run after AMSINI and before anything is loaded: it overwrites
+* the first word of page >10 and of the pages tried.  Leaf apart from MAPPG
+* (R11 kept in R6).  Uses R0-R6, R12.
 AMSSIZ MOV  R11,R6             MAPPG is called: keep the return address
        LI   R5,32              alias distance to try first
 AZ1    LI   R0,>10             the reference page ...
@@ -86,12 +91,12 @@ AZ1    LI   R0,>10             the reference page ...
        C    @>E000,R4          still its own marker?
        JNE  AZ2                no: page >10+S is page >10, so S pages exist
        SLA  R5,1               yes: try twice the distance
-       CI   R5,256
+       CI   R5,4096
        JL   AZ1
 AZ2    LI   R0,PGLOWB          window >E000 back to its own page
        LI   R1,>E
        BL   @MAPPG
-       MOV  R5,R0              32, 64, 128, or 256 when nothing aliased
+       MOV  R5,R0              32 ... 2048, or 4096 when nothing aliased
        B    *R6
 
 * AMSTST - write a page-specific word to the first and last word of every
@@ -106,11 +111,8 @@ AMSTST MOV  R11,R6
 AT1    MOV  R5,R0
        LI   R1,>E              window >E000
        BL   @MAPPG             the page there
-       MOV  R5,R4              signature: page number and its complement
-       SWPB R4
-       XOR  R5,R4
-* page-specific: its number mixed with its complement
-       INV   R4
+       MOV  R5,R4              signature: the page number plus a constant (so
+       AI   R4,>A55A           every page of 4096 has its own)
        MOV  R4,@>E000          at the page's first word ...
        MOV  R4,@>EFFE          ... and its last
        INC  R5                 the next page
@@ -121,9 +123,7 @@ AT2    MOV  R5,R0
        LI   R1,>E              window >E000
        BL   @MAPPG             the page there
        MOV  R5,R4
-       SWPB R4
-       XOR  R5,R4
-       INV  R4
+       AI   R4,>A55A
        C    @>E000,R4          its first word right?
        JNE  AT3
        C    @>EFFE,R4          and its last?

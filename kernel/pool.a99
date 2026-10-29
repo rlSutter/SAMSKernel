@@ -1,7 +1,8 @@
 *======================================================================
 * pool.a99 - a page pool: hand out and take back SAMS pages
 *
-* The kernel keeps a bitmap of up to 256 pages (a bit per page, 1 = free).
+* The kernel keeps a bitmap of up to 4096 pages (a bit per page, 1 = free: 512
+* bytes at POOLBM, in the kernel's own pages).
 * PINIT says which pages the pool manages (normally everything from
 * PGFREE, the first page the build leaves free, up to NPAGES, or less if
 * the application keeps some pages for itself).  PALLOC gives out the
@@ -16,7 +17,7 @@ PINIT  MOV  R11,R6
        MOV  R0,@POOLLO
        MOV  R1,@POOLHI
        LI   R2,POOLBM          clear the bitmap
-       LI   R3,16
+       LI   R3,256
 PI1    CLR  *R2+
        DEC  R3
        JNE  PI1
