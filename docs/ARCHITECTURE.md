@@ -88,11 +88,13 @@ slot B are allowed (`MAPE` and `MAPF` each set one window); `PAGEB` sets a conse
 | `>2040-207F` | `KBUF` | the 64-byte key buffer |
 | `>2080-209F` | `SCHEME`, `TXTBUF` | current scheme; 16 bytes for number formatting |
 | `>20A0-20BF` | `MCENT` ... `PREVPG`, `GPUBUF`, `NODMA` | module system words, the DMA mailbox as built |
-| `>20C0-20E7` | `POOLBM` ... `FREECT` | the page pool's bitmap (32 bytes), range, free count |
+| `>20C0-20DF` | | free (the pool's bitmap lived here before 1.4.0) |
+| `>20E0-20E5` | `POOLLO POOLHI FREECT` | the page pool's range and free count (its bitmap is at `>BE00`) |
 | `>20E8-20F5` | `VMNUM`, `VMOPT`, `TXCOLS`, `TXROWS`, `TXCELLS`, `TXATTR`, `NAMBAS` | the video mode and the text routines' geometry (set by `VMODE`) |
 | `>2100-21BF` | `FHOT` ... `FPAB` | the file service's state: scratchpad save (96), device name, saved words, the PAB (64) |
 | `>21C0-21DD` | `MUSTAT` ... `MUSHD` | the music player's state: playing, paused, the song's page, the offset, the hold count, the loop target, the latched register and the shadow of the chip's registers |
-| `>21E0-21FF` | | free for the kernel's growth |
+| `>21E0-21EB` | `CURA2 CURA3 CURBE CURBF CURCC CURCD` | the page each window of slots A, B and C holds (the pager keeps them) |
+| `>21EC-21FF` | | free for the kernel's growth |
 | `>2200-22FF` | `MODRAM` | scratch for the running module |
 | `>2300-3EFF` | `APPRAM`..`APPTOP` | **the application's**: 7,168 bytes |
 | `>3F00-3FFF` | stack | R10 starts at `>4000`; 128 words |
