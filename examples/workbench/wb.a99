@@ -378,9 +378,9 @@ CO3    LI   R3,5               no dot: DSK1.
 CO3A   MOVB *R1+,*R5+
        DEC  R4
        JNE  CO3A
-CO4    SWPB R3
+CO4    MOV  R3,@DEVLEN
+       SWPB R3
        MOVB R3,@CATNM
-       MOV  R3,@DEVLEN
        LI   R2,CATNM
        LI   R0,FIN+FINTL
        LI   R1,38

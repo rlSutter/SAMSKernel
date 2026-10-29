@@ -1118,23 +1118,34 @@ DC1    CLR  R0
        INC  R2
        JMP  DC1
 DC2    MOV  R2,@TMPW
-       LI   R1,STRBUF
        LI   R2,MACNAM
-       LI   R3,10
-       CLR  R0
-       C    @TMPW,R3
+       BL   @CMP10
+       JEQ  DC9                the macros are built in: nothing to do
+       MOV  @PASS,R0
+       CI   R0,2
        JNE  DC3
-DC2A   CB   *R1+,*R2+
-       JNE  DC3
-       DEC  R3
-       JNE  DC2A
-       JMP  DC9                the macros are built in: nothing to do
+       LI   R2,KRNNAM          pass 2 does not read KERNEL.EQU again: its
+       BL   @CMP10             symbols stay in the table from pass 1
+       JEQ  DC9
 DC3    BL   @BLDINC
        SETO @COPYF
 DC9    .leave
        RT
 MACNAM TEXT 'MACROS.A99'
+KRNNAM TEXT 'KERNEL.EQU'
        EVEN
+
+* CMP10 - EQ if STRBUF holds the 10-character name at R2.  Uses R0-R3.
+CMP10  LI   R0,10
+       C    @TMPW,R0
+       JNE  CM109
+       LI   R1,STRBUF
+       LI   R3,10
+CM101  CB   *R1+,*R2+
+       JNE  CM109
+       DEC  R3
+       JNE  CM101
+CM109  RT
 
 * BLDINC - INCNM := the main file's device ("DSK1.") + STRBUF's name, its
 * dots turned into slashes

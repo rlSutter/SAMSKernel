@@ -415,6 +415,12 @@ def workbench():
     check(tifdc.read_file(img, 'T1/TXT') == [b'XYfirst', b'second'], 'editor: CTRL S writes the file: %s' % tifdc.read_file(img, 'T1/TXT'))
     m, img = asmharness.workbench_ui('<WAIT 10>c<WAIT 120><F-x><WAIT 20><ENTER><WAIT 20>', 400, ['/tmp/t1.txt'])
     check(bytes(m.rb(0x2300 + 1 + i) for i in range(11)).startswith(b'DSK1.T1/TXT'), 'catalog: UP and DOWN pick a file and ENTER makes it the file name: %s' % bytes(m.rb(0x2300 + i) for i in range(16)))
+    # a program comes back to the workbench with GOMOD PG_WB
+    open('/tmp/ret.a99', 'w').write('\n'.join(['       COPY "kernel.equ"', '       COPY "macros.a99"', '       AORG >C000', '       DATA INIT,TICK,INIT,0',
+        'INIT   RT', 'TICK   .enter', '       MOV  R0,R0', '       JEQ  T9', '       LI   R0,PG_WB', '       CLR  R1', '       BL   @GOMOD', 'T9     .leave', '       RT']) + '\n')
+    m, img = asmharness.workbench_ui('<WAIT 10>nRET/A99<ENTER><WAIT 10>a<WAIT 2500>r<WAIT 60><ALPHA>x<WAIT 80>', 3200, ['/tmp/ret.a99'])
+    ln = sim9900.screen(m).split('\n')
+    check(ln[0].strip() == 'SAMS Kernel   workbench' and 'Assembled' in ln[9], 'a program returns to the workbench with GOMOD PG_WB, and its result is still there: %r' % ln[9].strip())
     # the whole round
     prog = ['       COPY "kernel.equ"', '       COPY "macros.a99"', '       AORG >C000', '       DATA INIT,TICK,INIT,0',
             'INIT   .enter', '       LI   R0,2*COLS+2', '       LI   R1,MSG', '       LI   R2,(RTEXT*16+RBG)*256',
