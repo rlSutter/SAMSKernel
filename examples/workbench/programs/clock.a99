@@ -1,0 +1,101 @@
+*======================================================================
+* clock.a99 - a program for the workbench's disk: the date and time from a
+* TIPI's clock.  ENTER reads it (CLKGET opens PI.CLOCK, reads one record and
+* parses it into DTMON DTDAY DTYEAR DTHOUR DTMIN DTSEC); without a TIPI the
+* screen says so.  FCTN 9 returns to the workbench, FCTN = quits.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+TICK   .enter
+       MOV  R0,R9
+       JEQ  T9
+       CI   R9,KQUIT*256
+       JNE  T1
+       SETO @QUITF
+       JMP  T9
+T1     CI   R9,KBACK*256
+       JNE  T2
+       LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R9,KENTER*256
+       JNE  T9
+       BL   @SHOW
+T9     .leave
+       RT
+
+* SHOW - read the clock and say what it said.
+SHOW   .enter
+       LI   R0,4*COLS+2
+       LI   R1,SBLANK
+       LI   R2,ANORM
+       BL   @PUTS
+       BL   @CLKGET            R0 = 0, or the error (>FF: no TIPI)
+       MOV  R0,R0
+       JEQ  SH1
+       LI   R0,4*COLS+2
+       LI   R1,SNONE
+       LI   R2,AERR
+       BL   @PUTS
+       JMP  SH9
+SH1    LI   R0,4*COLS+2
+       MOV  @DTMON,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+5
+       MOV  @DTDAY,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+8
+       MOV  @DTYEAR,R1
+       AI   R1,2000            two digits: the year 20yy
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+15
+       MOV  @DTHOUR,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+18
+       MOV  @DTMIN,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,4*COLS+21
+       MOV  @DTSEC,R1
+       LI   R2,ABOLD
+       BL   @DECW
+SH9    .leave
+       RT
+
+STITLE STRI ' Clock   a program made on the TI'
+SHELP  STRI 'ENTER reads the TIPI clock (PI.CLOCK)   FCTN 9 back'
+SBLANK STRI '                                        '
+SNONE  STRI 'no clock: is a TIPI attached?'
+       EVEN

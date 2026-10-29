@@ -28,6 +28,15 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 | 11 | In the workbench: E on `HELLO/A99`, type a line, CTRL S, CTRL A | the edit saves and re-assembles; a mistyped mnemonic is reported with its line | an editor key that does the wrong thing |
 | 12 | Cards above 1M, if you have one: step 2 again, then 6 and 10 | the page count is right and everything else as before | the first thing that differs |
 
+**TIPI steps** (if you have one; each is **[TI]**):
+
+| # | Do | You should see | If not, tell me |
+| --- | --- | --- | --- |
+| 13 | `images/diskbrowser8.bin` with `DSK1.` mapped to a directory on the TIPI | the directory's catalog; a text file opens | whether the catalog request is answered at all |
+| 14 | the workbench on the TIPI: a source in the mapped directory (or `PI.` paths), N, A, R | assembles and runs, as from a disk; includes found | the first failing name, and its error |
+| 15 | `COPY/A99` with `SRC` on `DSK1.` (TIPI) and, if you also have a TI disk controller, the copy going between them | `DST` appears; with both cards present nothing hangs, whichever device is used first | which direction fails |
+| 16 | `CLOCK/A99` from the workbench disk, ENTER | today's date and the time | "no clock" with a TIPI attached, or a wrong date |
+
 ## What each unverified claim rests on
 
 | Claim | Rests on | Where it could be wrong |
@@ -37,6 +46,7 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 | three files at once through the controller's three buffers; the controller finds a file by its PAB's address | TI's own disk controller ROM, running in the simulator (it did so correctly) | TIPI, CF7+ and other devices may differ |
 | the music player writes the right bytes at the right frames | tests against a model of the sound chip | how it sounds; the noise model is an approximation |
 | the workbench's assembler is right | byte-identical to xas99 for every example and two probe sources | an instruction or directive the examples do not use |
+| TIPI: the device names, the clock record, the power-up of every card, includes in the main file's directory | the TIPI wiki as Press's design used it (Press's file speed was measured on a TIPI); a model of a TIPI in the simulator | a real TIPI's DSR, its open-file limit and its catalog |
 | the page tests at power-up take about a second on a 16M card | 0.25 million instructions in the simulator | an estimate; I have not timed it |
 
 ## How to report

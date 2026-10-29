@@ -5,7 +5,7 @@ A small resident kernel for TI-99/4A programs in TMS9900 assembly, for a console
 kernel, itself descended from The Lantern Coast's, with everything specific to a word processor taken out.
 
 What you write is a *module*: up to 8K of code that the kernel calls once a frame with the key that was typed. The kernel gives you an 80 x 30 text
-screen with colour per cell, a decoded keyboard, every F18A display mode (`VMODE`), a music player, a workbench that builds programs on the TI itself, SAMS paging and a page pool, modules that switch and call each other, and disk files, plus a loader
+screen with colour per cell, a decoded keyboard, every F18A display mode (`VMODE`), a music player, a workbench that builds programs on the TI itself, SAMS paging and a page pool, modules that switch and call each other, and disk files (a disk controller, a TIPI or both), plus a loader
 that checks the machine, a clean power-up state and a clean exit.
 
 ## Two ways to work
@@ -66,6 +66,7 @@ The full comparison is in [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md)
 | `examples/workbench` | the workbench: edit, assemble and run programs on the TI (an editor, a native assembler checked against xas99, a launcher) |
 | `examples/joystick` | both joysticks: states, fire presses, and a switch that makes a joystick type arrow keys |
 | `examples/music` | a music player: two songs from SAMS pages, pause, stop, tone effects, music stepping through a long loop |
+| `examples/reversi` | a whole program in one module (3,392 bytes): Reversi against the computer, with hints, two levels, joystick and keyboard, save and open. Builds on a PC and assembles on the TI (it is on the workbench disk); checked against a Python model of the rules |
 | `examples/browser` | two modules: a DSK1 catalog browser and a text-file viewer (GOMOD with an argument, the file service, the page pool, slot B paging) |
 
 ## Tests
@@ -81,7 +82,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.5.2. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.6.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

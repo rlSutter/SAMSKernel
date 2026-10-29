@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -137,7 +137,7 @@ def browser():
     ln = lines(m)
     check('PRESSDISK' in ln[2] and '1440' in ln[2], 'the catalog: the disk line')
     check(ln[5].split()[:2] == ['DATA', 'INT/FIX'] and ln[6].split()[:2] == ['NOTES', 'DIS/VAR'] and ln[7].split()[:2] == ['README', 'DIS/VAR'], 'the catalog: three files with types')
-    m, cpu, halt = sim9900.run(c, keys='<ENTER><WAIT 60>', frames=300, setup=setup)
+    m, cpu, halt = sim9900.run(c, keys='<ENTER><WAIT 45>', frames=300, setup=setup)
     check('Not a DIS/VAR' in lines(m)[27], 'ENTER on an INT/FIX file: refused')
     m, cpu, halt = sim9900.run(c, keys='<F-x><F-x><ENTER><WAIT 200>', frames=700, setup=setup)
     ln = lines(m)
@@ -468,7 +468,8 @@ def nativedisk():
     check(b[-3:] == [0x8E, 0x0F, 0x90], 'beep, assembled and run on the TI: key 6 plays A on voice 1 (SNDTONE: >8E >0F >90): %s' % [hex(x) for x in b[-3:]])
 
 DISK_SOURCES = ['examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/workbench/programs/mode.a99',
-                'examples/workbench/programs/copy.a99', 'examples/workbench/programs/paging.a99', 'examples/joystick/joy.a99',
+                'examples/workbench/programs/copy.a99', 'examples/workbench/programs/paging.a99', 'examples/workbench/programs/clock.a99',
+                'examples/joystick/joy.a99', 'examples/reversi/revers.a99',
                 'examples/modes/modes.a99', 'tests/asm/probe1.a99']
 
 def tiprograms():
@@ -489,16 +490,212 @@ def tiprograms():
     m, img = go('MODE/A99', [P + 'mode.a99'], '2<WAIT 40><F-9><WAIT 80>', 3100)
     ln = lines(m)
     check(m.rw(0x20EC) == 80 and 'workbench' in ln[0], 'mode: FCTN 9 restores Text 80 and returns to the workbench: %r' % ln[0].strip())
-    m, img = go('PAGING/A99', [P + 'paging.a99'], '<ENTER><WAIT 60>', 2900)
+    m, img = go('PAGING/A99', [P + 'paging.a99'], '<ENTER><WAIT 45>', 2900)
     ln = [l.strip() for l in lines(m)[:10]]
     check('4 of 4 pages kept their own number' in ln and 'OK' in ln, 'paging: four pool pages each kept their own number, and slot B was put back: %s' % [l for l in ln if l][-2:])
     open('/tmp/src', 'w').write('first record\nsecond record\nthird\nfourth\n')
     m, img = go('COPY/A99', [P + 'copy.a99', '/tmp/src'], '<ENTER><WAIT 120>', 3000)
     check(tifdc.read_file(img, 'DST') == tifdc.read_file(img, 'SRC') and len(tifdc.read_file(img, 'DST')) == 4, 'copy: two files open at once, SRC copied to DST record for record on the TI: %s' % tifdc.read_file(img, 'DST'))
+    def pi(m):
+        m.pi_card = True; m.pi_clock = '3,10/29/26,14:05:09'
+    m, img = asmharness.workbench_ui('<WAIT 10>nCLOCK/A99<ENTER><WAIT 10>a<WAIT 2300>r<WAIT 60><ENTER><WAIT 80>', 2900, [P + 'clock.a99'], setup2=pi)
+    check('10 29 2026' in lines(m)[4] and '14 5  9' in lines(m)[4], 'clock: assembled on the TI, it reads a TIPI model\'s clock: %r' % lines(m)[4].strip())
     m, img = go('JOY/A99', [os.path.join(ROOT, 'examples/joystick/joy.a99')], '<J1-FIRE><WAIT 8><J1-FIRE><WAIT 8>', 2800)
     check(m.rw(0x2300 + 5760) == 2, 'joystick: the program assembled on the TI counts two fire presses (%d)' % m.rw(0x2300 + 5760))
 
 DISK_SOURCES_PLACEHOLDER = None
+
+def tipi():
+    """Support for a TIPI, as far as a simulator can show it (a MODEL of a TIPI on a second card at CRU >1000, not its
+    DSR): every card is powered up, not only the first device used; a file on the TIPI is copied to a TI controller's
+    disk with the TIPI used first; the clock (CLKGET); and the workbench's includes in the main file's directory."""
+    import tempfile, skdisk, tifdc, asmharness
+    c = build('tests/apps/tipi')
+    b = 0x2300
+    src = [b'record %02d from the TIPI' % i for i in range(1, 13)]
+    if os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM']):
+        d = tempfile.mkdtemp(); p = d + '/d.dsk'; skdisk.make_disk(p, [])
+        img = bytearray(open(p, 'rb').read()); box = {}
+        def setup(m):
+            box['f'] = tifdc.TIFDC(image=img); m.tifdc = box['f']
+            m.pi_card = True; m.pi_files = True; m.dvfiles['PI:IN.SRC'] = src; m.pi_clock = '3,10/29/26,14:05:09'
+        m, cpu, halt = sim9900.run(c, frames=1500, setup=setup)
+        check(m.pi_powered and m.rw(b) == 0 and m.rw(b + 2) == 0 and m.rw(b + 4) == 12 and m.rw(b + 6) == 5 and m.rw(b + 8) == 0,
+              'two cards: the TIPI model was powered up, a file on it opened first, then the TI controller\'s: 12 records copied (%d), end of file (%d)' % (m.rw(b + 4), m.rw(b + 6)))
+        check(tifdc.read_file(box['f'].image, 'DST') == src, 'two cards: the copy on the TI controller\'s disk is the TIPI file, record for record')
+        def setup2(m):
+            f = tifdc.TIFDC(image=bytearray(open(p, 'rb').read())); orig = f.read; m.tifdc = f
+            f.read = lambda a: 0 if a in (0x4004, 0x4005) else orig(a)      # the controller's power-up not run
+            m.pi_card = True; m.pi_files = True; m.dvfiles['PI:IN.SRC'] = src
+        m, cpu, halt = sim9900.run(c, frames=1500, setup=setup2)
+        check(m.rw(b + 4) != 12, 'and the test means something: without the controller\'s power-up the copy does not happen (%d records)' % m.rw(b + 4))
+    else:
+        print('  (two-card copy skipped: TIFDC_ROM)')
+    def clk(m):
+        m.pi_card = True; m.pi_files = True; m.dvfiles['PI:IN.SRC'] = src; m.pi_clock = '3,10/29/26,14:05:09'
+    m, cpu, halt = sim9900.run(c, frames=1500, setup=clk)
+    words = [m.rw(0x20C0 + 2 * i) for i in range(7)]
+    check(m.rw(b + 14) == 0 and words == [3, 10, 29, 26, 14, 5, 9], 'CLKGET: "3,10/29/26,14:05:09" gives DOW 3, 10/29/26, 14:05:09: %s' % words)
+    def noclk(m):
+        m.pi_card = True; m.pi_files = True; m.dvfiles['PI:IN.SRC'] = src; m.pi_clock = None
+    m, cpu, halt = sim9900.run(c, frames=1500, setup=noclk)
+    words = [m.rw(0x20C0 + 2 * i) for i in range(7)]
+    check(m.rw(b + 14) != 0 and words == [0] * 7, 'CLKGET without a clock: an error (%d) and the words are 0' % m.rw(b + 14))
+    # includes: in the main file's directory first, then on the device alone
+    prog = ['       COPY "kernel.equ"', '       COPY "macros.a99"', '       COPY "inc.a99"', '       AORG >C000', '       DATA INIT,TICK,INIT,0',
+            'INIT   LI   R0,VAL', '       RT', 'TICK   RT']
+    inc = ['VAL    EQU  >1234']
+    r = asmharness.assemble_standin({'SUB.MAIN/A99': prog, 'SUB.INC/A99': inc}, 'SUB.MAIN/A99')
+    check(r.errors == 0 and b'\x12\x34' in r.image,
+          'includes: inc.a99 is found beside DSK1.SUB.MAIN/A99 (SUB.INC/A99) and KERNEL/EQU on the device alone: errors %d' % r.errors)
+    r = asmharness.assemble_standin({'SUB.MAIN/A99': prog, 'INC/A99': inc}, 'SUB.MAIN/A99')
+    check(r.errors == 0 and b'\x12\x34' in r.image, 'includes: not beside it, the device\'s own directory has it (INC/A99): errors %d' % r.errors)
+    r = asmharness.assemble_standin({'SUB.MAIN/A99': prog}, 'SUB.MAIN/A99')
+    check(r.errors >= 1 and any((c & 255) == 7 for l, c in r.errtab), 'includes: nowhere: a file error, with its line: %s' % [(l, c & 255) for l, c in r.errtab][:3])
+
+def reversi():
+    """examples/reversi: the rules, the computer's two levels and the pass logic checked against a Python model
+    (tests/reversi_model.py): thousands of cell checks on positions from random games, every move of whole games
+    played through the keyboard, the joystick, hints and levels, and save and open through the file service."""
+    import random, asmharness
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import reversi_model as R
+    c = build('reversi')
+    B = 0x2300 + 5760
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'reversi', 'game.equ'))
+    m = sim9900.Machine(c)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    def put(b):
+        for i in range(100): m.wb(B + i, 3)
+        for r in range(8):
+            for c2 in range(8): m.wb(B + (r + 1) * 10 + c2 + 1, b[r * 8 + c2])
+    def get(mm):
+        return [mm.rb(B + (r + 1) * 10 + c2 + 1) for r in range(8) for c2 in range(8)]
+    random.seed(1)
+    cells = bad = moves = 0
+    for g in range(20):
+        b, p = R.start(), 1
+        for ply in range(70):
+            mv = R.legal(b, p)
+            if not mv:
+                p = 3 - p; mv = R.legal(b, p)
+                if not mv: break
+            put(b)
+            for cell in range(64):
+                m.ww(B + 108, 0)
+                r = asmharness.call(m, cpu, syms['padix'], {0: cell})
+                cells += 1
+                if asmharness.call(m, cpu, syms['flipn'], {0: r[0], 1: p})[0] != len(R.flips(b, cell, p)): bad += 1
+            cell = random.choice(mv)
+            put(b); m.ww(B + 108, 0xFFFF)
+            r = asmharness.call(m, cpu, syms['padix'], {0: cell}); asmharness.call(m, cpu, syms['flipn'], {0: r[0], 1: p})
+            nb = R.play(b, cell, p)
+            moves += 1
+            if get(m) != nb: bad += 1
+            b, p = nb, 3 - p
+    check(bad == 0, 'rules: %d cells and %d moves in 20 random games: the legal-move scan and the flips agree with the model (%d differ)' % (cells, moves, bad))
+    random.seed(7)
+    n = bad = 0
+    for g in range(12):
+        b, p = R.start(), 1
+        for ply in range(70):
+            mv = R.legal(b, p)
+            if not mv:
+                p = 3 - p; mv = R.legal(b, p)
+                if not mv: break
+            put(b)
+            for pl in (1, 2):
+                n += 1
+                if asmharness.call(m, cpu, syms['hasmv'], {1: pl})[0] != (1 if R.legal(b, pl) else 0): bad += 1
+            if p == 2:
+                m.ww(B + 104, 2)
+                got = asmharness.call(m, cpu, syms['aimove'])[0]
+                got = got - 65536 if got >= 32768 else got
+                n += 1
+                if got != R.greedy(b, 2): bad += 1
+                m.ww(B + 104, 1); m.ww(B + 118, random.randrange(65536))
+                n += 1
+                if asmharness.call(m, cpu, syms['aimove'])[0] not in R.legal(b, 2): bad += 1
+            b = R.play(b, random.choice(mv), p); p = 3 - p
+    check(bad == 0, 'computer: level 2 picks the model\'s greedy move, level 1 always a legal one, and "has a move" agrees (%d checks, %d differ)' % (n, bad))
+    # whole games through the keyboard: the first legal move each time
+    def script(policy, limit=99):
+        b, cur, keys, humans = R.start(), 19, '<WAIT 5>', 0
+        while humans < limit:
+            mv = R.legal(b, 1)
+            if not mv:
+                while not R.legal(b, 1):
+                    cm = R.greedy(b, 2)
+                    if cm is None: return keys, b, cur
+                    b = R.play(b, cm, 2)
+                continue
+            cell = policy(mv)
+            r0, c0 = divmod(cur, 8); r1, c1 = divmod(cell, 8)
+            keys += ('<F-x>' if r1 > r0 else '<F-e>') * abs(r1 - r0) + ('<F-d>' if c1 > c0 else '<F-s>') * abs(c1 - c0) + '<ENTER><WAIT 45>'
+            cur, humans = cell, humans + 1
+            b = R.play(b, cell, 1)
+            if R.legal(b, 2): b = R.play(b, R.greedy(b, 2), 2)
+            elif not R.legal(b, 1): return keys, b, cur
+            if not R.legal(b, 1) and not R.legal(b, 2): return keys, b, cur
+        return keys, b, cur
+    keys, b, cur = script(lambda mv: mv[0])
+    mm, cpu2, halt = sim9900.run(c, keys=keys + '<WAIT 150>', frames=9500)
+    text = ' '.join(lines(mm))
+    want = 'You win!' if R.score(b)[0] > R.score(b)[1] else ('The computer wins' if R.score(b)[0] < R.score(b)[1] else 'A draw')
+    check(get(mm) == b and (mm.rw(B + 110), mm.rw(B + 112)) == R.score(b) and mm.rw(B + 114) != 0 and want in text,
+          'a whole game by keyboard, %d of your moves: every board equals the model\'s, the scores %s, game over, "%s" on screen' % (keys.count('<ENTER>'), R.score(b), want))
+    random.seed(5)
+    keys, b, cur = script(lambda mv: random.choice(mv), 12)
+    mm, cpu2, halt = sim9900.run(c, keys=keys + '<WAIT 120>', frames=4500)
+    check(get(mm) == b and (mm.rw(B + 110), mm.rw(B + 112)) == R.score(b) and mm.rw(B + 102) == cur, '12 random moves of yours by keyboard: the board, the scores and the cursor equal the model\'s')
+    # an illegal move, hints, level
+    mm, cpu2, halt = sim9900.run(c, keys='<WAIT 5><F-e><F-e><F-s><F-s><F-s><ENTER><WAIT 10>', frames=300)
+    check(get(mm) == R.start() and 'not a legal move' in ' '.join(lines(mm)), 'an illegal move (a1) changes nothing and says so')
+    mm, cpu2, halt = sim9900.run(c, keys='<WAIT 5>h<WAIT 8>l<WAIT 8>', frames=200)
+    check(mm.rw(B + 106) != 0 and mm.rw(B + 104) == 1 and 'Level 1' in ' '.join(lines(mm)) and 'Hints: on' in ' '.join(lines(mm)), 'H turns the hints on, L switches to level 1')
+    # the joystick: right and down, then fire
+    mm, cpu2, halt = sim9900.run(c, keys='<WAIT 5><J1-FIRE><WAIT 70>', frames=250)
+    b1 = R.play(R.start(), 19, 1)
+    b1 = R.play(b1, R.greedy(b1, 2), 2)
+    check(get(mm) == b1, 'the joystick\'s fire button plays d3 (JOYKEY types ENTER for it) and the computer answers like the model')
+    mm, cpu2, halt = sim9900.run(c, keys='<WAIT 5><J1-LEFT><WAIT 8><J1-DOWN><WAIT 8>', frames=150)
+    check(mm.rw(B + 102) == 19 - 1 + 8, 'the joystick moves the cursor: left, then down (cell %d)' % mm.rw(B + 102))
+    # save and open
+    def setup(mm):
+        pass
+    keys = '<WAIT 5><ENTER><WAIT 70>s<WAIT 30>n<WAIT 20>o<WAIT 30>'
+    mm, cpu2, halt = sim9900.run(c, keys=keys, frames=700)
+    sg = R.play(R.start(), 19, 1); sg = R.play(sg, R.greedy(sg, 2), 2)
+    rec = mm.dvfiles.get('REVERSI')
+    want = (''.join(str(x) for x in sg) + '12').encode()
+    check(rec == [want] and get(mm) == sg and mm.rw(B + 100) == 1, 'S saves the game as one 66-character record, N starts again, O opens it: the position is back (%s)' % (rec[0][:20] if rec else rec))
+    mm, cpu2, halt = sim9900.run(c, keys='<WAIT 5>o<WAIT 20>', frames=200)
+    check('No saved game' in ' '.join(lines(mm)), 'O with no saved game says so')
+
+def reversiti():
+    """Reversi assembled on the simulated TI by the workbench's native assembler (it is one module of under 4,096
+    bytes): identical to xas99's, and the program that results plays."""
+    import asmharness
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    src = os.path.join(ROOT, 'examples', 'reversi', 'revers.a99')
+    build('reversi')
+    want = open(os.path.join(ROOT, 'build', 'reversi', 'game.bin'), 'rb').read()
+    r = asmharness.assemble(src, 'workbench')
+    check(r.errors == 0 and r.image == want, 'reversi assembled on the TI: %d bytes (limit 4096), byte for byte as xas99 (errors %d)' % (len(want), r.errors))
+    m, img = asmharness.workbench_ui('<WAIT 10>nREVERS/A99<ENTER><WAIT 10>a<WAIT 5200>r<WAIT 80><ENTER><WAIT 90>', 5600, [src])
+    B = 0x2300 + 5760
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import reversi_model as R
+    b1 = R.play(R.start(), 19, 1)
+    b1 = R.play(b1, R.greedy(b1, 2), 2)
+    got = [m.rb(B + (r_ + 1) * 10 + c2 + 1) for r_ in range(8) for c2 in range(8)]
+    check(got == b1, 'run from the workbench on the TI: ENTER plays d3 and the computer answers like the model')
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -640,7 +837,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

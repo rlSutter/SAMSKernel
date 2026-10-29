@@ -46,13 +46,17 @@ OPCODE EQU  APPRAM+570
 LABF   EQU  APPRAM+572         this line has a label
 LABNM  EQU  APPRAM+574         12 bytes: the label
 COPYF  EQU  APPRAM+586         non-zero: the line was a COPY (name in INCNM)
-INCNM  EQU  APPRAM+588         24 bytes: the include's full name
+* 32 bytes: the include's full name, in the main file's directory
+INCNM  EQU   APPRAM+5984
+* 32 bytes: the same name on the device alone (tried if INCNM is not there)
+INCN2  EQU   APPRAM+6016
 SAVEN  EQU  APPRAM+612         scratch
 LABLEN EQU  APPRAM+634         the length of the line's label
 TMPW   EQU  APPRAM+614         scratch words (6)
 ERRTAB EQU  APPRAM+640         24 errors: line, (depth << 8 | code)
 CNTS   EQU  APPRAM+736         records read of each open file (4 words)
-NAMES  EQU  APPRAM+744         4 file names of 24 bytes
+* 4 file names of 32 bytes (up to 31 characters: PI.DIR.NAME/EXT)
+NAMES  EQU   APPRAM+6048
 STRBUF EQU  APPRAM+848         a string being built (80 bytes)
 OUTBUF EQU  APPRAM+1024        the image: 4,096 bytes
 OUTMAX EQU  4096

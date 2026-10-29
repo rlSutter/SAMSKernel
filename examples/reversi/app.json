@@ -1,0 +1,7 @@
+{
+  "name": "REVERSI",
+  "min_pages": 128,
+  "modules": [
+    {"name": "game", "source": "revers.a99"}
+  ]
+}

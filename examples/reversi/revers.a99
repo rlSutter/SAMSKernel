@@ -1,0 +1,986 @@
+*======================================================================
+* revers.a99 - Reversi (Othello) against the computer, as an example of
+* a complete program on the SAMS Kernel.
+*
+*   arrows (FCTN E S D X) or joystick 1: move the cursor
+*   ENTER or the joystick's fire button: put your disc there
+*   H hints   L level (1 random, 2 greedy)   N new game   C colours
+*   S save the game to DSK1.REVERSI   O open it again   FCTN = quit
+*
+* You move first and play the bold discs; the computer plays the red ones.
+* A move must flip at least one line of the computer's discs lying between
+* the new disc and one of yours; a player with no move passes; when neither
+* can move the game ends and the more discs win.
+*
+* What it shows of the kernel: a text screen with a colour per cell (the
+* board is painted with attributes, the discs with attribute pairs from the
+* colour roles, so the five colour schemes recolour it), the keyboard and
+* the joysticks (JOYKEY types arrow keys for joystick 1), tones (SNDTONE),
+* the file service (save and open), the frame counter for timing and for the
+* random seed.  The whole of it is one module under 4,096 bytes, so it
+* builds on a PC (python3 tools/skbuild.py examples/reversi) and also
+* assembles on the TI itself in the workbench (it is on the workbench's disk:
+* N REVERS/A99, A, R).  Its variables are at APPRAM+5760 and up, clear of
+* the workbench's own state.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* attributes: text colour over a background role; discs and squares are
+* painted by their background
+ASQ0   EQU  (RTEXT*16+RBARBG)*256     one colour of square
+* the other (neither is the page's own colour)
+ASQ1   EQU   (RTEXT*16+RDIM)*256
+ACUR   EQU  (RTEXT*16+RACCNT)*256     the cursor's square
+ADH    EQU  (RTEXT*16+RBOLD)*256      your disc (the bold, high-contrast colour)
+ADC    EQU  (RTEXT*16+RERROR)*256     the computer's disc (red)
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+WORK   EQU  APPRAM+5760
+* 10 x 10 bytes: the 8 x 8 board with a border of 3s
+BOARD  EQU   WORK
+TURN   EQU  WORK+100           1 you, 2 the computer
+CUR    EQU  WORK+102           the cursor: row * 8 + column
+LEVEL  EQU  WORK+104           1 random, 2 greedy
+HINTS  EQU  WORK+106           non-zero: show the legal moves
+DOFLP  EQU  WORK+108           non-zero: FLIPN makes the move, else only counts
+SC1    EQU  WORK+110           your discs
+SC2    EQU  WORK+112           the computer's
+OVER   EQU  WORK+114           non-zero: the game is over
+WAITF  EQU  WORK+116           frames until the computer moves (0: not waiting)
+SEED   EQU  WORK+118
+MSG    EQU  WORK+120           the message string's address
+SNDCT  EQU  WORK+122           frames until a tone is silenced
+GSCH EQU  WORK+124           the colour scheme, 0-4
+LASTM  EQU  WORK+126           the last move: row * 8 + column (-1: none)
+TA     EQU  WORK+128           scratch words
+TB     EQU  WORK+130
+TC     EQU  WORK+132
+TD     EQU  WORK+134
+BESTS  EQU  WORK+136
+BESTC  EQU  WORK+138
+REC    EQU  WORK+160           a saved game as a text record: 66 bytes
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+*----------------------------------------------------------------------
+* the rules
+*----------------------------------------------------------------------
+* PADIX - R0 = a cell's number (row * 8 + column): R0 = its place in BOARD.
+* Leaf.  Uses R1, R2.
+PADIX  MOV  R0,R1
+       SRL  R1,3               the row
+       MOV  R0,R2
+       ANDI R2,7               the column
+       MOV  R1,R0
+       SLA  R0,3
+       A    R1,R0
+       A    R1,R0               row * 10
+       A    R2,R0
+       AI   R0,11              (one row and one column in, for the border)
+       RT
+
+* FLIPN - R0 = a place in BOARD, R1 = the player (1 or 2): the number of
+* discs a disc put there would flip (0: the cell is taken, or nothing would
+* flip: not a legal move).  If DOFLP is non-zero the discs are flipped and the
+* disc is put down.  Keeps R8 and R9.
+FLIPN  .enter
+       .push R8
+       .push R9
+       MOV  R0,R4              the place
+       MOV  R1,R5
+       SWPB R5                 the player, in the high byte (for CB)
+       LI   R6,>0300
+       SB   R5,R6              the opponent: 3 - the player
+       CLR  R8                 the total
+       LI   R0,BOARD
+       A    R4,R0
+       MOVB *R0,R1
+       JNE  FN9                the cell is not empty
+       LI   R7,DIRS
+FN1    MOV  *R7+,R2            a direction's step (0 ends the list)
+       JEQ  FN8
+       MOV  R4,R9
+       CLR  R3                 the opponent's discs along it
+FN2    A    R2,R9
+       LI   R0,BOARD
+       A    R9,R0
+       MOVB *R0,R1
+       CB   R1,R6
+       JNE  FN3
+       INC  R3
+       JMP  FN2
+FN3    CB   R1,R5              one of the player's own at the end?
+       JNE  FN1
+       MOV  R3,R3
+       JEQ  FN1                none between: nothing flips this way
+       A    R3,R8
+       MOV  @DOFLP,@DOFLP
+       JEQ  FN1
+FN4    S    R2,R9              walk back, turning them over
+       LI   R0,BOARD
+       A    R9,R0
+       MOVB R5,*R0
+       DEC  R3
+       JNE  FN4
+       JMP  FN1
+FN8    MOV  R8,R8
+       JEQ  FN9
+       MOV  @DOFLP,@DOFLP
+       JEQ  FN9
+       LI   R0,BOARD
+       A    R4,R0
+       MOVB R5,*R0             the new disc
+FN9    MOV  R8,R0
+       .pop R9
+       .pop R8
+       .leave
+       RT
+DIRS   DATA -11,-10,-9,-1,1,9,10,11,0
+
+* HASMV - R1 = a player: R0 = 1 if he has a legal move, else 0.
+HASMV  .enter
+       .push R9
+       MOV  R1,@TC
+       CLR  R9                 the cell
+       CLR  @DOFLP
+HM1    MOV  R9,R0
+       BL   @PADIX
+       MOV  @TC,R1
+       BL   @FLIPN
+       MOV  R0,R0
+       JNE  HM8
+       INC  R9
+       CI   R9,64
+       JL   HM1
+       CLR  R0
+       JMP  HM9
+HM8    LI   R0,1
+HM9    .pop R9
+       .leave
+       RT
+
+* COUNTS - SC1 and SC2: the discs of each player (a row at a time: two border
+* cells lie between rows).  Leaf.  Uses R0-R5.
+COUNTS CLR  R2
+       CLR  R3
+       LI   R0,BOARD+11
+       LI   R5,8
+CO0    LI   R1,8
+CO1    MOVB *R0+,R4
+       SRL  R4,8
+       CI   R4,1
+       JNE  CO2
+       INC  R2
+       JMP  CO4
+CO2    CI   R4,2
+       JNE  CO4
+       INC  R3
+CO4    DEC  R1
+       JNE  CO1
+       AI   R0,2
+       DEC  R5
+       JNE  CO0
+       MOV  R2,@SC1
+       MOV  R3,@SC2
+       RT
+
+* INITB - the starting position.  Leaf.  Uses R0-R3.
+INITB  LI   R0,BOARD
+       LI   R1,50
+IB1    CLR  *R0+
+       DEC  R1
+       JNE  IB1
+       LI   R0,BOARD           the border: 3s
+       LI   R1,>0300
+       LI   R2,10
+IB2    MOVB R1,*R0+
+       DEC  R2
+       JNE  IB2
+       LI   R0,BOARD+90
+       LI   R2,10
+IB3    MOVB R1,*R0+
+       DEC  R2
+       JNE  IB3
+       LI   R0,BOARD+10
+       LI   R2,8
+IB4    MOVB R1,*R0
+       AI   R0,9
+       MOVB R1,*R0+
+       DEC  R2
+       JNE  IB4
+       LI   R1,>0100
+       MOVB R1,@BOARD+45       e4 and d5: yours
+       MOVB R1,@BOARD+54
+       LI   R1,>0200
+       MOVB R1,@BOARD+44       d4 and e5: the computer's
+       MOVB R1,@BOARD+55
+       RT
+
+*----------------------------------------------------------------------
+* the computer's move
+*----------------------------------------------------------------------
+* RAND - R0 = a number from 0 to R1-1 (R1 > 0), from a linear congruential
+* generator whose seed is mixed from the frame counter.  Leaf.  Uses R0-R3.
+RAND   MOV  @SEED,R2
+       MPY  @C25173,R2         R2:R3 = seed * 25173
+       AI   R3,13849
+       MOV  R3,@SEED
+       SRL  R3,4               (the low bits of such a generator are poor)
+       CLR  R2
+       DIV  R1,R2              R3 = the remainder: 0 to R1-1
+       MOV  R3,R0
+       RT
+C25173 DATA 25173
+
+* AIMOVE - choose the computer's move: R0 = the cell (0-63), or -1 if it has
+* none.  Level 1 picks a legal move at random, level 2 the one with the best
+* weight plus flips (the first in a tie).  Does not play it.
+AIMOVE .enter
+       .push R9
+       CLR  @DOFLP
+       SETO @BESTC
+       LI   R0,>8000
+       MOV  R0,@BESTS          the best score so far: very low
+       CLR  R9
+       CLR  @TA                the number of legal moves
+AI1    MOV  R9,R0
+       BL   @PADIX
+       LI   R1,2
+       BL   @FLIPN
+       MOV  R0,R0
+       JEQ  AI4                not legal
+       INC  @TA
+       MOV  @LEVEL,R1
+       CI   R1,2
+       JEQ  AI2
+       MOV  @TA,R1             level 1: each legal move replaces the choice with
+       BL   @RAND              chance 1 in the number seen so far
+       MOV  R0,R0
+       JNE  AI4
+       MOV  R9,@BESTC
+       JMP  AI4
+AI2    MOV  R0,R3              level 2: the weight of the cell plus the flips
+       MOV  R9,R1
+       SLA  R1,1
+       A    @WEIGHT(R1),R3
+       C    R3,@BESTS
+       JGT  AI3                (signed: better)
+       JMP  AI4
+AI3    MOV  R3,@BESTS
+       MOV  R9,@BESTC
+AI4    INC  R9
+       CI   R9,64
+       JL   AI1
+       MOV  @BESTC,R0
+       .pop R9
+       .leave
+       RT
+WEIGHT DATA 100,-20,10,5,5,10,-20,100
+       DATA -20,-50,-2,-2,-2,-2,-50,-20
+       DATA 10,-2,1,1,1,1,-2,10
+       DATA 5,-2,1,0,0,1,-2,5
+       DATA 5,-2,1,0,0,1,-2,5
+       DATA 10,-2,1,1,1,1,-2,10
+       DATA -20,-50,-2,-2,-2,-2,-50,-20
+       DATA 100,-20,10,5,5,10,-20,100
+
+*----------------------------------------------------------------------
+* the screen
+*----------------------------------------------------------------------
+* DRAWSQ - one square of the board: R0 = its number (row * 8 + column).  It
+* is painted with attributes (a light or a dark square, or the cursor's); a
+* disc is the four middle cells in a player's colour; an empty square shows a
+* bullet if hints are on and it is a legal move for you.  Keeps R9.
+DRAWSQ .enter
+       .push R9
+       MOV  R0,@TA
+       MOV  R0,R3
+       SRL  R3,3               the row
+       MOV  R0,R4
+       ANDI R4,7               the column
+       MOV  R3,R5
+       A    R4,R5
+       ANDI R5,1               a dark square if row + column is odd
+       MOV  R5,@TB
+       MOV  R3,R5
+       SLA  R5,5
+       MOV  R5,R9
+       SLA  R9,2
+       A    R5,R9              row * 160
+       MOV  R4,R6
+       SLA  R4,2
+       A    R4,R6              column * 5
+       A    R6,R9
+* the square's first cell: row 3 + 2r, column 6 + 5c
+       AI   R9,246
+       MOV  R9,@TD
+       LI   R7,ASQ0
+       MOV  @TB,@TB
+       JEQ  DS1
+       LI   R7,ASQ1
+DS1    C    @TA,@CUR
+       JNE  DS2
+       LI   R7,ACUR
+DS2    MOV  R7,@TC             the square's attribute
+       MOV  R9,R0
+       MOV  R7,R1
+       LI   R2,5
+       BL   @FILLA
+       MOV  @TD,R0
+       AI   R0,COLS
+       MOV  @TC,R1
+       LI   R2,5
+       BL   @FILLA
+       MOV  @TA,R0
+       BL   @PADIX
+       MOV  R0,R3
+       MOVB @BOARD(R3),R4
+       SRL  R4,8
+       JEQ  DSHINT             empty: perhaps a hint
+       LI   R1,ADH
+       CI   R4,1
+       JEQ  DS3
+       LI   R1,ADC
+DS3    MOV  R1,@TC
+       MOV  @TD,R0
+       INC  R0
+       LI   R2,3
+       BL   @FILLA
+       MOV  @TD,R0
+       AI   R0,COLS+1
+       MOV  @TC,R1
+       LI   R2,3
+       BL   @FILLA
+       JMP  DS9
+DSHINT MOV  @HINTS,@HINTS
+       JEQ  DS9
+       MOV  @TURN,R1
+       CI   R1,1
+       JNE  DS9
+       MOV  @OVER,@OVER
+       JNE  DS9
+       MOV  @TA,R0
+       BL   @PADIX
+       CLR  @DOFLP
+       LI   R1,1
+       BL   @FLIPN
+       MOV  R0,R0
+       JEQ  DS9                not a legal move
+* the square's colour, with the marker colour as ink
+       MOV   @TC,R2
+       ANDI R2,>0F00
+       AI   R2,RMARK*4096
+       MOV  @TD,R0
+       AI   R0,COLS+2
+       LI   R1,16*256          the bullet glyph
+       BL   @PUTC
+DS9    .pop R9
+       .leave
+       RT
+
+* DRAWBD - every square.
+DRAWBD .enter
+       CLR  R9
+DB1    MOV  R9,R0
+       BL   @DRAWSQ
+       INC  R9
+       CI   R9,64
+       JL   DB1
+       .leave
+       RT
+
+* DRAWALL - the whole screen: the title bar, the board's labels, the board,
+* the text beside it.
+DRAWALL .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       CLR  R9                 the labels: a-h across, 1-8 down
+DA1    MOV  R9,R0
+       MOV  R0,R3
+       SLA  R0,2
+       A    R3,R0              column * 5
+       AI   R0,2*COLS+8
+       MOV  R9,R1
+       AI   R1,>0061           'a' + column ...
+       SLA  R1,8
+       LI   R2,AMARK
+       BL   @PUTC
+       MOV  R9,R0
+       MOV  R0,R3
+       SLA  R3,5
+       SLA  R0,7
+       A    R3,R0              row * 160
+       AI   R0,3*COLS+4
+       MOV  R9,R1
+       AI   R1,>0031           '1' + row
+       SLA  R1,8
+       LI   R2,AMARK
+       BL   @PUTC
+       INC  R9
+       CI   R9,8
+       JL   DA1
+       BL   @DRAWBD
+       BL   @PANEL
+       LI   R9,STEXT           the fixed text beside the board
+DA2    MOV  *R9+,R0
+       JEQ  DA3
+       MOV  *R9+,R1
+       LI   R2,ANORM
+       BL   @PUTS
+       JMP  DA2
+DA3    .leave
+       RT
+
+* PANEL - the scores, whose turn it is, the level, the message and the last
+* move.
+PANEL  .enter
+       LI   R0,3*COLS+47       you: a disc, the name, the count
+       LI   R1,ADH
+       LI   R2,2
+       BL   @FILLA
+       LI   R0,3*COLS+51
+       LI   R1,SYOU
+       LI   R2,ABOLD
+       BL   @PUTS
+       LI   R0,3*COLS+63
+       MOV  @SC1,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,3*COLS+66
+       LI   R1,SPACE2
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,5*COLS+47       the computer
+       LI   R1,ADC
+       LI   R2,2
+       BL   @FILLA
+       LI   R0,5*COLS+51
+       LI   R1,SCOMP
+       LI   R2,ABOLD
+       BL   @PUTS
+       LI   R0,5*COLS+63
+       MOV  @SC2,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,5*COLS+66
+       LI   R1,SPACE2
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,8*COLS+47       whose turn, or the end
+       LI   R1,SBLANK
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R1,STURN1
+       MOV  @TURN,R2
+       CI   R2,2
+       JNE  PN1
+       LI   R1,STURN2
+PN1    MOV  @OVER,@OVER
+       JEQ  PN2
+       LI   R1,SOVER
+PN2    LI   R0,8*COLS+47
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,10*COLS+47      the message
+       LI   R1,SBLANK
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @MSG,R1
+       JEQ  PN3
+       LI   R0,10*COLS+47
+       LI   R2,ABOLD
+       BL   @PUTS
+PN3    LI   R0,12*COLS+47      the last move
+       LI   R1,SBLANK
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @LASTM,R3
+       JLT  PN4
+       LI   R0,12*COLS+47
+       LI   R1,SLAST
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @LASTM,R1
+       ANDI R1,7
+       AI   R1,>0061           the column letter
+       SLA  R1,8
+       LI   R0,12*COLS+59
+       LI   R2,ABOLD
+       BL   @PUTC
+       MOV  @LASTM,R1
+       SRL  R1,3
+       AI   R1,>0031           the row digit
+       SLA  R1,8
+       LI   R0,12*COLS+60
+       LI   R2,ABOLD
+       BL   @PUTC
+PN4    LI   R0,14*COLS+47      the level and the hints
+       LI   R1,SLEV1
+       MOV  @LEVEL,R2
+       CI   R2,2
+       JNE  PN5
+       LI   R1,SLEV2
+PN5    LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,15*COLS+47
+       LI   R1,SHINTOF
+       MOV  @HINTS,@HINTS
+       JEQ  PN6
+       LI   R1,SHINTON
+PN6    LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+SPACE2 STRI '   '
+SBLANK STRI '                                 '
+STITLE STRI ' SAMS Kernel   Reversi'
+SYOU   STRI 'You'
+SCOMP  STRI 'Computer'
+STURN1 STRI 'Your move'
+STURN2 STRI 'The computer is thinking'
+SOVER  STRI 'Game over'
+SLAST  STRI 'Last move:'
+SLEV1  STRI 'Level 1: random moves  '
+SLEV2  STRI 'Level 2: greedy moves  '
+SHINTON STRI 'Hints: on  '
+SHINTOF STRI 'Hints: off '
+SK1    STRI 'arrows or joystick: move'
+SK2    STRI 'ENTER or fire: your disc'
+SK3    STRI 'H hints   L level'
+SK4    STRI 'N new game   C colours'
+SK5    STRI 'S save   O open   FCTN = quit'
+       EVEN
+STEXT  DATA  17*COLS+47,SK1,18*COLS+47,SK2,19*COLS+47,SK3,20*COLS+47,SK4
+       DATA  21*COLS+47,SK5,0
+
+*----------------------------------------------------------------------
+* the game
+*----------------------------------------------------------------------
+TKEY   EQU  WORK+140           the key of this frame (R0 does not survive calls)
+
+INIT   .enter
+       LI   R0,1
+       MOV  R0,@JOYKEY         joystick 1 types the arrow keys and ENTER for us
+       MOV  @FRAME,@SEED
+       LI   R0,2
+       MOV  R0,@LEVEL
+       CLR  @HINTS
+       CLR  @GSCH
+       BL   @NEWGAME
+       .leave
+       RT
+
+REDRAW .enter
+       BL   @DRAWALL
+       .leave
+       RT
+
+* NEWGAME - the starting position, you to move, and the screen.
+NEWGAME .enter
+       BL   @INITB
+       LI   R0,1
+       MOV  R0,@TURN
+       LI   R0,19              the cursor on d3, a legal first move
+       MOV  R0,@CUR
+       CLR  @OVER
+       CLR  @WAITF
+       CLR  @DOFLP
+       SETO @LASTM
+       LI   R0,SNEW
+       MOV  R0,@MSG
+       BL   @COUNTS
+       BL   @DRAWALL
+       .leave
+       RT
+
+* BEEP - a short tone of divider R1 on voice 1.
+BEEP   .enter
+       CLR  R0
+       CLR  R2
+       BL   @SNDTONE
+       LI   R0,6               silenced by TICK six frames on
+       MOV  R0,@SNDCT
+       .leave
+       RT
+
+* TICK - the tones, the computer's move, then the key.
+TICK   .enter
+       MOV  R0,@TKEY
+       MOV  @SNDCT,@SNDCT
+       JEQ  T0
+       DEC  @SNDCT
+       JNE  T0
+       BL   @SNDOFF
+T0     MOV  @WAITF,@WAITF
+       JEQ  T1
+       DEC  @WAITF
+       JNE  T1
+       BL   @COMPMV
+T1     MOV  @TKEY,R9
+       JNE  T2
+       B    @T9
+T2     CI   R9,KQUIT*256
+       JNE  T3
+       SETO @QUITF
+       B    @T9
+T3     MOV  @FRAME,R0          every key stirs the random seed
+       A    R0,@SEED
+       CI   R9,>6100           letters to capitals
+       JL   T4
+       CI   R9,>7A00
+       JH   T4
+       AI   R9,->2000
+T4     CI   R9,KUP*256
+       JNE  T5
+       LI   R0,-1
+       CLR  R1
+       BL   @CURMV
+       B    @T9
+T5     CI   R9,KDOWN*256
+       JNE  T6
+       LI   R0,1
+       CLR  R1
+       BL   @CURMV
+       B    @T9
+T6     CI   R9,KLEFT*256
+       JNE  T7
+       CLR  R0
+       LI   R1,-1
+       BL   @CURMV
+       B    @T9
+T7     CI   R9,KRIGHT*256
+       JNE  T8
+       CLR  R0
+       LI   R1,1
+       BL   @CURMV
+       B    @T9
+T8     CI   R9,KENTER*256
+       JNE  T10
+       BL   @HUMAN
+       B    @T9
+T10    CI   R9,>4800           H
+       JNE  T11
+       INV  @HINTS
+       BL   @DRAWBD
+       BL   @PANEL
+       B    @T9
+T11    CI   R9,>4C00           L
+       JNE  T12
+       LI   R0,3
+       S    @LEVEL,R0          1 <-> 2
+       MOV  R0,@LEVEL
+       BL   @PANEL
+       B    @T9
+T12    CI   R9,>4E00           N
+       JNE  T13
+       BL   @NEWGAME
+       B    @T9
+T13    CI   R9,>4300           C
+       JNE  T14
+       MOV  @GSCH,R0
+       INC  R0
+       CI   R0,5
+       JL   T13A
+       CLR  R0
+T13A   MOV  R0,@GSCH
+       BL   @SETSCH
+       B    @T9
+T14    CI   R9,>5300           S
+       JNE  T15
+       BL   @SAVEG
+       B    @T9
+T15    CI   R9,>4F00           O
+       JNE  T9
+       BL   @LOADG
+T9     .leave
+       RT
+
+* CURMV - move the cursor by R0 rows and R1 columns, if it stays on the board,
+* and redraw the two squares it touches.
+CURMV  .enter
+       MOV  @CUR,R2
+       MOV  R2,R3
+       SRL  R3,3               the row
+       ANDI R2,7               the column
+       A    R0,R3
+       A    R1,R2
+       CI   R3,8
+       JHE  CM9                (a negative number is a large one: off the board)
+       CI   R2,8
+       JHE  CM9
+       SLA  R3,3
+       A    R2,R3              the new square's number
+       MOV  @CUR,R0            the old one
+       MOV  R3,@CUR
+       BL   @DRAWSQ            without the cursor now ...
+       MOV  @CUR,R0
+       BL   @DRAWSQ            ... and the new one with it
+CM9    .leave
+       RT
+
+* HUMAN - you put a disc on the cursor's square, if it is a legal move; then
+* whose turn it is next, and the screen.
+HUMAN  .enter
+       MOV  @OVER,@OVER
+       JNE  HU9
+       MOV  @TURN,R0
+       CI   R0,1
+       JNE  HU9
+       MOV  @CUR,R0
+       BL   @PADIX
+       CLR  @DOFLP
+       LI   R1,1
+       BL   @FLIPN
+       MOV  R0,R0
+       JEQ  HUBAD
+       MOV  @CUR,R0            legal: make it
+       BL   @PADIX
+       SETO @DOFLP
+       LI   R1,1
+       BL   @FLIPN
+       CLR  @DOFLP
+       MOV  @CUR,@LASTM
+       CLR  @MSG
+       LI   R1,254             a high tone
+       BL   @BEEP
+       BL   @COUNTS
+       LI   R1,1
+       BL   @NEXTT
+       BL   @DRAWBD
+       BL   @PANEL
+       JMP  HU9
+HUBAD  LI   R0,SILL            not a legal move: say so, and growl
+       MOV  R0,@MSG
+       LI   R1,900
+       BL   @BEEP
+       BL   @PANEL
+HU9    .leave
+       RT
+
+* COMPMV - the computer plays, if it can.
+COMPMV .enter
+       MOV  @OVER,@OVER
+       JNE  CP9
+       BL   @AIMOVE
+       CI   R0,-1
+       JEQ  CP9
+       MOV  R0,@LASTM
+       BL   @PADIX
+       SETO @DOFLP
+       LI   R1,2
+       BL   @FLIPN
+       CLR  @DOFLP
+       CLR  @MSG
+       LI   R1,339             a lower tone
+       BL   @BEEP
+       BL   @COUNTS
+       LI   R1,2
+       BL   @NEXTT
+       BL   @DRAWBD
+       BL   @PANEL
+CP9    .leave
+       RT
+
+* NEXTT - R1 = the player who has just moved: who moves next.  The other player
+* if he has a move; else the same player again (the other passes); if neither
+* can, the game is over and MSG says who won.
+NEXTT  .enter
+       MOV  R1,@TB             the player who moved
+       LI   R0,3
+       S    R1,R0
+       MOV  R0,@TC             the other
+       MOV  R0,R1
+       BL   @HASMV
+       MOV  R0,R0
+       JEQ  NT1
+       MOV  @TC,@TURN          the other has a move
+       CLR  @MSG
+       JMP  NT5
+NT1    MOV  @TB,R1
+       BL   @HASMV
+       MOV  R0,R0
+       JEQ  NT2
+       MOV  @TB,@TURN          the same player again: the other passes
+       LI   R0,SPASSY
+       MOV  @TC,R1
+       CI   R1,1
+       JEQ  NT1A
+       LI   R0,SPASSC
+NT1A   MOV  R0,@MSG
+       JMP  NT5
+NT2    SETO @OVER              neither can move
+       CLR  @WAITF
+       C    @SC1,@SC2          (LI would change the flags: compare, then load)
+       JEQ  NT2T
+       JH   NT2W
+       LI   R0,SLOSE
+       JMP  NT2A
+NT2W   LI   R0,SWIN
+       JMP  NT2A
+NT2T   LI   R0,STIE
+NT2A   MOV  R0,@MSG
+       JMP  NT9
+NT5    CLR  @WAITF             the computer to move: a short wait first, so the
+       MOV  @TURN,R0           player sees his own move before it answers
+       CI   R0,2
+       JNE  NT9
+       LI   R0,25
+       MOV  R0,@WAITF
+NT9    .leave
+       RT
+
+* SAVEG - the game as one 66-character record on DSK1.REVERSI: 64 digits
+* (0 empty, 1 yours, 2 the computer's), whose turn, the level.
+SAVEG  .enter
+       CLR  R3
+       LI   R4,REC
+SV1    MOV  R3,R0
+       BL   @PADIX
+       MOV  R0,R5
+       MOVB @BOARD(R5),R6
+       AI   R6,>3000           a digit
+       MOVB R6,*R4+
+       INC  R3
+       CI   R3,64
+       JL   SV1
+       MOV  @TURN,R6
+       SLA  R6,8
+       AI   R6,>3000
+       MOVB R6,*R4+
+       MOV  @LEVEL,R6
+       SLA  R6,8
+       AI   R6,>3000
+       MOVB R6,*R4+
+       LI   R2,SNAME
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@TA
+       JNE  SVERR
+       LI   R1,REC
+       LI   R2,66
+       BL   @FWRITE
+       MOV  R0,@TA
+       BL   @FCLOSE
+       MOV  @TA,@TA
+       JNE  SVERR
+       LI   R0,SSAVED
+       JMP  SV9
+SVERR  LI   R0,SSVERR
+SV9    MOV  R0,@MSG
+       BL   @PANEL
+       .leave
+       RT
+
+* LOADG - read that record back, check it, and play on from it.
+LOADG  .enter
+       LI   R2,SNAME
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  LDNO
+       LI   R1,REC
+       BL   @FREAD
+       MOV  R0,@TA
+       MOV  R2,@TB
+       BL   @FCLOSE
+       MOV  @TA,@TA
+       JNE  LDBAD
+       MOV  @TB,R0
+       CI   R0,66
+       JNE  LDBAD
+       LI   R4,REC             every character must be a digit 0-2 (the turn
+       LI   R3,64              and level, 1 or 2)
+LD1    MOVB *R4+,R0
+       SRL  R0,8
+       AI   R0,-48
+       CI   R0,2
+       JH   LDBAD
+       DEC  R3
+       JNE  LD1
+       MOVB @REC+64,R0
+       SRL  R0,8
+       AI   R0,-48
+       CI   R0,1
+       JL   LDBAD
+       CI   R0,2
+       JH   LDBAD
+       MOVB @REC+65,R0
+       SRL  R0,8
+       AI   R0,-48
+       CI   R0,1
+       JL   LDBAD
+       CI   R0,2
+       JH   LDBAD
+       BL   @INITB             good: clear, then set each cell
+       CLR  R3
+       LI   R4,REC
+LD2    MOV  R3,R0
+       BL   @PADIX
+       MOV  R0,R5
+       MOVB *R4+,R6
+       AI   R6,->3000
+       MOVB R6,@BOARD(R5)
+       INC  R3
+       CI   R3,64
+       JL   LD2
+       MOVB @REC+64,R0
+       SRL  R0,8
+       AI   R0,-48
+       MOV  R0,@TURN
+       MOVB @REC+65,R0
+       SRL  R0,8
+       AI   R0,-48
+       MOV  R0,@LEVEL
+       CLR  @OVER
+       CLR  @WAITF
+       SETO @LASTM
+       BL   @COUNTS
+       LI   R0,SOPENED
+       MOV  R0,@MSG
+       MOV  @TURN,R0
+       CI   R0,2
+       JNE  LD3
+       LI   R0,25
+       MOV  R0,@WAITF
+LD3    BL   @DRAWALL
+       JMP  LD9
+LDNO   LI   R0,SNOSAVE
+       JMP  LD8
+LDBAD  LI   R0,SBADSV
+LD8    MOV  R0,@MSG
+       BL   @PANEL
+LD9    .leave
+       RT
+
+SNAME  STRI 'DSK1.REVERSI'
+SNEW   STRI 'New game: you play the bold discs'
+SILL   STRI 'That is not a legal move'
+SPASSY STRI 'You have no move: you pass'
+SPASSC STRI 'Computer has no move: it passes'
+SWIN   STRI 'You win!'
+SLOSE  STRI 'The computer wins'
+STIE   STRI 'A draw'
+SSAVED STRI 'Game saved to DSK1.REVERSI'
+SSVERR STRI 'The game could not be saved'
+SOPENED STRI 'Game opened'
+SNOSAVE STRI 'No saved game on DSK1'
+SBADSV STRI 'That saved game cannot be read'
+       EVEN
+       END

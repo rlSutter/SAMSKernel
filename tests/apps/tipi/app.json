@@ -1,0 +1,7 @@
+{
+  "name": "TIPITEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "tp", "source": "tp.a99"}
+  ]
+}

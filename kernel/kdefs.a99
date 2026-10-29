@@ -184,6 +184,15 @@ JOYKEY EQU   >21F4
 JKLAST EQU  >21F6            the code the joystick is typing now
 JKHOLD EQU  >21F8            frames it has held it (for the repeat)
 
+* The clock (CLKGET, files.a99), read from TIPI's PI.CLOCK: the words at >20C0
+DTDOW  EQU  >20C0            day of the week, as the clock gives it (a digit)
+DTMON  EQU  >20C2            month 1-12
+DTDAY  EQU  >20C4            day 1-31
+DTYEAR EQU  >20C6            year, two digits (add 2000)
+DTHOUR EQU  >20C8            hour 0-23
+DTMIN  EQU  >20CA            minute
+DTSEC  EQU  >20CC            second (0 if the clock gives none)
+
 * File service (files.a99): >2100->21FF
 FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
 FNAMB  EQU  >2160            8 bytes: the device name for the DSR search
@@ -198,6 +207,7 @@ FDPWR  EQU  >2176            non-zero once the controller's power-up has run
 FD70   EQU  >2178            >8370 as the controller's power-up left it
 FSELH  EQU  >21FA            the file handle the F routines act on (0-2)
 FPFLG  EQU  >21FC            scratch: a PAB flag byte's address
+FDPW2  EQU  >21FE            scratch: the power-up list entry being called
 FERR   EQU  >217A            the last file operation's result
 FLEN   EQU  >217C            the last record's length
 * the name in use (address of a length-prefixed string)

@@ -360,9 +360,21 @@ number n of a catalog record: R1 = the record's address (as FREAD left it after 
 
 find the device named in the PAB and call its DSR (from The Lantern Coast).  >8356 -> the PAB's name length byte.  R0 = 0, the DSR's error 1-7, or >FF (no card has that device).  The console's own DSRLNK is not used: it needs the GPL environment the kernel does not keep.
 
+### `DSRPWR` *(internal)*
+
+run the power-up routines of every card, as the console does when it starts (the kernel has reset VRAM since, so the controller's buffers at the top of VRAM must be made again): VRAM's top is set to >3FFF, then each card in CRU order (>1000 up) with a valid header has its power-up list run, and the bottom the buffers reached is kept (FD70).  A TIPI at >1000 and a TI controller at >1100 are both powered, whichever is used first.  Uses R0-R3, R12.
+
 ### `DLGPL` *(internal)*
 
 (entered after LWPI GPLWS, so R9 R12 R13 R15 here are the GPL workspace's) call the DSR entry in FDENT as the console's GPL would: R12 = the ROM's CRU base, R13 = >9800 (GROM read), R15 = >8C02 (VDP address).  The DSR returns to R11+2 when it handled the call, R11 if not.
+
+### `CLKGET`
+
+read TIPI's clock (the device PI.CLOCK, one record "w,mm/dd/yy,HH:MM:SS": the form of the Corcomp clock) into the words DTDOW DTMON DTDAY DTYEAR (two digits) DTHOUR DTMIN DTSEC (0 if the record has no seconds).  R0 = 0 if it worked; else the DSR's error (>FF: there is no such device, no TIPI) or 1 (a record too short), and the words are 0.  It uses file handle 2 for a moment and puts the selected handle back: do not call it while handle 2 holds an open file of yours.  It is slow on a real TIPI (it asks the Pi).  Uses R0-R9.
+
+### `CK2D` *(internal)*
+
+the two decimal digits at R1 into R0, R1 past them.  Leaf.  Uses R0-R2.
 
 ## Music and sound (music.a99)
 

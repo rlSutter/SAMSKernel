@@ -20,8 +20,8 @@ exercised by key scripts. **It has not run on a real TI-99/4A**, and I have not 
 The same source assembles on both: it is [PC or TI] code, with the **[TI]** limits in part 4 and part 5.
 
 **Programs on the workbench disk** (each assembles and runs on the TI; the tests do exactly that): `HELLO/A99` (keys echoed), `BEEP/A99` (notes on keys 1-8: `SNDTONE`), `MODE/A99` (Text 80 / Text 40: `VMODE`, `TXCOLS`),
-`PAGING/A99` (SAMS pages from the pool: `PINIT`, `PALLOC`, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once: `FSEL`; the sample `SRC` on the disk is what it copies), `JOY/A99` (both joysticks: `JOYGET`, `JOYKEY`), `MODES/A99` (fifteen display screens) and
-`PROBE1/A99` (an assembler test). Each is the example for one part of PROGRAMMERS-GUIDE.md (parts 1, 5, 6, 7, 9).
+`PAGING/A99` (SAMS pages from the pool: `PINIT`, `PALLOC`, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once: `FSEL`; the sample `SRC` on the disk is what it copies), `JOY/A99` (both joysticks: `JOYGET`, `JOYKEY`), `CLOCK/A99` (the date and time from a TIPI's clock: `CLKGET`), `REVERS/A99` (Reversi: a whole program, 3,392 bytes, takes under a minute and a half to assemble at the simulator's estimate of the TI's speed; I have not timed it on a real TI),
+`MODES/A99` (fifteen display screens) and `PROBE1/A99` (an assembler test). Each is the example for one part of PROGRAMMERS-GUIDE.md (parts 1, 5, 6, 7, 9).
 
 ## 1. Getting it onto the TI
 
@@ -153,6 +153,16 @@ INIT   ...
 - **To come back**: `LI R0,PG_WB / CLR R1 / BL @GOMOD`. The assembled image stays in the workbench's memory, so `R` runs it again without assembling. FCTN = quits the whole workbench.
 - The program shares the kernel with the workbench. Free SAMS pages for your own use start at `PGUSER+2`; the editor's buffer uses the pages above that, and a program that uses them loses the editor's text (the file on the disk is safe).
 - The program is not a cartridge: it exists in SAMS while the workbench runs. The workbench cannot write a cartridge image (a FinalGROM's storage is not something the TI can write); for that, build the program on the PC with `skbuild.py`.
+
+## 5a. On a TIPI
+
+**[TI]** The workbench works with whatever drives the TI has; a TIPI is one of them.
+- **Where the files go.** Map `DSK1.` to a directory on the Pi that holds the workbench's files (the TIPI's own configuration does this), or use `PI.` paths in the file name (`DSK1.` and `PI.PROJ.HELLO/A99` both work; the field takes 31 characters, so map a drive if your paths are long). A TIPI keeps files in TIFILES
+  format: **[PC]** `python3 tools/skdisk.py work.dsk --kernel-equ build/workbench/kernel.equ --dir tipi_files FILES...` writes the same files as TIFILES (`hello.a99.tfi`, ... named as xdm99 names them) for a TIPI directory; how your TIPI wants such a file named I have not checked, so rename them if it needs another form.
+- **Includes.** `COPY "kernel.equ"` and the other includes are looked for beside the main file first (`PI.PROJ.KERNEL/EQU` for `PI.PROJ.HELLO/A99`), then on the device alone (`PI.KERNEL/EQU`, `DSK1.KERNEL/EQU`): one `KERNEL/EQU` at the top serves every project directory. KERNEL/EQU must still come from the same build as the workbench cartridge.
+- **Speed and the catalog.** A TIPI asks the Pi for every record, so assembling there is slower than from RAM-like drives in ways I have not measured. The catalog (`C`) lists the drive in the file name's device; whether your TIPI answers the TI catalog request for a directory I have not tried.
+- **The clock.** `programs/clock.a99` reads the TIPI's clock.
+- **Tested** against a model of a TIPI in the simulator, not against a real one.
 
 ## 6. How it works, and what it costs
 

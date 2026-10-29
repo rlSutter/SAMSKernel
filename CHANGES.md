@@ -1,5 +1,16 @@
 # Changes
 
+## 1.6.0 (29 October 2026)
+
+Support for a TIPI (and any second DSR card).
+
+- **Fix: every card is powered up.** `DSRLNK` ran the power-up routine of the first card whose device was used, once; a TI disk controller used after a TIPI was never powered up (its VRAM buffers were never made). Now the first device call runs every card's power-up list, in CRU order, as the console does. `tests/apps/tipi` copies from a TIPI model to the real TI controller ROM's disk with the TIPI used first (and shows the copy fails without the power-up).
+- **`CLKGET`**: reads TIPI's `PI.CLOCK` (`w,mm/dd/yy,HH:MM:SS`) into `DTDOW DTMON DTDAY DTYEAR DTHOUR DTMIN DTSEC`; new `programs/clock.a99` on the workbench disk.
+- **The workbench's includes** come from the main file's directory first (so `PI.PROJ.MAIN/A99` finds `PI.PROJ.INC/A99`), then from the device alone (`PI.KERNEL/EQU`); file names up to 31 characters.
+- `tools/skdisk.py --dir DIR` writes the disk's files as TIFILES for a TIPI directory (naming not checked against a real TIPI). The simulator has a model of a TIPI (a card at `>1000`, `PI.` files, a clock). Test group `tipi`.
+- **Example: Reversi** (`examples/reversi`, one module of 3,392 bytes; on the workbench disk as `REVERS/A99`): the board painted with attributes and colour roles, keyboard and joystick, hints, two levels, save and open. Checked against a Python model (`tests/reversi_model.py`; groups `reversi`, `reversiti`); the tests found three bugs in it (the disc count crossed the border cells, the winner message jumped on an `LI`'s flags, a routine clobbered its caller's R9). Guide: an appendix, and two checklist items.
+- Not tried: a real TIPI's DSR under this kernel, its open-file limit, its answer to a catalog request, and the exact file naming it wants.
+
 ## 1.5.2 (29 October 2026)
 
 Every document now shows both ways of working, marked **[PC]**, **[TI]** or **[PC or TI]** (the legend and a comparison table are in the programmer's guide part 0 and the README; each document has a route note and the parts that differ carry their own).

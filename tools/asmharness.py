@@ -92,7 +92,7 @@ def assemble(source, kernel_app, extra=(), name=None, rom=None):
 
 
 # ---- driving the workbench itself: keys in, screen and disk out -----------------------------------
-def workbench_ui(keys, frames, files=(), rom=None):
+def workbench_ui(keys, frames, files=(), rom=None, setup2=None):
     """Boot the workbench with a disk holding `files` (and KERNEL.EQU), play the key script; returns
     (machine, the disk image as it ends)."""
     import tifdc
@@ -106,6 +106,8 @@ def workbench_ui(keys, frames, files=(), rom=None):
     def setup(m):
         box['fdc'] = tifdc.TIFDC(image=img)
         m.tifdc = box['fdc']
+        if setup2:
+            setup2(m)
     m, cpu, halt = sim9900.run(cart, keys=keys, frames=frames, setup=setup, rom=rom)
     if halt:
         raise RuntimeError(halt)
@@ -123,3 +125,32 @@ def editor_lines(m):
         pg, off = pgfree + 4 + s // 51, (s % 51) * 80
         out.append(bytes(m.ams[pg * 4096 + off:pg * 4096 + off + 80]).rstrip().decode('latin-1'))
     return out
+
+
+def assemble_standin(files, main, kernel_app='workbench'):
+    """Assemble `main` (a TI name like 'SUB.MAIN/A99' on DSK1) on the simulated TI whose drive is the simulator's
+    stand-in (so a name may have directories, as on a TIPI): `files` maps TI names to lists of lines."""
+    cart, syms, own_equ = build_workbench()
+    m = sim9900.Machine(cart)
+    for name, lines in files.items():
+        m.dvfiles[name] = [l.encode('latin-1') for l in lines]
+    m.dvfiles['KERNEL/EQU'] = [l.encode('latin-1') for l in skdisk.equ_lines(own_equ).split('\n') if l]
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    fname = ('DSK1.' + main).encode('ascii')
+    base = 0x2300
+    for i, b in enumerate(bytes([len(fname)]) + fname):
+        m.wb(base + i, b)
+    pg = int(re.search(r'pg_asm:\s*equ\s+>([0-9a-f]+)', open(own_equ).read().lower()).group(1), 16)
+    m.map[0xC], m.map[0xD] = pg, pg + 1
+    r0 = call(m, cpu, syms['asmgo'], limit=200_000_000)
+    res = Result()
+    res.errors = r0[0]
+    res.length = m.rw(base + 524)
+    res.image = bytes(m.rb(base + 1024 + i) for i in range(res.length))
+    res.errtab = [(m.rw(base + 640 + 4 * i), m.rw(base + 642 + 4 * i)) for i in range(min(res.errors, 24))]
+    res.machine = m
+    return res

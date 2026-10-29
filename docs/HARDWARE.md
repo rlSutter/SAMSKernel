@@ -178,6 +178,11 @@ non-zero, which is why programs written against a real console always worked, bu
 survives a DSR (which runs in that workspace). The kernel therefore sets it to 1 at start-up and again after
 every DSR call. If you write your own DSR calls, do the same.
 
+## TIPI and other DSR cards
+
+The kernel finds a device by name in the DSR header of every card (CRU `>1000` to `>1F00`), runs every card's power-up routine once (the VRAM buffers of a TI controller are made by its power-up, at the top of VRAM, below `>3FFF`), and calls the device's routine through the PAB as the console's DSRLNK would.
+What I rely on about a TIPI: it has the devices `PI` (`PI.dir.name` for files, `PI.CLOCK`, `PI.PIO`) and may map `DSK1.` to a directory; `PI.CLOCK` answers one record `w,mm/dd/yy,HH:MM:SS` (from the TIPI wiki, as noted in Press's design); `PI.PIO` emulates an Epson ESC/P printer and makes a PDF. All of that is Press's knowledge, from the TIPI wiki: Press was designed to print through `PI.PIO` and to read `PI.CLOCK`, and its load and save speed was measured on a TIPI; I do not know whether its printing and clock reading have been run on a real TIPI. **What I have not seen:** a real TIPI's DSR under this kernel since 1.6.0 (the simulator has a *model* of a TIPI: a card at `>1000` with its own power-up, `PI.` files and a clock), how many files it can hold open, and how it answers a catalog request.
+
 ## Joysticks
 
 The TI reads both joysticks through the keyboard matrix: with the column select (CRU outputs 18-20) at 6 the row lines (inputs 3-10) show joystick 1, at 7 joystick 2: row 0 fire, 1 left, 2 right, 3 down,

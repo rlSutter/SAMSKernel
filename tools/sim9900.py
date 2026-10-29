@@ -159,6 +159,23 @@ class Machine:
         self.dsr_on = False
         self.disk_dir = None
         self.tifdc = None       # a tools/tifdc.TIFDC: the real TI controller's DSR in place of the stand-in
+        # a second card at CRU >1000, a MODEL of a TIPI (not its DSR): the device "PI", a power-up routine that
+        # sets pi_powered, and (pi_files) PI.<path> as files, kept in dvfiles under "PI:<path>"; PI.CLOCK and
+        # PI.PIO as for the stand-in.  Set pi_card = True to put it in the machine.
+        self.pi_card = False
+        self.pi_on = False
+        self.pi_powered = False
+        self.pi_files = False
+        pirom = bytearray(0x2000)
+        pirom[0:4] = b'\xAA\x01\x00\x00'
+        pirom[4:6] = (0x4040).to_bytes(2, 'big'); pirom[8:10] = (0x4010).to_bytes(2, 'big')
+        pirom[0x10:0x12] = b'\x00\x00'; pirom[0x12:0x14] = (0x4050).to_bytes(2, 'big'); pirom[0x14:0x17] = b'\x02PI'
+        pirom[0x40:0x42] = b'\x00\x00'; pirom[0x42:0x44] = (0x4060).to_bytes(2, 'big')
+        for i, w in enumerate((0x0180, 0x1302, 0x05CB, 0x045B, 0x045B)):
+            pirom[0x50 + 2 * i: 0x52 + 2 * i] = w.to_bytes(2, 'big')
+        for i, w in enumerate((0x0181, 0x045B)):
+            pirom[0x60 + 2 * i: 0x62 + 2 * i] = w.to_bytes(2, 'big')
+        self.pirom = pirom
         rom = bytearray(0x2000)
         rom[0:4] = b'\xAA\x01\x00\x00'
         rom[4:6] = (0x4020).to_bytes(2, 'big'); rom[8:10] = (0x4010).to_bytes(2, 'big')
@@ -194,6 +211,8 @@ class Machine:
         if addr < 0x6000:
             if self.sams and self.ams_regs_visible and addr < 0x4020:
                 return self.map[(addr - 0x4000) >> 1]
+            if self.pi_on:
+                return self.pirom[addr - 0x4000]
             if self.tifdc is not None and self.tifdc.rom_on:
                 return self.tifdc.read(addr)
             if self.dsr_on:
@@ -380,6 +399,8 @@ class Machine:
             self.ams_mapping = bool(v)
         elif bit == 0x880:        # >1100 / 2: the fake disk controller ROM
             self.dsr_on = bool(v)
+        elif bit == 0x800 and self.pi_card:     # >1000 / 2: the model of a TIPI
+            self.pi_on = bool(v)
         elif bit == 21:           # 9901 output 21: ALPHA LOCK select (active low)
             self.cru21 = v
 
@@ -415,6 +436,8 @@ class Machine:
             p = self.rw(0x8356) + 1; self.scratch[0x56] = (p >> 8) & 0xFF; self.scratch[0x57] = p & 0xFF
         if op in (0, 1, 2, 3, 7) and dev == 'DSK1':
             return self.record_op(pab, op, buf, fname, fail)
+        if dev == 'PI' and self.pi_files and fname.split('.')[0] not in ('CLOCK', 'PIO') and op in (0, 1, 2, 3, 7):
+            return self.record_op(pab, op, buf, 'PI:' + fname, fail)
         if dev in ('PIO', 'PI'):
             return self.printer_op(pab, op, buf, count, name, fname, fail)
         if self.disk_dir is None or dev != 'DSK1':
@@ -772,6 +795,9 @@ class CPU:
             print(f"{pc0:04X} {op:04X} R0={self.reg(0):04X} R1={self.reg(1):04X} R5={self.reg(5):04X}")
         if op == 0x0180:                       # simulator trap: fake DSR
             self.flag('E', not m.dsr_trap(self))
+            return
+        if op == 0x0181:                       # simulator trap: the TIPI model's power-up routine ran
+            m.pi_powered = True
             return
         top = op >> 12
         # ---- dual operand: A AB C CB S SB SOC SOCB SZC SZCB MOV MOVB

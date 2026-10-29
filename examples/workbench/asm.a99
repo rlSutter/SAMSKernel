@@ -46,13 +46,17 @@ OPCODE EQU  APPRAM+570
 LABF   EQU  APPRAM+572         this line has a label
 LABNM  EQU  APPRAM+574         12 bytes: the label
 COPYF  EQU  APPRAM+586         non-zero: the line was a COPY (name in INCNM)
-INCNM  EQU  APPRAM+588         24 bytes: the include's full name
+* 32 bytes: the include's full name, in the main file's directory
+INCNM  EQU   APPRAM+5984
+* 32 bytes: the same name on the device alone (tried if INCNM is not there)
+INCN2  EQU   APPRAM+6016
 SAVEN  EQU  APPRAM+612         scratch
 LABLEN EQU  APPRAM+634         the length of the line's label
 TMPW   EQU  APPRAM+614         scratch words (6)
 ERRTAB EQU  APPRAM+640         24 errors: line, (depth << 8 | code)
 CNTS   EQU  APPRAM+736         records read of each open file (4 words)
-NAMES  EQU  APPRAM+744         4 file names of 24 bytes
+* 4 file names of 32 bytes (up to 31 characters: PI.DIR.NAME/EXT)
+NAMES  EQU   APPRAM+6048
 STRBUF EQU  APPRAM+848         a string being built (80 bytes)
 OUTBUF EQU  APPRAM+1024        the image: 4,096 bytes
 OUTMAX EQU  4096
@@ -1147,43 +1151,84 @@ CM101  CB   *R1+,*R2+
        JNE  CM101
 CM109  RT
 
-* BLDINC - INCNM := the main file's device ("DSK1.") + STRBUF's name, its
-* dots turned into slashes
-* (TMPW its length).  Uses R0-R4.
-BLDINC LI   R1,SRCNAME
-       LI   R2,INCNM+1
-       CLR  R3                 length so far
+* BLDINC - the include's name, STRBUF (TMPW its length), in two places: INCNM
+* in the main file's directory (everything of its name up to the last dot: with
+* "DSK1.NAME" that is "DSK1.", with a TIPI path "PI.PROJ.NAME" it is
+* "PI.PROJ."),
+* and INCN2 on the device alone ("PI."); a TI file name has no dot, so the dots
+* of the name itself become slashes.  INCN2 is empty if it would be the same.
+* Uses R0-R7.
+BLDINC .enter
+       LI   R1,SRCNAME
        CLR  R4
-       MOVB *R1+,R4            the main name's length
-       SWPB R4
-BI1    MOV  R4,R4
-       JEQ  BI3                no dot: no device prefix
-       CLR  R0
-       MOVB *R1+,R0
-       MOVB R0,*R2+
-       INC  R3
-       DEC  R4
-       CI   R0,>2E00
-       JNE  BI1
-       JMP  BI4
-BI3    CLR  R3
-       LI   R2,INCNM+1
-BI4    LI   R1,STRBUF
-       MOV  @TMPW,R4
-BI5    MOV  R4,R4
-       JEQ  BI6
-       CLR  R0
-       MOVB *R1+,R0
-       CI   R0,>2E00           a TI file name has no dot: "kernel.equ" is
-       JNE  BI5A               the file KERNEL/EQU, as xdm99 stores it
-       LI   R0,>2F00
-BI5A   MOVB R0,*R2+
-       INC  R3
-       DEC  R4
-       JMP  BI5
-BI6    SWPB R3
-       MOVB R3,@INCNM
+       MOVB *R1+,R4
+       SWPB R4                 the main name's length
+       CLR  R5                 where the first dot ends (0: none)
+       CLR  R6                 where the last dot ends
+       CLR  R3
+BI1    C    R3,R4
+       JHE  BI2
+       MOV  R1,R7
+       A    R3,R7
+       CB   *R7,@DOTC
+       JNE  BI1A
+       MOV  R3,R6
+       INC  R6
+       MOV  R5,R5
+       JNE  BI1A
+       MOV  R6,R5
+BI1A   INC  R3
+       JMP  BI1
+BI2    MOV  R5,@TMPW+6
+       MOV  R6,@TMPW+8
+       LI   R2,INCNM
+       BL   @BLD1              the main file's directory
+       MOV  @TMPW+6,R6
+       C    R6,@TMPW+8
+       JNE  BI3
+       CLR  R0                 the same: no second try
+       MOVB R0,@INCN2
+       JMP  BI9
+BI3    LI   R2,INCN2
+       BL   @BLD1              the device alone
+BI9    .leave
        RT
+
+* BLD1 - R2 = a name buffer (length byte first), R6 = how many characters of
+* the main file's name to start with: the name STRBUF follows, its dots turned
+* into slashes, the whole at most 31 characters.  Leaf.  Uses R0-R7.
+BLD1   MOV  R2,R7
+       INC  R7
+       LI   R1,SRCNAME+1
+       MOV  R6,R3
+       JEQ  BL2
+BL1    MOVB *R1+,*R7+
+       DEC  R3
+       JNE  BL1
+BL2    LI   R1,STRBUF
+       MOV  @TMPW,R4           the name's length
+       MOV  R6,R5
+       A    R4,R5
+       CI   R5,31
+       JLE  BL3
+       LI   R5,31
+       MOV  R5,R4
+       S    R6,R4
+BL3    MOV  R4,R4
+       JEQ  BL6
+       CLR  R0
+       MOVB *R1+,R0
+       CI   R0,>2E00           a TI file name has no dot
+       JNE  BL5
+       LI   R0,>2F00
+BL5    MOVB R0,*R7+
+       DEC  R4
+       JMP  BL3
+BL6    SWPB R5
+       MOVB R5,*R2
+       RT
+DOTC   BYTE >2E
+       EVEN
 
 *----------------------------------------------------------------------
 * the kernel's macros, built in
@@ -1466,11 +1511,8 @@ ATEXT  EQU  (RTEXT*16+RBG)*256
 * OPENCUR - open the file at this depth for reading (its name is in
 * NAMES).  R0 = 0 or the error.  Uses R0-R9.
 OPENCUR .enter
-       MOV  @DEPTH,R1
-       MOV  R1,R2
-       SLA  R2,3
-       SLA  R1,4
-       A    R1,R2
+       MOV  @DEPTH,R2
+       SLA  R2,5               32 bytes a name
        AI   R2,NAMES
        LI   R0,FIN+FVAR
        LI   R1,80
@@ -1488,17 +1530,14 @@ ASMFILE .enter
        BL   @ERR
        B    @AF99
 AF0    MOV  R1,R3              keep the name at this depth
-       SLA  R3,3
-       MOV  R1,R4
-       SLA  R4,4
-       A    R4,R3
+       SLA  R3,5
        AI   R3,NAMES
        CLR  R4
        MOVB *R2+,R4
        SWPB R4
-       CI   R4,23
+       CI   R4,31
        JLE  AF0A
-       LI   R4,23
+       LI   R4,31
 AF0A   MOV  R4,R5
        SWPB R5
        MOVB R5,*R3+
@@ -1512,7 +1551,26 @@ AF0C   SLA  R1,1
        BL   @OPENCUR
        MOV  R0,R0
        JEQ  AFLP
-       LI   R0,E_FIL
+* an include that is not in the main file's directory:
+       MOV   @DEPTH,R1
+       JEQ  AFBAD              try the device's own directory (INCN2)
+       MOVB @INCN2,R4
+       JEQ  AFBAD
+       MOV  R1,R3
+       SLA  R3,5
+       AI   R3,NAMES
+       CLR  R4
+       MOVB @INCN2,R4
+       SWPB R4
+       INC  R4                 its length byte too
+       LI   R2,INCN2
+AF0D   MOVB *R2+,*R3+
+       DEC  R4
+       JNE  AF0D
+       BL   @OPENCUR
+       MOV  R0,R0
+       JEQ  AFLP
+AFBAD  LI   R0,E_FIL
        BL   @ERRA
        B    @AF99
 AFLP   MOV  @ENDF,@ENDF

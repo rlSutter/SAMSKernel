@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """skdisk.py - make a TI disk image holding sources for the SAMS Kernel workbench.
 
-    python3 tools/skdisk.py out.dsk --kernel-equ build/APP/kernel.equ FILE [FILE ...] [--volume NAME]
+    python3 tools/skdisk.py out.dsk --kernel-equ build/APP/kernel.equ FILE [FILE ...] [--volume NAME] [--dir DIR]
 
 Each FILE is stored as a DIS/VAR 80 file named after the file (upper case, at most 10 characters:
 "hello.a99" is HELLO.A99).  --kernel-equ also stores KERNEL.EQU: the kernel's public symbols as
 "NAME EQU >ADDR" lines, which a program's "COPY "kernel.equ"" reads on the TI.  The image is a
 single-sided single-density disk (90K), the size the TI's own controller and tools/tifdc.py use.
+--dir DIR also writes every file of the disk into DIR in TIFILES format, named as xdm99 names them (hello.a99.tfi):
+the form a TIPI's directory or a FIAD-style directory holds.  How your TIPI wants such a file named is not something
+I have checked: rename them if it needs another form.
 Needs xdt99's xdm99.py (next to this directory, or XAS99's directory).
 """
 import os, re, subprocess, sys, tempfile
@@ -70,12 +73,21 @@ def main():
     equ = a[a.index('--kernel-equ') + 1] if '--kernel-equ' in a else None
     vol = a[a.index('--volume') + 1] if '--volume' in a else 'SKDISK'
     skip = set()
-    for flag in ('--kernel-equ', '--volume'):
+    for flag in ('--kernel-equ', '--volume', '--dir'):
         if flag in a:
             skip.update({a.index(flag), a.index(flag) + 1})
     files = [f for i, f in enumerate(a[1:], 1) if i not in skip]
     make_disk(out, files, equ, vol)
     print('wrote', out)
+    if '--dir' in a:
+        d = a[a.index('--dir') + 1]
+        os.makedirs(d, exist_ok=True)
+        names = [l.split()[0] for l in subprocess.run([sys.executable, xdm(), out], capture_output=True, text=True).stdout.split('\n')[2:] if l.strip()]
+        for n in names:
+            r = subprocess.run([sys.executable, xdm(), out, '-e', n, '-t', '-o', os.path.join(d, n.lower().replace('/', '.') + '.tfi')], capture_output=True, text=True)
+            if r.returncode:
+                sys.exit(r.stderr + r.stdout)
+        print('wrote %d TIFILES files to %s' % (len(names), d))
 
 
 if __name__ == '__main__':

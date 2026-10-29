@@ -1,0 +1,70 @@
+*======================================================================
+* tp.a99 - two disk systems at once: a file on a TIPI (PI.IN.SRC, handle 0)
+* is copied to a file on the TI disk controller (DSK1.DST, handle 1), the
+* TIPI used FIRST so that the controller's power-up must have been run by
+* the kernel and not left to the first device used; then the clock is read
+* (CLKGET).  Results are words from APPRAM, read by tests/test_kernel.py
+* (group tipi).
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+RES    EQU  APPRAM             results (words, by byte offset): 0 open PI file,
+*                              2 open DSK1 file, 4 records copied, 6 last read
+*                              error, 8 write errors, 10 the length in hand,
+*                              12 done, 14 CLKGET's result, 16 CLKGET's result with
+*                              no card (filled by a second call in the test)
+BUF    EQU  APPRAM+100
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+TICK   RT
+
+INIT   .enter
+       CLR  R0
+       BL   @FSEL
+       LI   R2,SRC
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@RES
+       LI   R0,1
+       BL   @FSEL
+       LI   R2,DST
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,@RES+2
+LOOP   CLR  R0
+       BL   @FSEL
+       LI   R1,BUF
+       BL   @FREAD
+       MOV  R0,@RES+6
+       JNE  DONE
+       MOV  R2,@RES+10
+       LI   R0,1
+       BL   @FSEL
+       LI   R1,BUF
+       MOV  @RES+10,R2
+       BL   @FWRITE
+       MOV  R0,R0
+       JEQ  W1
+       INC  @RES+8
+W1     INC  @RES+4
+       JMP  LOOP
+DONE   CLR  R0
+       BL   @FSEL
+       BL   @FCLOSE
+       LI   R0,1
+       BL   @FSEL
+       BL   @FCLOSE
+       BL   @CLKGET
+       MOV  R0,@RES+14
+       SETO @RES+12
+       .leave
+       RT
+
+SRC    STRI 'PI.IN.SRC'
+DST    STRI 'DSK1.DST'
+       EVEN

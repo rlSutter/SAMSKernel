@@ -7,11 +7,8 @@ ATEXT  EQU  (RTEXT*16+RBG)*256
 * OPENCUR - open the file at this depth for reading (its name is in
 * NAMES).  R0 = 0 or the error.  Uses R0-R9.
 OPENCUR .enter
-       MOV  @DEPTH,R1
-       MOV  R1,R2
-       SLA  R2,3
-       SLA  R1,4
-       A    R1,R2
+       MOV  @DEPTH,R2
+       SLA  R2,5               32 bytes a name
        AI   R2,NAMES
        LI   R0,FIN+FVAR
        LI   R1,80
@@ -29,17 +26,14 @@ ASMFILE .enter
        BL   @ERR
        B    @AF99
 AF0    MOV  R1,R3              keep the name at this depth
-       SLA  R3,3
-       MOV  R1,R4
-       SLA  R4,4
-       A    R4,R3
+       SLA  R3,5
        AI   R3,NAMES
        CLR  R4
        MOVB *R2+,R4
        SWPB R4
-       CI   R4,23
+       CI   R4,31
        JLE  AF0A
-       LI   R4,23
+       LI   R4,31
 AF0A   MOV  R4,R5
        SWPB R5
        MOVB R5,*R3+
@@ -53,7 +47,26 @@ AF0C   SLA  R1,1
        BL   @OPENCUR
        MOV  R0,R0
        JEQ  AFLP
-       LI   R0,E_FIL
+* an include that is not in the main file's directory:
+       MOV   @DEPTH,R1
+       JEQ  AFBAD              try the device's own directory (INCN2)
+       MOVB @INCN2,R4
+       JEQ  AFBAD
+       MOV  R1,R3
+       SLA  R3,5
+       AI   R3,NAMES
+       CLR  R4
+       MOVB @INCN2,R4
+       SWPB R4
+       INC  R4                 its length byte too
+       LI   R2,INCN2
+AF0D   MOVB *R2+,*R3+
+       DEC  R4
+       JNE  AF0D
+       BL   @OPENCUR
+       MOV  R0,R0
+       JEQ  AFLP
+AFBAD  LI   R0,E_FIL
        BL   @ERRA
        B    @AF99
 AFLP   MOV  @ENDF,@ENDF

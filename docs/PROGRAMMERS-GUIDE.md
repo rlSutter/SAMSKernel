@@ -702,6 +702,34 @@ LOOP   CLR  R0
 file counts as one of the three. Each handle has its own PAB in VRAM (`>3700`, `>3740`, `>3780`: the controller tells open files apart by their PABs) and they share one record buffer, since a call finishes with it. `FDELETE` uses the
 selected handle's PAB, so close that handle's file first. `tests/apps/files2` is a working copy-while-reading example, checked against TI's own controller ROM.
 
+### Devices: a disk controller, a TIPI, and others
+
+**[PC or TI]** The file calls take any device a DSR provides; the device is the part of the name before the first dot.
+
+| Name | Device |
+| --- | --- |
+| `DSK1.NAME` | the TI disk controller's drive 1 (a TIPI can map `DSK1.` to a directory of its own, and then the same name works there) |
+| `PI.DIR.DIR.NAME` | a TIPI: after `PI.` the dots separate directories; a file name's own dot is written `/` (`HELLO/A99`, as xdm99 writes it) |
+| `PI.CLOCK` | the TIPI's clock: one record, `w,mm/dd/yy,HH:MM:SS` (below) |
+| `PIO`, `PI.PIO` | a printer: open it for output with `FOUT+FVAR` and `FWRITE` a record a line, as for a file; device options such as `.CR` are part of the name. A TIPI's `PI.PIO` is an Epson ESC/P emulator that makes a PDF, not a pass-through (Press's printing code is the worked example) |
+
+A name may be up to 53 characters (the PAB's limit); the workbench's file-name field takes 31. The kernel runs the **power-up routine of every card** the first time any device is used (as the console does when it starts),
+in CRU order from `>1000`: a TIPI at `>1000` and a TI controller at `>1100` are both ready whichever you open first. (Before 1.6.0 only the first card used was powered up, so a TIPI used first left a TI controller dead.)
+Three files can be open at once, whatever devices they are on; a TIPI's own limit I do not know.
+
+**The clock.** `CLKGET` reads `PI.CLOCK` and fills `DTDOW DTMON DTDAY DTYEAR` (two digits: add 2000) `DTHOUR DTMIN DTSEC`; R0 = 0, or the DSR's error (`>FF`: there is no TIPI), or 1 for a record that is too short. It borrows file handle 2:
+
+```
+       BL   @CLKGET
+       MOV  R0,R0
+       JNE  NOCLK             no TIPI, or no clock
+       MOV  @DTHOUR,R1        the hour, 0-23
+       MOV  @DTYEAR,R2
+       AI   R2,2000           the year
+```
+
+**[TI]** `programs/clock.a99` on the workbench disk shows the date and time (ENTER reads it). **[PC]** the same code builds with `skbuild.py`. **Tested** against a model of a TIPI in the simulator (a second card with its own power-up, `PI.` files, a clock); **not** against a real TIPI's DSR.
+
 ## 10. Time
 
 The main loop runs: *wait for the frame, poll the keyboard, take one key, call `TICK`.* One
@@ -850,7 +878,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 
 1. **Registers across calls.** Check each callee's "Uses" (`PUTS` R0-R7, `DECW` R0-R8, `KIDLE` R0-R7 and
    R12, a DSR call R0-R9). Keep loop state in memory.
-2. **`.leave` clobbers the flags.** Test a result register after the call.
+2. **`.leave` clobbers the flags, and so does every load** (`LI`, `MOV`, `AI`): compare, then load. (Reversi's winner message jumped on the flags of an `LI` and told you that you had won a game you lost 10 to 54.)
 3. **`R0` is not an index register; `MOVB` leaves the low byte; `SLA Rn,0` shifts by R0.**
 4. **`EVEN` after byte data** (or a code label lands on an odd address); count `TEXT` lengths or use `STRI`.
 5. **Jumps reach about 128 words**: when one goes out of range, invert the condition around a `B @label`.
@@ -870,8 +898,10 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 15. **Slot A is 7K.** If you need more, it is a SAMS page.
     **Music steps with the frames you let through**: a long loop that never calls `KIDLE` (or returns to the main loop) stalls the song.
 16. **It works in the simulator** is the beginning of a test, not the end: js99er, then the real machine.
+17. **Say which registers your own routines keep.** Reversi's square-drawing routine used R9 and ended its caller's loop after one square; a routine of yours that is called in a loop should `.push`/`.pop` what it touches or say it does not.
+18. **Test against a model.** `examples/reversi`'s disc count ran across the board's border cells and passed every rules test; only a whole game compared with a Python model's scores found it (`tests/reversi_model.py`).
 
-## 15. What the kernel does not do (version 1.5)
+## 15. What the kernel does not do (version 1.6)
 
 
 **[TI]** adds its own limits (the table above): one module of up to 4,096 bytes at `>C000`; no `data` pages, no music compiled at build (`MUPLAY` needs a song in pages; `SNDTONE` works), no databank of your own, no user macros or forward `EQU`, no cartridge image; variables in `APPRAM+5760` and above, so a program does not
@@ -884,6 +914,7 @@ overwrite the workbench's own state (WORKBENCH.md part 5).
   ancestor of this kernel; see FROM-PRESS.md).
 - At most three files open at once (the controller's three buffers); no relative-record files beyond what the PAB offers, no file-size query.
 - Joysticks are read, but only as direction-and-fire switches (no analog, no presence test, no calibration).
+- A TIPI is reached through the file service (any `PI.` name) and `CLKGET`; there is no catalog of a TIPI directory, no URL or network access, and its open-file limit is unknown to me.
 - No cooperative multitasking: one module's `TICK` runs at a time.
 
 ## Appendix: a second module in five minutes
@@ -894,3 +925,24 @@ overwrite the workbench's own state (WORKBENCH.md part 5).
 3. In `main.a99`'s `TICK`: on `CI R0,>8100` (CTRL A) do `LI R0,PG_ABOUT / CLR R1 / BL @GOMOD`.
 4. Build and run. In the first module, make `INIT` redraw everything from slot A state, because it runs
    again when you come back.
+
+## Appendix: a whole program, Reversi
+
+**[PC or TI]** `examples/reversi/revers.a99` is Reversi against the computer: one module of 3,392 bytes (the TI route's limit is 4,096), so it builds on a PC (`python3 tools/skbuild.py examples/reversi`) and assembles on the TI (it is on the workbench disk: `N`, `REVERS/A99`, `A`, `R`).
+
+![Reversi: the board painted with attributes, hints on](images/reversi.png)
+
+What to read in it, by part of this guide:
+
+| Part | Where in `revers.a99` |
+| --- | --- |
+| 3, 4 The module, registers | the entry table, `INIT` and `TICK`; every routine's header says what it uses and keeps (`FLIPN` keeps R8-R9, `DRAWSQ` keeps R9) |
+| 5 The screen | the board is **attributes**: `DRAWSQ` fills five cells a row with `FILLA`, colours come from roles (`RBARBG`, `RDIM` for the squares, `RBOLD` and `RERROR` for the two players, `RACCNT` for the cursor), so `C` (`SETSCH`) recolours it without a redraw; the hint bullets are `PUTC` |
+| 6 The keyboard, joysticks | `TICK` reads the arrows and ENTER; `JOYKEY` is set once in `INIT` and joystick 1 then types them for it |
+| 7 Memory | its variables are at `APPRAM+5760` (clear of the workbench's state on the TI route) |
+| 9 Files | `SAVEG` and `LOADG`: one 66-character record on `DSK1.REVERSI`, checked on reading |
+| 10 Time | the computer waits 25 frames before it answers (`WAITF` counted in `TICK`), tones last six frames (`SNDCT`), the seed comes from the frame counter and every key |
+
+The rules are a 10 by 10 board with a border of 3s, so a line is followed by adding a step (`-11 -10 -9 -1 1 9 10 11`) until the cell is not the opponent's: `FLIPN` counts the discs a move would flip, or makes the move. Level 2 picks the legal move with the best weight plus flips (`WEIGHT`, a table that likes corners and dislikes the squares beside them); level 1 picks a legal move at random (each legal move replaces the choice with chance 1 in the number seen so far). It does not look ahead, so it is a beatable opponent.
+
+**Tested** by `test_kernel.py reversi`: 76,800 cell checks and 1,200 moves from random games, and the computer's two levels, against `tests/reversi_model.py`; a whole game of 29 of your moves played through the keyboard, ending in the model's board and scores and the right message; the joystick; hints and level; save and open. `reversiti` assembles it on the simulated TI (byte for byte as xas99) and plays a move there. **Not tried:** a real TI; the colours in the four schemes other than the default (the discs and squares are roles, so contrast changes with the scheme).

@@ -266,7 +266,11 @@ FC100  DATA 100
 * is not used: it needs the GPL environment the kernel does not keep.
 DSRLNK .enter
        MOV  R10,@FSR10
-       MOV  @>8356,R0
+       MOV  @FDPWR,R0          every card powered up yet?  (once)
+       JNE  DLSTRT
+       SETO @FDPWR
+       BL   @DSRPWR
+DLSTRT MOV  @>8356,R0
        BL   @VRAD
        MOVB @VDPRD,R3          full name length
        SRL  R3,8
@@ -319,31 +323,6 @@ DLNM1  CB   *R6+,*R2+
        DEC  R7
        JNE  DLNM1
        MOV  R12,@FDCRU         the card holding it
-       MOV  @FDPWR,R0          the controller's power-up, once
-       JNE  DLCALL             done already?
-       SETO @FDPWR             (once)
-       LI   R0,>3FFF           VRAM's top, before the power-up
-       MOV  R0,@>8370
-       MOV  @>8354,@FD54       kept: the power-up may change them
-       MOV  @>8356,@FD56
-       MOV  @>83D0,@FDD0
-       MOV  @>83D2,@FDD2
-       LI   R2,>4004           the card's power-up list
-       MOV  *R2,R2
-       JEQ  DLCALL             none?
-       INCT R2
-       MOV  *R2,@FDENT         its routine
-       LWPI GPLWS              the GPL workspace, as the console's DSRLNK
-       BL   @DLGPL             call it
-       JMP  DLPU1              (the return after it)
-DLPU1  LWPI WS
-       MOV  @>8370,@FD70       the bottom of the controller's buffers
-       MOV  @FD54,@>8354       put back what it may change
-       MOV  @FD56,@>8356
-       MOV  @FDD0,@>83D0
-       MOV  @FDD2,@>83D2
-       MOV  @FDCRU,R12         the card again
-       SBO  0                  its ROM on
 DLCALL MOV  R9,@FDENT          the device's routine
        LWPI GPLWS              the GPL workspace
        BL   @DLGPL             call it
@@ -371,6 +350,55 @@ DLNONE LI   R0,>00FF           >FF: no such device
 DLOUT  MOV  @FSR10,R10         our stack back
        .leave
        RT
+* DSRPWR - run the power-up routines of every card, as the console does when
+* it starts (the kernel has reset VRAM since, so the controller's buffers at
+* the top of VRAM must be made again): VRAM's top is set to >3FFF, then each
+* card in CRU order (>1000 up) with a valid header has its power-up list run,
+* and the bottom the buffers reached is kept (FD70).  A TIPI at >1000 and a
+* TI controller at >1100 are both powered, whichever is used first.  Uses R0-R3,
+* R12.
+DSRPWR .enter
+       MOV  @>8354,@FD54       what a power-up may change, kept
+       MOV  @>8356,@FD56
+       MOV  @>83D0,@FDD0
+       MOV  @>83D2,@FDD2
+       LI   R0,>3FFF           VRAM's top, before the power-ups
+       MOV  R0,@>8370
+       LI   R12,>0F00
+PW1    MOV  R12,R12
+       JEQ  PW2
+       SBZ  0                  the last card off
+PW2    AI   R12,>0100
+       CI   R12,>2000
+       JEQ  PWEND
+       MOV  R12,@FDCRU
+       SBO  0                  this card's ROM on
+       LI   R2,>4000
+       CB   *R2,@HAA           a valid header?
+       JNE  PW1
+       MOV  @>4004,R2          its power-up list
+PW3    MOV  R2,R2
+       JEQ  PW1                (the list's end: the next card)
+       MOV  R2,@FDPW2
+       INCT R2
+       MOV  *R2,@FDENT         the routine
+       LWPI GPLWS              the GPL workspace, as the console's DSRLNK
+       BL   @DLGPL             call it
+       JMP  PW4                (the return after it)
+PW4    LWPI WS
+       MOV  @FDCRU,R12         the card again, its ROM on
+       SBO  0
+       MOV  @FDPW2,R2
+       MOV  *R2,R2             the next entry of the list
+       JMP  PW3
+PWEND  MOV  @>8370,@FD70       the bottom of the controller's buffers
+       MOV  @FD54,@>8354       put back what a power-up may change
+       MOV  @FD56,@>8356
+       MOV  @FDD0,@>83D0
+       MOV  @FDD2,@>83D2
+       .leave
+       RT
+
 * DLGPL - (entered after LWPI GPLWS, so R9 R12 R13 R15 here are the GPL
 * workspace's) call the DSR entry in FDENT as the console's GPL would:
 * R12 = the ROM's CRU base, R13 = >9800 (GROM read), R15 = >8C02 (VDP
@@ -383,3 +411,96 @@ DLGPL  MOV  @FDCRU,R12
 HAA    BYTE >AA
 DOT    BYTE '.'
        EVEN
+
+*----------------------------------------------------------------------
+* the clock: TIPI's PI.CLOCK
+*----------------------------------------------------------------------
+* CLKGET - read TIPI's clock (the device PI.CLOCK, one record
+* "w,mm/dd/yy,HH:MM:SS":
+* the form of the Corcomp clock) into the words DTDOW DTMON DTDAY DTYEAR (two
+* digits) DTHOUR DTMIN DTSEC (0 if the record has no seconds).  R0 = 0 if it
+* worked; else the DSR's error (>FF: there is no such device, no TIPI) or 1 (a
+* record too short), and the words are 0.  It uses file handle 2 for a moment
+* and puts the selected handle back: do not call it while handle 2 holds an
+* open file of yours.  It is slow on a real TIPI (it asks the Pi).  Uses R0-R9.
+CLKGET .enter
+       LI   R1,DTDOW
+       LI   R2,7
+CG0    CLR  *R1+
+       DEC  R2
+       JNE  CG0
+       MOV  @FSELH,R0
+       .push R0                the caller's handle, kept
+       LI   R0,2
+       BL   @FSEL
+       LI   R2,CLKNM
+       LI   R0,FIN+FVAR
+       CLR  R1                 the record length: the device's own
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  CG8                no clock: its error
+       AI   R10,-80            a buffer on the stack
+       MOV  R10,R1
+       BL   @FREAD             R0 = 0 or an error; R2 = the record's length
+       MOV  R0,R0
+       JNE  CG7
+       MOV  R2,R6
+       CI   R6,17              "w,mm/dd/yy,HH:MM" at least
+       JL   CG6
+       MOV  R10,R1
+       MOVB *R1+,R0            the day of the week
+       SRL  R0,8
+       AI   R0,-48
+       MOV  R0,@DTDOW
+       INC  R1                 ','
+       BL   @CK2D
+       MOV  R0,@DTMON
+       INC  R1                 '/'
+       BL   @CK2D
+       MOV  R0,@DTDAY
+       INC  R1
+       BL   @CK2D
+       MOV  R0,@DTYEAR
+       INC  R1                 ','
+       BL   @CK2D
+       MOV  R0,@DTHOUR
+       INC  R1                 ':'
+       BL   @CK2D
+       MOV  R0,@DTMIN
+       CI   R6,19
+       JL   CG5
+       INC  R1                 ':'
+       BL   @CK2D
+       MOV  R0,@DTSEC
+CG5    CLR  R0
+       JMP  CG7
+CG6    LI   R0,1
+       LI   R1,DTDOW           (nothing usable: the words stay 0)
+       LI   R2,7
+CG6A   CLR  *R1+
+       DEC  R2
+       JNE  CG6A
+CG7    AI   R10,80
+       .push R0
+       BL   @FCLOSE
+       .pop R0
+CG8    .pop R3
+       MOV  R3,@FSELH
+       .leave
+       RT
+CLKNM  STRI 'PI.CLOCK'
+       EVEN
+
+* CK2D - the two decimal digits at R1 into R0, R1 past them.  Leaf.  Uses R0-R2.
+CK2D   MOVB *R1+,R0
+       SRL  R0,8
+       AI   R0,-48
+       MOV  R0,R2
+       SLA  R0,3
+       SLA  R2,1
+       A    R2,R0              tens * 10
+       MOVB *R1+,R2
+       SRL  R2,8
+       AI   R2,-48
+       A    R2,R0
+       RT
