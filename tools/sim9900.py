@@ -236,8 +236,8 @@ class Machine:
                 i = (addr - 0x4000) >> 1
                 if self.wide_regs:       # a card of more than 1M: 12 bits, the even byte the low 8, the odd byte bits 8-11 (as js99er)
                     self.map[i] = (self.map[i] & 0x0FF) | ((val & 0x0F) << 8) if addr & 1 else (self.map[i] & 0xF00) | val
-                else:
-                    self.map[i] = val & 0xFF
+                elif not addr & 1:       # a card of 1M: the even byte is the page; the odd byte is ignored
+                    self.map[i] = val
             elif self.tifdc is not None and self.tifdc.rom_on:
                 self.tifdc.write(addr, val)
             return

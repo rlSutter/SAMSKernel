@@ -39,9 +39,10 @@ PAGEC  .enter
 *   R0 = page (0-255), R1 = window (0-15)
 * Uses R2, R3, R12.  Leaf.  Does not update CURPA/B/C: use it for windows
 * you track yourself; PAGEB, MAPE and MAPF track slot B.
-MAPPG  MOV  R0,R2              build (page<<8)|page: the card latches one byte
-       SLA  R2,8
-       SOC  R0,R2
+MAPPG  MOV  R0,R2              the page in the high byte (the even address):
+       SLA  R2,8               the low byte (bits 8-11 of a big card's page)
+*                              stays 0, so the page is exactly R0 on a card of
+*                              any size
        MOV  R1,R3              window number ...
        SLA  R3,1               ... times two = register offset
        AI   R3,AMSREG          register address

@@ -17,13 +17,16 @@ python3 tools/skdisk.py work.dsk --kernel-equ build/workbench/kernel.equ example
                                                      a disk image holding KERNEL/EQU and your sources
 ```
 
-`images/workbench8.bin` and `images/workbench.dsk` in the distribution are these, prebuilt (the disk holds KERNEL/EQU, hello, music, modes and a probe source). Put the cartridge image where your cartridge
+`images/workbench8.bin` and `images/workbench.dsk` in the distribution are these, prebuilt (the disk holds KERNEL/EQU, hello, beep, modes and a probe source). Put the cartridge image where your cartridge
 device wants it, and the disk in DSK1 (a TIPI, a CF7+ or a floppy; how the image gets there depends on your hardware, and I have tried none of them). **KERNEL/EQU must come from the same build as the
 workbench cartridge**: it holds the addresses of the kernel's routines and equates in that build, and a program assembled against another build's addresses will not run.
 
 The disk image is single-sided single-density (90K), the format TI's own controller and the simulator use. I have not tried it in js99er, whose disk controller setting matters (a double-density "Generic Disk" setting reads other images than TI's own); if it does not read it, make the disk in the format your setup wants.
 
 You need the same machine as for any SAMS Kernel program: an F18A and 512K of SAMS.
+
+**What can be assembled here.** KERNEL/EQU holds the kernel's symbols and the workbench's own (`PG_WB`, `PG_ASM`, `PGUSER`...). A source that needs equates only another application's build has cannot assemble: `examples/music` uses
+`PD_TUNE` and `PD_SCALE`, the pages its songs are built into, so it is not on the workbench disk (`beep` is the sound example there). `tests/test_kernel.py nativedisk` checks that everything on the disk assembles.
 
 ## 2. The menu
 

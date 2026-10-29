@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 native nativemods workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 native nativemods nativedisk workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -156,6 +156,9 @@ def sams16():
     m, cpu, halt = sim9900.run(c, keys='<C-t><WAIT 700>', frames=1000, pages=4096, setup=wide)
     ln = [l.strip() for l in lines(m)[2:12] if l.strip()]
     check(halt is None and ln and all('PASS' in l for l in ln[:8]) and '256' in ln[0], '16M card: the self-test passes and the kernel uses 256 pages: %s' % ln[0])
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 10><F-=>', frames=400, pages=4096, setup=wide)
+    r = getattr(m, 'at_reset', None)
+    check(halt is None and r is not None and not r[2], '16M card: FCTN = resets the console with the mapping off (the kernel runs on to the reset): halt %s, reset %s' % (halt, r is not None))
 
 def rom_music():
     import skmusic
@@ -392,6 +395,22 @@ def nativemods():
         r = asmharness.assemble(src, app, extra)
         check(r.errors == 0 and r.image == want, '%s: %d bytes assembled on the TI, identical to xas99 (errors %d)' % (mod, len(want), r.errors))
 
+def nativedisk():
+    """What the workbench's demonstration disk holds must assemble with the workbench's own KERNEL/EQU (a source that
+    needs equates only another app's build has, like examples/music's song pages, must not be on it); and beep runs."""
+    import asmharness
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    for src in DISK_SOURCES:
+        r = asmharness.assemble(os.path.join(ROOT, src), 'workbench')
+        check(r.errors == 0, '%s assembles against the workbench\'s own KERNEL/EQU: %d bytes, errors %d %s' % (src, r.length, r.errors, [(l, c & 255) for l, c in r.errtab][:3]))
+    m, img = asmharness.workbench_ui('<WAIT 10>nBEEP/A99<ENTER><WAIT 10>a<WAIT 3500>r<WAIT 80>6<WAIT 40>', 4200, [os.path.join(ROOT, 'examples/workbench/programs/beep.a99')])
+    b = [x for (src, i, x) in m.chip_log if src == 'cpu']
+    check(b[-3:] == [0x8E, 0x0F, 0x90], 'beep, assembled and run on the TI: key 6 plays A on voice 1 (SNDTONE: >8E >0F >90): %s' % [hex(x) for x in b[-3:]])
+
+DISK_SOURCES = ['examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/modes/modes.a99', 'tests/asm/probe1.a99']
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -532,7 +551,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

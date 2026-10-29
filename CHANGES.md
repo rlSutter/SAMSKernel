@@ -1,5 +1,11 @@
 # Changes
 
+## 1.3.1 (29 October 2026)
+
+- **Fix: QUIT on a SAMS of more than 1M.** The page registers were written with the page in both bytes of the word; on a 12-bit card the odd byte is bits 8-11, so identity-mapped page *p* was not page *p*, and switching the mapping off at quit moved the
+  kernel's own code out from under it (found by running the 1.3.0 images on a 16M card in js99er: everything worked until QUIT). `MAPPG` and `AMSINI` now write the page in the high byte only. The simulator models 12-bit registers (`tests/test_kernel.py sams16`).
+- **Fix: the workbench disk.** It held `MUSIC/A99`, which needs `PD_TUNE` and `PD_SCALE` (data pages of the music app's own build): two undefined symbols on the workbench. The disk now holds hello, `beep` (a new program for the workbench), modes and a probe source, and the test group `nativedisk` checks that all of them assemble and that beep plays its note.
+
 ## 1.3.0 (29 October 2026)
 
 Building on the TI: `examples/workbench`, with a native assembler, an editor and a launcher (docs/WORKBENCH.md).

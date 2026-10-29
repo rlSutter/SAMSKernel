@@ -1,0 +1,73 @@
+*======================================================================
+* beep.a99 - a program for the workbench's disk: keys 1-8 play the notes
+* C D E F G A B C on voice 1 (SNDTONE), 0 silences it, FCTN 9 (BACK)
+* returns to the workbench, FCTN = quits.  It needs nothing but the
+* workbench's own KERNEL/EQU: assemble it with A, run it with R.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SHELP
+       LI   R2,ANORM
+       BL   @PUTS
+       .leave
+       RT
+
+TICK   .enter
+       MOV  R0,R9
+       JEQ  T9
+       CI   R9,KQUIT*256
+       JNE  T1
+       BL   @SNDOFF
+       SETO @QUITF
+       JMP  T9
+T1     CI   R9,KBACK*256
+       JNE  T2
+       BL   @SNDOFF
+       LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R9,>3000           the keys 0-8
+       JL   T9
+       CI   R9,>3800
+       JH   T9
+       AI   R9,->3000
+       SRL  R9,8
+       JEQ  TOFF
+       DEC  R9
+       SLA  R9,1
+       MOV  @DIVS(R9),R1       the divider of the note
+       CLR  R0                 voice 1
+       CLR  R2                 loudest
+       BL   @SNDTONE
+       JMP  T9
+TOFF   BL   @SNDOFF
+T9     .leave
+       RT
+
+DIVS   DATA 428,381,339,320,285,254,226,214
+STITLE STRI ' Beep   a program made on the TI'
+SHELP  BYTE SHELPE-SHELPB
+SHELPB TEXT '1-8 play C D E F G A B C   0 silence   FCTN 9 back to th'
+       TEXT 'e workbench'
+SHELPE
+       EVEN

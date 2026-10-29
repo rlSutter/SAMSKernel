@@ -184,9 +184,10 @@ VDP RAM or GROM (pointer `>83CC`, duration `>83CE`, flag bit 0 of `>83FD`); `>83
 ## SAMS
 
 **Cards of more than 1M (a 16M SAMS).** The kernel numbers pages 0-255 (it keeps them in a byte), so it uses the first 1M of such a card and ignores the rest; `AMSSIZ` reports 256. Page registers are 12 bits on a big card (as js99er models it:
-the even byte is the low 8 bits, the odd byte bits 8-11), and `MAPPG` and `AMSINI` write the page in *both* bytes. On a 1M card the extra bits are ignored; on a 16M card they turn page *p* into the physical page `(p AND >F) * 256 + p`, a
-different but still one-to-one choice, so every page the kernel uses is still a separate page of RAM. In the simulator's model of a 16M card (test group `sams16`) the kernel boots and its self-test passes. **Not tried on a real 16M card or in
-js99er's 16M setting.** If it fails there, the first things to look at are those register writes (`MAPPG`, `AMSINI` in kernel/pager.a99 and amsinit.a99) and `AMSSIZ`.
+the even byte is the low 8 bits, the odd byte bits 8-11), so the kernel writes a page number in the high (even) byte only and leaves the low byte 0: the page is then exactly the number given, on a card of any size. **Until 1.3.1 it wrote the page in both
+bytes**, which on a big card turned page *p* into page `(p AND >F) * 256 + p`; the kernel ran, but when it quit and switched the mapping off, the card put its real page >A back in the window the kernel's own code was running in, and the code vanished (found on a 16M card in
+js99er, 29 October 2026; the simulator's model of a 12-bit card, test group `sams16`, reproduces it and now passes, including the quit). Not tried on a real 16M card; on the cards that were tried (1M, in Press and the Lantern Coast) the odd byte was ignored, so
+this does not change them. Pages above 255 are not used.
 
 Registers are words at `>4000 + 2 x window` while CRU `>1E00` bit 0 is set; each latches one byte, so a word
 is written as (page << 8) | page. CRU bit 1 turns mapping on. The loader maps the identity (page n at window n)
