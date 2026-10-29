@@ -515,7 +515,10 @@ STITLE STRI ' SAMS Kernel   workbench'
 SFILE  STRI 'File:'
 SDSK   STRI 'DSK1.'
 SH1    STRI 'N  type a file name          C  the catalog of the disk'
-SH2    STRI 'E  edit the file             A  assemble it         R  run the program'
+SH2    BYTE SH2E-SH2B
+SH2B   TEXT 'E  edit the file             A  assemble it         R  r'
+       TEXT 'un the program'
+SH2E
 SH3    STRI 'FCTN =  quit'
 SOK    STRI 'Assembled:'
 SBYTES STRI 'bytes at >'

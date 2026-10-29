@@ -74,6 +74,8 @@ MCALLM .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        BL   @LOOKUP
        MOV  R0,@TMPW
        LI   R0,>06A0
@@ -82,7 +84,7 @@ MCALLM .enter
        BL   @EMITW
        .leave
        RT
-MODNM  TEXT 'MODCALL '
+MODNM  TEXT 'MODCALL     '
 
 *----------------------------------------------------------------------
 * a statement
@@ -140,6 +142,8 @@ ASMLINE .enter
        MOV  @NAMLEN,@LABLEN
        LI   R1,NAMBUF
        LI   R2,LABNM
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+

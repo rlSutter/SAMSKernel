@@ -9,7 +9,7 @@ LOOKUP .enter
        MOV  R1,R1
        JGT  LKFND
        JMP  LKNO
-LKFND  MOV  @8(R5),R0
+LKFND  MOV  @12(R5),R0
        JMP  LK9
 LKNO   SETO @UNRES
        CLR  R0
@@ -98,7 +98,7 @@ TDLR   INC  R8
        JMP  T9
 TNAM   BL   @GETNM
        MOV  @NAMLEN,R0
-       CI   R0,8
+       CI   R0,12
        JLE  TN1
        LI   R0,E_LEN
        BL   @ERR
@@ -348,6 +348,8 @@ DEFLAB .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  @PASS,R0
        CI   R0,1
        JNE  DL2
@@ -359,7 +361,7 @@ DL2    BL   @FINDSYM
        MOV  R1,R1
        JGT  DL3
        JMP  DL9
-DL3    C    @8(R5),@LC
+DL3    C    @12(R5),@LC
        JEQ  DL9
        LI   R0,E_PHS
        BL   @ERR

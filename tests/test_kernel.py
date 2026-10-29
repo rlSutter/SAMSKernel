@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg native nativemods workbench boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -338,6 +338,95 @@ def music():
     ev2, _ = skmusic.decode(skm2, 2)
     check(lp != 0xFFFF and lp > 8 and len(ev2) > len(ev), 'compiler: loop-at one second makes a loop target (offset %d) and the second pass replays from there' % lp)
 
+def native():
+    """The assembler that runs on the TI (examples/workbench/asm.a99), checked against xas99: the probe
+    sources byte for byte, a broken source error for error, and the encodings xas99 gets wrong."""
+    import asmharness
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    X = os.environ.get('XAS99', os.path.join(ROOT, 'xdt99', 'xas99.py'))
+    def xas(src):
+        out = '/tmp/sk_native.bin'
+        r = subprocess.run([sys.executable, X, '-R', '-b', '-I', os.path.join(ROOT, 'kernel'), '-o', out, src], capture_output=True, text=True)
+        if r.returncode: sys.exit(r.stdout + r.stderr)
+        return open(out, 'rb').read()
+    for name in ('probe1', 'probe2'):
+        src = os.path.join(ROOT, 'tests', 'asm', name + '.a99')
+        r = asmharness.assemble(src, 'hello')
+        want = xas(src)
+        check(r.errors == 0 and r.image == want, '%s: every instruction form, directive and macro: %d bytes, byte for byte as xas99 (errors %d)' % (name, len(want), r.errors))
+    r = asmharness.assemble(os.path.join(ROOT, 'tests', 'asm', 'errors.a99'), 'hello')
+    found = sorted(set((l, c & 255) for l, c in r.errtab))
+    want = [(3, 1), (4, 2), (5, 3), (6, 4), (7, 5), (10, 7), (13, 2), (15, 11), (17, 12)]
+    check(all(w in found for w in want), 'errors.a99: unknown operation, bad operand, undefined symbol, duplicate label, jump range, missing file, R0 index, bad list, EQU without label are all found: %s' % [w for w in want if w not in found])
+    check((14, 10) in found and (8, 6) in found and (9, 6) in found and (16, 6) in found,
+          'errors.a99: and what xas99 lets through: a long label, SBO 200, SLA 16, BYTE 300')
+    open('/tmp/ldcr.a99', 'w').write('       AORG >C000\n       LDCR R1,16\n       STCR R1,16\n       LDCR R1,1\n')
+    r = asmharness.assemble('/tmp/ldcr.a99', 'hello')
+    check(r.image.hex() == '300134013041', 'LDCR with 16 bits is >3001 (xas99 makes it >3401, an STCR): %s' % r.image.hex())
+
+def nativemods():
+    """Every example module, assembled on the simulated TI from its source on a disk: identical to xas99's."""
+    import asmharness
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    mods = [('hello', 'hello', 'hello', ()), ('music', 'music', 'music', ()), ('browser', 'browse', 'browser/browse.a99', ('browser/shared.a99',)),
+            ('browser', 'view', 'browser/view.a99', ('browser/shared.a99',)), ('modes', 'modes', 'modes/modes.a99', ()),
+            ('diag', 'diag', 'diag/diag.a99', ()), ('diag', 'tests', 'diag/tests.a99', ())]
+    for app, mod, src, extra in mods:
+        src = os.path.join(ROOT, 'examples', src if '/' in src else src + '/' + src + '.a99')
+        extra = [os.path.join(ROOT, 'examples', e) for e in extra]
+        build(app)
+        want = open(os.path.join(ROOT, 'build', app, mod + '.bin'), 'rb').read()
+        r = asmharness.assemble(src, app, extra)
+        check(r.errors == 0 and r.image == want, '%s: %d bytes assembled on the TI, identical to xas99 (errors %d)' % (mod, len(want), r.errors))
+
+def workbench():
+    """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
+    assemble it, run it."""
+    import asmharness, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    open('/tmp/t1.txt', 'w').write('first\nsecond\nthird\n')
+    pre = '<WAIT 10>nT1/TXT<ENTER><WAIT 10>e<WAIT 300>'
+    def ed(k, frames=720):
+        m, img = asmharness.workbench_ui(pre + k + '<WAIT 20>', frames, ['/tmp/t1.txt'])
+        return asmharness.editor_lines(m), m, img
+    L, m, img = ed('XY')
+    check(L == ['XYfirst', 'second', 'third'], 'editor: typing inserts: %s' % L)
+    L, m, img = ed('<F-2>ZZ')
+    check(L[0] == 'ZZrst', 'editor: FCTN 2 switches to overwriting: %s' % L[0])
+    L, m, img = ed('XY<F-x><F-5><F-d><F-d><ENTER>')
+    check(L == ['XYfirst', 'se', 'cond', 'third'], 'editor: ENTER splits a line: %s' % L)
+    L, m, img = ed('XY<F-x><F-5><F-d><F-d><ENTER><C-h>')
+    check(L == ['XYfirst', 'second', 'third'], 'editor: CTRL H at the start of a line joins it to the one before: %s' % L)
+    L, m, img = ed('<F-x><F-3>')
+    check(L == ['first', 'third'], 'editor: FCTN 3 deletes the line: %s' % L)
+    L, m, img = ed('<F-d><F-1><F-1>')
+    check(L[0] == 'fst', 'editor: FCTN 1 deletes characters: %s' % L[0])
+    L, m, img = ed('<F-6>Q<F-5>P')
+    check(L[0] == 'PfirstQ', 'editor: BEGIN and PROC\'D go to the ends of the line: %s' % L[0])
+    L, m, img = ed('<F-e><F-e><F-s><F-8><F-7>')
+    check(L == ['first', 'second', 'third'], 'editor: moving past the ends changes nothing')
+    L, m, img = ed('XY<F-x><F-5><F-d><F-d><ENTER><C-h><F-x><F-3><WAIT 20><C-s><WAIT 120>', 1300)
+    check(tifdc.read_file(img, 'T1/TXT') == [b'XYfirst', b'second'], 'editor: CTRL S writes the file: %s' % tifdc.read_file(img, 'T1/TXT'))
+    m, img = asmharness.workbench_ui('<WAIT 10>c<WAIT 120><F-x><WAIT 20><ENTER><WAIT 20>', 400, ['/tmp/t1.txt'])
+    check(bytes(m.rb(0x2300 + 1 + i) for i in range(11)).startswith(b'DSK1.T1/TXT'), 'catalog: UP and DOWN pick a file and ENTER makes it the file name: %s' % bytes(m.rb(0x2300 + i) for i in range(16)))
+    # the whole round
+    prog = ['       COPY "kernel.equ"', '       COPY "macros.a99"', '       AORG >C000', '       DATA INIT,TICK,INIT,0',
+            'INIT   .enter', '       LI   R0,2*COLS+2', '       LI   R1,MSG', '       LI   R2,(RTEXT*16+RBG)*256',
+            '       BL   @PUTS', '       .leave', '       RT', 'TICK   RT', "MSG    STRI 'Built on the TI'"]
+    keys = '<WAIT 10>nNEW1<ENTER><WAIT 10>e<WAIT 300>' + '<ENTER>'.join(prog) + '<WAIT 30><C-a><WAIT 2500>r<WAIT 150>'
+    m, img = asmharness.workbench_ui(keys, 9000)
+    ln = sim9900.screen(m).split('\n')
+    rec = tifdc.read_file(img, 'NEW1')
+    check(rec and rec[0] == b'       COPY "KERNEL.EQU"' and len(rec) == 13, 'typed in the editor and saved to the disk as NEW1 (13 lines)')
+    check(m.rw(0x2300 + 526) == 0 and m.rw(0x2300 + 524) == 50, 'CTRL A saved and assembled it on the TI: no errors, 50 bytes')
+    check(ln[2].strip() == 'BUILT ON THE TI', 'R ran it, in SAMS pages, as a module: its screen says %r' % ln[2].strip())
+
 def modes():
     """Every display mode: the modes demo application (examples/modes) run in the
     simulator, each screen drawn by tools/f18render.py and its pixels checked."""
@@ -422,7 +511,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('native', native), ('nativemods', nativemods), ('workbench', workbench), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

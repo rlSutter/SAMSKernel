@@ -109,6 +109,7 @@ def problems(path):
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     files = args or sorted(glob.glob(os.path.join(ROOT, 'kernel', '*.a99')) + glob.glob(os.path.join(ROOT, 'examples', '*', '*.a99')))
+    files = [g for f in files for g in (sorted(glob.glob(os.path.join(f, '*.a99'))) if os.path.isdir(f) else [f])]
     bad = 0
     for f in files:
         if '--fix' in sys.argv:

@@ -35,7 +35,7 @@ UNRES  EQU  APPRAM+530         an expression used a symbol not yet defined
 DEPTH  EQU  APPRAM+532         COPY depth, 0 = the main file
 ENDF   EQU  APPRAM+534         END seen
 NAMLEN EQU  APPRAM+536         length of the name last scanned
-NAMBUF EQU  APPRAM+538         10 bytes: the name, upper case, 8 characters
+NAMBUF EQU  APPRAM+538         12 bytes: the name, upper case, 12 characters
 OPT    EQU  APPRAM+550         operand type Ts (2 words)
 OPS    EQU  APPRAM+554         operand register S (2 words)
 OPE    EQU  APPRAM+558         operand extra word (2 words)
@@ -44,7 +44,7 @@ OPIDX  EQU  APPRAM+566         which operand (0 or 2)
 CLASS  EQU  APPRAM+568
 OPCODE EQU  APPRAM+570
 LABF   EQU  APPRAM+572         this line has a label
-LABNM  EQU  APPRAM+574         10 bytes: the label
+LABNM  EQU  APPRAM+574         12 bytes: the label
 COPYF  EQU  APPRAM+586         non-zero: the line was a COPY (name in INCNM)
 INCNM  EQU  APPRAM+588         24 bytes: the include's full name
 SAVEN  EQU  APPRAM+612         scratch
@@ -56,9 +56,9 @@ NAMES  EQU  APPRAM+744         4 file names of 24 bytes
 STRBUF EQU  APPRAM+848         a string being built (80 bytes)
 OUTBUF EQU  APPRAM+1024        the image: 4,096 bytes
 OUTMAX EQU  4096
-SYMBAS EQU  >E000              the symbol table: 800 slots of 10 bytes
-SYMEND EQU  >E000+8000
-NSYMS  EQU  800
+SYMBAS EQU  >E000              the symbol table: 580 slots of 14 bytes
+SYMEND EQU  >E000+8120
+NSYMS  EQU  580
 
 * error codes
 E_SYN  EQU  1                  unknown mnemonic or bad statement
@@ -70,7 +70,7 @@ E_VAL  EQU  6                  value out of range
 E_FIL  EQU  7                  file not found or unreadable
 E_OVF  EQU  8                  image over 4,096 bytes
 E_ORG  EQU  9                  bad AORG
-E_LEN  EQU  10                 name longer than 8 characters
+E_LEN  EQU  10                 name longer than 12 characters
 E_EXP  EQU  11                 bad expression
 E_EQU  EQU  12                 EQU needs a label and a defined value
 E_PHS  EQU  13                 a label's value changed between the passes
@@ -129,6 +129,8 @@ GETNM  .enter
        MOV  R2,*R1+
        MOV  R2,*R1+
        MOV  R2,*R1+
+       MOV  R2,*R1+
+       MOV  R2,*R1+
        CLR  @NAMLEN
 GN1    CLR  R0
        MOVB *R8,R0
@@ -137,7 +139,7 @@ GN1    CLR  R0
        MOV  R1,R1
        JEQ  GN9
        MOV  @NAMLEN,R2
-       CI   R2,8
+       CI   R2,12
        JHE  GN2
        MOVB R0,@NAMBUF(R2)
 GN2    INC  @NAMLEN
@@ -250,14 +252,22 @@ FINDSYM .enter
        SLA  R1,1
        A    R1,R0
        A    @NAMBUF+6,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+8,R0
+       MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       A    @NAMBUF+10,R0
        MOV  R0,R2
        CLR  R1
        LI   R3,NSYMS
-       DIV  R3,R1              R2 = hash mod 800
+       DIV  R3,R1              R2 = hash mod 580
        MOV  R2,R5
-       SLA  R5,3
+       SLA  R5,4
        SLA  R2,1
-       A    R2,R5              slot * 10
+       S    R2,R5              slot * 14
        AI   R5,SYMBAS
        LI   R7,NSYMS
 FS1    MOVB *R5,R0
@@ -269,8 +279,12 @@ FS1    MOVB *R5,R0
        C    @4(R5),@NAMBUF+4
        JNE  FSNXT
        C    @6(R5),@NAMBUF+6
+       JNE  FSNXT
+       C    @8(R5),@NAMBUF+8
+       JNE  FSNXT
+       C    @10(R5),@NAMBUF+10
        JEQ  FSFND
-FSNXT  AI   R5,10
+FSNXT  AI   R5,14
        CI   R5,SYMEND
        JL   FS2
        LI   R5,SYMBAS
@@ -288,7 +302,7 @@ FS9    .leave
 * a full table is E_OVF.  Uses R0-R7.
 DEFSYM .enter
        MOV  @NAMLEN,R0
-       CI   R0,8
+       CI   R0,12
        JLE  DS0
        LI   R0,E_LEN
        BL   @ERRA
@@ -301,7 +315,9 @@ DS0    MOV  R4,@TMPW
        MOV  @NAMBUF+2,@2(R5)
        MOV  @NAMBUF+4,@4(R5)
        MOV  @NAMBUF+6,@6(R5)
-       MOV  @TMPW,@8(R5)
+       MOV  @NAMBUF+8,@8(R5)
+       MOV  @NAMBUF+10,@10(R5)
+       MOV  @TMPW,@12(R5)
        JMP  DS9
 DSDUP  MOV  @PASS,R0
        CI   R0,1
@@ -324,7 +340,7 @@ LOOKUP .enter
        MOV  R1,R1
        JGT  LKFND
        JMP  LKNO
-LKFND  MOV  @8(R5),R0
+LKFND  MOV  @12(R5),R0
        JMP  LK9
 LKNO   SETO @UNRES
        CLR  R0
@@ -413,7 +429,7 @@ TDLR   INC  R8
        JMP  T9
 TNAM   BL   @GETNM
        MOV  @NAMLEN,R0
-       CI   R0,8
+       CI   R0,12
        JLE  TN1
        LI   R0,E_LEN
        BL   @ERR
@@ -663,6 +679,8 @@ DEFLAB .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  @PASS,R0
        CI   R0,1
        JNE  DL2
@@ -674,7 +692,7 @@ DL2    BL   @FINDSYM
        MOV  R1,R1
        JGT  DL3
        JMP  DL9
-DL3    C    @8(R5),@LC
+DL3    C    @12(R5),@LC
        JEQ  DL9
        LI   R0,E_PHS
        BL   @ERR
@@ -1040,6 +1058,8 @@ DEQU   .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  @LABLEN,@NAMLEN
        BL   @DEFSYM
        JMP  DQ9
@@ -1229,6 +1249,8 @@ MCALLM .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        BL   @LOOKUP
        MOV  R0,@TMPW
        LI   R0,>06A0
@@ -1237,7 +1259,7 @@ MCALLM .enter
        BL   @EMITW
        .leave
        RT
-MODNM  TEXT 'MODCALL '
+MODNM  TEXT 'MODCALL     '
 
 *----------------------------------------------------------------------
 * a statement
@@ -1295,6 +1317,8 @@ ASMLINE .enter
        MOV  @NAMLEN,@LABLEN
        LI   R1,NAMBUF
        LI   R2,LABNM
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
@@ -1573,7 +1597,7 @@ AG1    CLR  *R1+
        JNE  AG1
        BL   @MAPSYM
        LI   R1,SYMBAS
-       LI   R2,4000
+       LI   R2,4096
 AG2    CLR  *R1+
        DEC  R2
        JNE  AG2

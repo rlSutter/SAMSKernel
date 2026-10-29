@@ -28,6 +28,9 @@ def equ_lines(path):
     out = []
     for m in re.finditer(r'^(\S+):\s*\n\s*equ\s+(>[0-9a-fA-F]+)', t, re.M):
         out.append('%-8s EQU  %s' % (m.group(1).upper(), m.group(2).upper()))
+    pg = re.search(r'^PGFREE\s+EQU\s+>([0-9A-F]+)', '\n'.join(out), re.M)
+    if pg and any(l.startswith('PG_ASM') for l in out):     # the workbench's own: where a program is run
+        out.append('%-8s EQU  >%X' % ('PGUSER', int(pg.group(1), 16) + 2))
     return '\n'.join(out) + '\n'
 
 

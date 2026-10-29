@@ -149,7 +149,7 @@ AG1    CLR  *R1+
        JNE  AG1
        BL   @MAPSYM
        LI   R1,SYMBAS
-       LI   R2,4000
+       LI   R2,4096
 AG2    CLR  *R1+
        DEC  R2
        JNE  AG2

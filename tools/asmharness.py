@@ -78,6 +78,8 @@ def assemble(source, kernel_app, extra=(), name=None, rom=None):
     m.vram  # (the machine is live)
     for i, b in enumerate(bytes([len(fname)]) + fname):
         m.wb(base + i, b)
+    pg = int(re.search(r'pg_asm:\s*equ\s+>([0-9a-f]+)', open(own_equ).read().lower()).group(1), 16)
+    m.map[0xC], m.map[0xD] = pg, pg + 1          # the assembler's pages in slot C, as MODCALL would put them
     r0 = call(m, cpu, syms['asmgo'])
     res = Result()
     res.errors = r0[0]
@@ -87,3 +89,37 @@ def assemble(source, kernel_app, extra=(), name=None, rom=None):
     res.errtab = [(m.rw(base + 640 + 4 * i), m.rw(base + 642 + 4 * i)) for i in range(min(res.errors, 24))]
     res.machine = m
     return res
+
+
+# ---- driving the workbench itself: keys in, screen and disk out -----------------------------------
+def workbench_ui(keys, frames, files=(), rom=None):
+    """Boot the workbench with a disk holding `files` (and KERNEL.EQU), play the key script; returns
+    (machine, the disk image as it ends)."""
+    import tifdc
+    cart, syms, own_equ = build_workbench()
+    d = tempfile.mkdtemp()
+    p = os.path.join(d, 'disk.dsk')
+    skdisk.make_disk(p, list(files), own_equ)
+    img = bytearray(open(p, 'rb').read())
+    box = {}
+
+    def setup(m):
+        box['fdc'] = tifdc.TIFDC(image=img)
+        m.tifdc = box['fdc']
+    m, cpu, halt = sim9900.run(cart, keys=keys, frames=frames, setup=setup, rom=rom)
+    if halt:
+        raise RuntimeError(halt)
+    return m, box['fdc'].image
+
+
+def editor_lines(m):
+    """The editor's buffer, line by line, read out of SAMS."""
+    pgfree = int(re.search(r'pgfree:\s*equ\s+>([0-9a-f]+)', open(os.path.join(ROOT, 'build', 'workbench', 'kernel.equ')).read().lower()).group(1), 16)
+    n = m.rw(0x2300 + 128)
+    o = m.ams[(pgfree + 20) * 4096:(pgfree + 20) * 4096 + 2 * n]
+    out = []
+    for i in range(n):
+        s = o[2 * i] << 8 | o[2 * i + 1]
+        pg, off = pgfree + 4 + s // 51, (s % 51) * 80
+        out.append(bytes(m.ams[pg * 4096 + off:pg * 4096 + off + 80]).rstrip().decode('latin-1'))
+    return out

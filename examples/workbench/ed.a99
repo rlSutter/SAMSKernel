@@ -30,12 +30,12 @@ EDFREE EQU  APPRAM+140         the next never-used slot
 EDNFR  EQU  APPRAM+142         slots on the free list
 EDLOAD EQU  APPRAM+144         non-zero: a buffer is loaded (its name in EDNAME)
 EDSURE EQU  APPRAM+146         CTRL X was pressed once with unsaved changes
-EDT    EQU  APPRAM+148         scratch words (6)
+EDT    EQU  APPRAM+148         scratch words (8)
 EDOLD  EQU  APPRAM+248         the cursor's cell on screen (-1: none)
 EDDRAW EQU  APPRAM+250         0 nothing, 1 this line, 2 everything to draw
 EDMSG  EQU  APPRAM+252         a message to show instead of the help (0: none)
-EDNAME EQU  APPRAM+160         the loaded file's name (24 bytes)
-EDFL   EQU  APPRAM+184         the free list: 32 slots
+EDNAME EQU  APPRAM+164         the loaded file's name (24 bytes)
+EDFL   EQU  APPRAM+188         the free list: 16 slots
 EDPG0  EQU  PGFREE+4           16 pages of text
 ORDPG  EQU  PGFREE+20          the order table
 MAXLN  EQU  800
@@ -125,7 +125,7 @@ NS2    INC  @EDFREE
 * FREESLOT - give slot R0 back (if the list has room).  Uses R1.
 FREESLOT
        MOV  @EDNFR,R1
-       CI   R1,32
+       CI   R1,16
        JHE  FS9
        SLA  R1,1
        MOV  R0,@EDFL(R1)
@@ -274,8 +274,9 @@ SAVEFILE .enter
        BL   @FOPEN
        MOV  R0,R0
        JNE  SV9
-       CLR  R9
-SV1    C    R9,@EDN
+       CLR  @EDT+14            (the file service clobbers R6-R9)
+SV1    MOV  @EDT+14,R9
+       C    R9,@EDN
        JHE  SV8
        MOV  R9,R1
        BL   @LNPTR
@@ -300,7 +301,7 @@ SV5    LI   R1,EDRBUF
        BL   @FWRITE
        MOV  R0,R0
        JNE  SV7
-       INC  R9
+       INC  @EDT+14
        JMP  SV1
 SV7    MOV  R0,@EDT+10
        BL   @FCLOSE
@@ -345,9 +346,10 @@ FIXTOP MOV  @EDCUR,R0
        RT
 FT1    AI   R0,-27
        C    R0,@EDTOP
-       JLE  FT9
-       MOV  R0,@EDTOP
-FT9    RT
+       JGT  FT2                (signed: the cursor may be near the top)
+       RT
+FT2    MOV  R0,@EDTOP
+       RT
 
 * DRAWROW - screen row R9 (0-27): its line, or blanks.  Uses R0-R5.
 DRAWROW .enter
@@ -691,7 +693,7 @@ KEYENT .enter
        LI   R4,EDRBUF
        LI   R5,80
        S    @EDCOL,R5
-       MOV  R5,@EDT+4
+       MOV  R5,@EDT+12
 KT1    MOVB *R3,*R4+
        MOVB @SPACE,*R3+
        DEC  R5
@@ -700,7 +702,7 @@ KT1    MOVB *R3,*R4+
        INC  R1
        BL   @INSLINE
        LI   R3,EDRBUF
-       MOV  @EDT+4,R5
+       MOV  @EDT+12,R5
 KT2    MOVB *R3+,*R2+
        DEC  R5
        JNE  KT2

@@ -358,6 +358,8 @@ DEQU   .enter
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
        MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
        MOV  @LABLEN,@NAMLEN
        BL   @DEFSYM
        JMP  DQ9
