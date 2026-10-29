@@ -1,5 +1,16 @@
 # Changes
 
+## 1.4.0 (29 October 2026)
+
+The kernel uses the whole of a big SAMS card: pages are numbers 0-4095 (up to 16M), where they were 0-255 (1M).
+
+- **A clean break in the slot-B save-and-restore idiom.** `CURPA/CURPB/CURPC` (one packed word a slot) are gone; the pager records one page a window in `CURA2 CURA3 CURBE CURBF CURCC CURCD` (`>21E0-21EB`). `GETPB` (new) returns the pages in `>E000` and
+  `>F000` in R0 and R1; `SETPB` now takes them in R0 and R1 (it took one packed word in R0). Code that did `MOV @CURPB,R0 ... BL @SETPB` becomes `BL @GETPB` ... `BL @SETPB` with both registers saved. The kernel, the music player and the diagnostic are converted.
+- `MAPPG` writes a page with its bytes swapped (`SWPB`), the layout of a 12-bit register; for pages under 256 this is what 1.3.1 wrote. `AMSSIZ` tells 32 ... 4,096 pages (it stopped at 256); `AMSTST` tests them all (about 0.25 million instructions on 16M); the refusal screen shows 3 digits.
+- The page pool's bitmap is 512 bytes at `>BE00` in the kernel's own pages (it was 32 bytes in slot A); `skbuild.py` refuses a kernel over 7,680 bytes (it is about 5,000). `"min_pages"` may be 32 ... 4096.
+- The self-test checks pages above 255 (each its own page, page >30 undisturbed) and the pool's last four pages. Test group `sams16`: cards of 128K, 1M, 2M and 16M in the simulator, QUIT included.
+- Not tried on a real card above 1M, nor in js99er's 16M setting.
+
 ## 1.3.1 (29 October 2026)
 
 - **Fix: QUIT on a SAMS of more than 1M.** The page registers were written with the page in both bytes of the word; on a 12-bit card the odd byte is bits 8-11, so identity-mapped page *p* was not page *p*, and switching the mapping off at quit moved the

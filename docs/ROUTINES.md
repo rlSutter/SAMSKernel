@@ -100,13 +100,17 @@ detect a mapper.  Must be called in pass-through mode (before AMSINI).  Returns 
 
 identity-map all 16 windows and switch mapping mode on. After this, page n is at address n<<12 for n = 0..15, which means the kernel at >A000 is on pages >A->D and nothing moved. Uses R1-R3, R12.
 
+### `CURINI` *(internal)*
+
+record what the identity map put in each window (the tracking words live in slot A, so this runs after the loader has cleared it).
+
 ### `PAGEA` *(internal)*
 
 map pages R0 and R0+1 into slot A (>2000, >3000).
 
 ### `AMSSIZ` *(internal)*
 
-how many pages the card has: R0 = 32, 64, 128 or 256 (256 meaning 1M or more; larger cards are used as 1M for now).  Writes a marker to page >10 and checks whether a write to page >10+32, +64 or +128 lands on it (the card decodes only as many page bits as it has). Run after AMSINI and before anything is loaded: it overwrites the first word of pages >10, >30, >50 and >90.  Leaf apart from MAPPG (R11 kept in R6).  Uses R0-R6, R12.
+how many pages the card has: R0 = 32, 64, 128 ... up to 4096 (a 16M card).  Writes a marker to page >10 and checks whether a write to page >10+32, +64 ... +2048 lands on it (the card decodes only as many page bits as it has).  Run after AMSINI and before anything is loaded: it overwrites the first word of page >10 and of the pages tried.  Leaf apart from MAPPG (R11 kept in R6).  Uses R0-R6, R12.
 
 ### `AMSTST` *(internal)*
 
@@ -116,27 +120,31 @@ write a page-specific word to the first and last word of every page from >10 up 
 
 ### `PAGEC` *(internal)*
 
-map pages R0 and R0+1 into slot C (>C000, >D000): a module. Recorded in CURPC.  Kernel use only (see above).  Uses R0-R4, R7, R12.
+map pages R0 and R0+1 into slot C (>C000, >D000): a module. Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R7, R12.
 
 ### `MAPPG`
 
-map one page into one window. R0 = page (0-255), R1 = window (0-15) Uses R2, R3, R12.  Leaf.  Does not update CURPA/B/C: use it for windows you track yourself; PAGEB, MAPE and MAPF track slot B.
+map one page into one window. R0 = page (0-4095), R1 = window (0-15) Uses R2, R3, R12.  Leaf.  Does not update the tracking words: use it for windows you track yourself; PAGEB, MAPE and MAPF track slot B. The register takes the page's low 8 bits in the even byte and bits 8-11 in the odd byte (a card of 1M or less ignores the odd byte): the page with its bytes swapped.
 
 ### `PAGEB`
 
-map pages R0 and R0+1 into slot B (>E000, >F000), recorded in CURPB.  Uses R0-R4, R7, R12.
+map pages R0 and R0+1 into slot B (>E000, >F000), recorded in CURBE/CURBF.  Uses R0-R3, R7, R12.
 
 ### `MAPE`
 
-map page R0 into window >E000 / >F000 alone, unless CURPB says it is there already; recorded in CURPB.  Leaves.  Use R1-R3, R12 (R1 only, when the page is already mapped).
+map page R0 into window >E000 / >F000 alone, unless it is there already; recorded in CURBE / CURBF.  Leaves.  Use R1-R3, R12 (nothing, when the page is already mapped).
 
 ### `MAPF`
 
-map page R0 into window >E000 / >F000 alone, unless CURPB says it is there already; recorded in CURPB.  Leaves.  Use R1-R3, R12 (R1 only, when the page is already mapped).
+map page R0 into window >E000 / >F000 alone, unless it is there already; recorded in CURBE / CURBF.  Leaves.  Use R1-R3, R12 (nothing, when the page is already mapped).
+
+### `GETPB`
+
+the pages slot B holds now: R0 = the page in >E000, R1 = the page in >F000.  Save them to put slot B back later with SETPB.  Leaf.
 
 ### `SETPB`
 
-put slot B back as R0 says, (page for >E000 << 8) | page for >F000: a CURPB value saved earlier (the two pages need not be consecutive).  Uses R0-R3, R12.
+put slot B back as it was: R0 = the page for >E000, R1 = the page for >F000 (what GETPB gave; the two pages need not be consecutive).  Uses R0-R4, R12.
 
 ## Text 80, colour schemes, the DMA row mover (video.a99)
 
@@ -338,7 +346,7 @@ find the device named in the PAB and call its DSR (from The Lantern Coast).  >83
 
 ### `MUPLAY`
 
-start the song whose first SAMS page is R0 (the song's pages must be consecutive).  Any song playing is replaced.  R0 = 0 if it began, 1 if the pages do not hold a song.  Uses R0-R4, R12.
+start the song whose first SAMS page is R0 (the song's pages must be consecutive).  Any song playing is replaced.  R0 = 0 if it began, 1 if the pages do not hold a song.  Uses R0-R5, R12.
 
 ### `MUSTOP`
 

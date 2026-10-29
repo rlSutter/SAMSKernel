@@ -65,17 +65,18 @@ check after the new module's `INIT` lets an `INIT` switch or quit at once.
 **Switching** records the outgoing module in `PREVPG`, maps the new one with `PAGEC`, calls its `INIT` with
 `R0 = PREVPG` and `R1 = GOARG`, and goes back to `KCHK`.
 
-**`MODCALL`** (a call, not a switch) pushes the current `CURPC`, maps the target module, calls the routine at the entry's address,
-saves its `R0` in `MCRET`, maps the caller back from the pushed `CURPC` and returns `R0`. The mapping uses `R0-R4`, `R7`, `R12`, so
+**`MODCALL`** (a call, not a switch) pushes the running module's first page (`CURCC`), maps the target module, calls the routine at the entry's address,
+saves its `R0` in `MCRET`, maps the caller back from the pushed page and returns `R0`. The mapping uses `R0-R3`, `R7`, `R12`, so
 extra arguments and results travel in `R5`, `R6`, `R8`, `R9` or in memory.
 
 ## 5. SAMS paging
 
-`MAPPG` writes `(page << 8) | page` to the window's register at `>4000 + 2 x window` with the registers exposed (`SBO 0`) and hides them
-again. `PAGEC`, `PAGEB`, `MAPE`, `MAPF`, `SETPB` keep `CURPC` / `CURPB` in step. Two different pages in slot B are allowed
-(`MAPE` and `MAPF` each set one half of `CURPB`); `PAGEB` sets a consecutive pair; `SETPB` restores both halves of a saved
-`CURPB` independently (the Press ancestor restored by remapping a consecutive pair from the first page, which is wrong when
-the halves differ).
+A page is a number 0-4095 (a SAMS card of up to 16M). `MAPPG` writes the page with its bytes swapped (`SWPB`) to the window's register at `>4000 + 2 x window` with the registers exposed (`SBO 0`)
+and hides them again: the even byte is the page's low 8 bits and the odd byte bits 8-11 (a card of 1M or less ignores the odd byte). The pager records the page each window holds in
+`CURA2 CURA3` (slot A), `CURBE CURBF` (slot B) and `CURCC CURCD` (slot C), at `>21E0-21EB`; `PAGEA`, `PAGEB`, `PAGEC`, `MAPE`, `MAPF` and `SETPB` keep them in step. Two different pages in
+slot B are allowed (`MAPE` and `MAPF` each set one window); `PAGEB` sets a consecutive pair; `GETPB` returns the two pages slot B holds (R0, R1) and `SETPB` puts two pages back (R0, R1), independently
+(the Press ancestor restored by remapping a consecutive pair from the first page, which is wrong when the halves differ). **The page pool's bitmap** is 512 bytes at `>BE00` in the kernel's own pages (a bit for each of
+4,096 pages); the build refuses a kernel that grows into it (at most 7,680 bytes; it is about 5,000).
 
 ## 6. Memory maps
 
@@ -102,7 +103,7 @@ the halves differ).
 | --- | --- |
 | `>8300-831F` | the workspace `WS`: R0-R15 |
 | `>8320-833F` | free (saved and restored around DSR calls) |
-| `>8340-834F` | `FRAME CURPA CURPB CURPC F18FLG F18VER NPAGES QUITF` |
+| `>8340-834F` | `FRAME`, three free words, `F18FLG F18VER NPAGES QUITF` |
 | `>8350` | `VDPPIC` (non-zero: PICO9918) |
 | `>8352-8353`, `>8358-836F` | free; a DSR changes parts of `>8320-837F` while it runs and the file service puts them back |
 | `>8354-8357` | the DSR's name length and pointer (while a call runs) |
@@ -131,7 +132,7 @@ and sets `VR1CPY`. `LDSCHM` additionally copies the scheme's entry 2 to entry 1 
 ## 6a. The music player in detail
 
 `MUTICK` runs from the main loop (right after `VSYNC`) and from `KIDLE`, `KPFR` and `KWAIT`. If no song plays, or one is paused, it returns at once; if the song is holding it counts a frame off and returns (8 instructions).
-Otherwise it saves `CURPB`, maps the song's page for the next command through slot B (`MAPE` for the page, `MAPF` for the next, so a read may run on into it), and reads commands until a hold: a byte `>80-FF` or a data byte
+Otherwise it saves the two pages slot B holds (`CURBE`, `CURBF`), maps the song's page for the next command through slot B (`MAPE` for the page, `MAPF` for the next, so a read may run on into it), and reads commands until a hold: a byte `>80-FF` or a data byte
 `>40-7F` goes to the chip (and into a shadow of the eight registers so that `MUPAUSE` can put the chip back), `>01-3F` sets the hold and ends the frame, `>00` jumps to the loop target (and maps again) or stops the song. The offset is a
 16-bit number from the start of the song; the page is `MUPAGE + offset / 4096`. At most 256 commands a frame. Then `SETPB` restores slot B. `MUPLAY` checks the 'SK' magic, sets the state and silences the chip. A song is therefore any
 bytes in consecutive SAMS pages; the compiler (`tools/skmusic.py`) is only one way to make them.

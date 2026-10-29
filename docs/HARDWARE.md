@@ -13,8 +13,8 @@ The loader (cartridge bank 0, `loader.a99`) runs these before it loads anything:
 
 1. **SAMS present.** `AMSDET` writes and reads back a mapper register.
 2. **SAMS size.** `AMSSIZ` writes a marker to page `>10`, then a different value to page `>10` + 32,
-   + 64 and + 128; the first write that lands on page `>10`'s marker shows how many page bits the card
-   decodes. With no alias at +128 the card is used as 256 pages (1M); larger cards are used as 1M.
+   + 64 ... + 2048; the first write that lands on page `>10`'s marker shows how many page bits the card
+   decodes. With no alias at +2048 the card has 4,096 pages (16M). The count is 32, 64 ... 4,096.
    The probe comes *before* any full test because writing every page of a too-small card would go
    through an alias into the kernel's own pages. The count must be at least `min_pages`.
 3. **Page test.** `AMSTST` writes a page-specific word to the first and last word of every page from
@@ -183,11 +183,12 @@ VDP RAM or GROM (pointer `>83CC`, duration `>83CE`, flag bit 0 of `>83FD`); `>83
 
 ## SAMS
 
-**Cards of more than 1M (a 16M SAMS).** The kernel numbers pages 0-255 (it keeps them in a byte), so it uses the first 1M of such a card and ignores the rest; `AMSSIZ` reports 256. Page registers are 12 bits on a big card (as js99er models it:
-the even byte is the low 8 bits, the odd byte bits 8-11), so the kernel writes a page number in the high (even) byte only and leaves the low byte 0: the page is then exactly the number given, on a card of any size. **Until 1.3.1 it wrote the page in both
-bytes**, which on a big card turned page *p* into page `(p AND >F) * 256 + p`; the kernel ran, but when it quit and switched the mapping off, the card put its real page >A back in the window the kernel's own code was running in, and the code vanished (found on a 16M card in
-js99er, 29 October 2026; the simulator's model of a 12-bit card, test group `sams16`, reproduces it and now passes, including the quit). Not tried on a real 16M card; on the cards that were tried (1M, in Press and the Lantern Coast) the odd byte was ignored, so
-this does not change them. Pages above 255 are not used.
+**Cards of more than 1M (up to a 16M SAMS).** Since 1.4.0 the kernel uses all of the card: a page is a number 0-4095 and `AMSSIZ` reports up to 4,096 pages. Page registers are 12 bits on a big card (as js99er models it:
+the even byte is the low 8 bits, the odd byte bits 8-11), and `MAPPG` writes a page with its bytes swapped, so the even byte holds the low 8 bits and the odd byte bits 8-11 (0 for a page under 256: a card of 1M or less ignores the odd byte, so
+nothing changes for them). `PGFREE` and the page pool run up to `NPAGES`. **History.** Before 1.3.1 the kernel wrote the page in both bytes, which on a big card made page *p* the page `(p AND >F) * 256 + p`; it ran, but at QUIT the mapping was switched off,
+the card put its real page >A back in the window the kernel's own code was running in, and the code vanished (found on a 16M card in js99er, 29 October 2026). 1.3.1 wrote the high byte only (1M); 1.4.0 uses the whole card. The simulator models a 12-bit card
+(test group `sams16`: 128K, 1M, 2M and 16M, the self-test with pages above 255, the pool's last pages, QUIT). **Not tried on a real card above 1M, nor in js99er's 16M setting after 1.4.0.** Start-up tests every page: about 0.25 million
+instructions on a 16M card (a second or so, by estimate) against 0.09 million on 1M.
 
 Registers are words at `>4000 + 2 x window` while CRU `>1E00` bit 0 is set; each latches one byte, so a word
 is written as (page << 8) | page. CRU bit 1 turns mapping on. The loader maps the identity (page n at window n)

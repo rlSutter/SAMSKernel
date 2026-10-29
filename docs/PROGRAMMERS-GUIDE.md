@@ -426,19 +426,23 @@ or more). The kernel and the build own some; the rest are yours:
 
 `MAPE` maps one page into window `>E000`, `MAPF` into `>F000`; afterwards `@>E000` is
 that page's first byte. `PAGEB` maps two *consecutive* pages into both. All of them keep
-`CURPB` (what slot B holds) in step, **which is what makes it safe to borrow slot B**:
+`CURBE`/`CURBF` (the pages slot B holds) in step, **which is what makes it safe to borrow slot B**. A page is a number 0-4095 (a card of up to 16M):
 
 ```
-       MOV  @CURPB,R0         what is mapped now
+       BL   @GETPB            R0, R1: the pages mapped in >E000 and >F000 now
        .push R0
+       .push R1
        LI   R0,MYPAGE
        BL   @MAPE
        ... use @>E000 ...
+       .pop R1
        .pop R0
        BL   @SETPB            put both windows back as they were
 ```
 
-Never write a mapper register any other way (`MAPPG` does not record CURPB: it is the
+(Before 1.4.0 the saved value was one packed word, `MOV @CURPB,R0 ... BL @SETPB`; it is now two pages, so a page above 255 fits.)
+
+Never write a mapper register any other way (`MAPPG` does not record the pages: it is the
 low-level routine). **Code never remaps the window it is running in.** Code in slot C
 may freely remap slot B; nothing but the kernel's main loop remaps slot C, and nothing
 remaps slot A. A buffer you hand to a routine must not be in `>E000-FFFF` if the routine
@@ -449,7 +453,7 @@ itself remaps slot B (the rule applies to your own routines too).
 `PINIT` (R0 = first page, R1 = the page after the last) declares a pool and frees all its
 pages. `PALLOC` returns the lowest free page in R0 (0 when none is left); `PRELS` gives
 one back (twice is harmless; a page outside the pool is ignored). A page's contents are
-never touched. The pool is a bitmap in slot A for up to 256 pages; `FREECT` is the
+never touched. The pool is a bitmap (512 bytes at `>BE00`, in the kernel's pages) for up to 4,096 pages; `FREECT` is the
 free count. The viewer in `examples/browser` takes pages from `PGFREE`, fills them with
 lines of a file, and draws from them:
 
@@ -752,7 +756,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 5. **Jumps reach about 128 words**: when one goes out of range, invert the condition around a `B @label`.
 6. **Expressions evaluate left to right**: parenthesise.
 7. **Code never remaps the window it is running in**; slot C belongs to the kernel's main loop.
-8. **Map slot B only with `MAPE`/`MAPF`/`PAGEB`/`SETPB`**, so `CURPB` is true; save and restore it when you borrow.
+8. **Map slot B only with `MAPE`/`MAPF`/`PAGEB`/`SETPB`**, so `CURBE`/`CURBF` are true; save them with `GETPB` and restore them with `SETPB` when you borrow.
 9. **Interrupts are masked outside `VSYNC`.** Do not `LIMI 2` in your code; do not poll the keyboard in the middle of a VDP transfer.
 10. **Never write an F18A register you do not need**, and do not unlock the F18A twice (the second unlock locks it): the kernel handled both.
 11. **Power-up RAM is random**: clear what you use. (The loader clears slot A; nothing else is cleared.)

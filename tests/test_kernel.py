@@ -46,7 +46,7 @@ def boot():
     check(bytes(m.vram[0x1800 + 65 * 8:0x1800 + 66 * 8]) == bytes([0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0]), 'glyph A in the pattern table')
     m, cpu, halt = sim9900.run(c, keys='<ALPHA>hi there', frames=200)
     check(lines(m)[4].startswith('  hi there'), 'typed text is echoed: %r' % lines(m)[4][:14])
-    check(m.rw(0x8346) == 0x1213, 'slot C holds the boot module, pages >12 >13 (CURPC=%04X)' % m.rw(0x8346))
+    check(m.rw(0x21E8) == 0x12 and m.rw(0x21EA) == 0x13, 'slot C holds the boot module, pages >12 >13 (CURCC=%04X CURCD=%04X)' % (m.rw(0x21E8), m.rw(0x21EA)))
 
 def refusal():
     c = build('hello')
@@ -58,7 +58,7 @@ def refusal():
     m, cpu, halt = sim9900.run(c, frames=120, sams=False)
     check(any('WITH 512K' in l for l in lines(m)), 'no card refused')
     m, cpu, halt = sim9900.run(c, frames=200, setup=lambda m: m.bad_pages.add(0x2A))
-    check(any('FAILED ITS TEST' in l for l in lines(m)) and any('>2A' in l for l in lines(m)), 'a bad page refused and named')
+    check(any('FAILED ITS TEST' in l for l in lines(m)) and any('>02A' in l for l in lines(m)), 'a bad page refused and named (three digits)')
     m, cpu, halt = sim9900.run(c, frames=150, f18a=False)
     check(any('NEEDS AN F18A' in l for l in lines(m)), 'no F18A refused')
     m, cpu, halt = sim9900.run(c, frames=120, pages=256)

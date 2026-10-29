@@ -163,7 +163,8 @@ CURA2  EQU  >21E0            window >2000 (slot A)
 CURA3  EQU  >21E2            window >3000
 CURBE  EQU  >21E4            window >E000 (slot B)
 CURBF  EQU  >21E6            window >F000
-CURCC  EQU  >21E8            window >C000 (slot C: the running module's first page)
+* window >C000 (slot C: the running module's first page)
+CURCC  EQU   >21E8
 CURCD  EQU  >21EA            window >D000
 
 * File service (files.a99): >2100->21FF

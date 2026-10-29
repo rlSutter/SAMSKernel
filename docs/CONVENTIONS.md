@@ -8,7 +8,7 @@ list for people changing the kernel.
 
 - Fixed windows: slot A (`>2000-3FFF`, pages `>02-03`) is never remapped; the kernel (`>A000-BFFF`, pages `>0A-0B`) is never
   remapped; slot C (`>C000-DFFF`) is remapped only by `PAGEC`, called only from the kernel's main loop and `MODCALL`; slot B
-  (`>E000-FFFF`) by `PAGEB`, `MAPE`, `MAPF`, `SETPB`, which keep `CURPB`.
+  (`>E000-FFFF`) by `PAGEB`, `MAPE`, `MAPF`, `SETPB`, which keep `CURBE`/`CURBF`.
 - Code never remaps the window it runs in.
 - Every kernel variable is declared once, in `kdefs.a99`. An application declares its own as offsets from `APPRAM`, once,
   in a file its modules share.
