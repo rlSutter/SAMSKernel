@@ -16,9 +16,32 @@
 *   >C006 reserved
 * (docs/PROGRAMMERS-GUIDE.md has the whole story.)
 *======================================================================
+* THE MAIN LOOP, which is the heart of the system.  After the loader
+* (loader.a99) has checked the machine and set up the memory map it jumps
+* here.  KSTART initialises the keyboard and the 80-column text screen, then
+* the program runs as a loop of frames: wait for the video chip's frame signal
+* (VSYNC), step the music, scan the keyboard, and call the running module's
+* TICK with the next key.  This is why a module never loops: the loop is here,
+* and a module's TICK does a slice of work and returns.  After each TICK the
+* kernel looks at two flags the module may have set: QUITF (leave the program)
+* and NEXTPG (switch to another module).
+*
+* Registers: the kernel runs in its own workspace WS (the 16 registers live in
+* RAM at an address of the kernel's choosing: LWPI WS) and keeps R10 as the
+* software stack pointer for .enter / .leave.  Interrupts are masked (LIMI 0)
+* except for the brief moments VSYNC and .intsvc let the console's interrupt
+* routine run to count frames; the console's routine does its work only at
+* those moments, which is why a program that polls the keyboard in the middle
+* of a video transfer can corrupt the screen.
        COPY "kdefs.a99"
 
        AORG >A000
+* Start-up order matters: interrupts off first, our own workspace and stack
+* next, then the console's interrupt flags (the console's ISR would otherwise
+* move sprites and treat FCTN = as QUIT by itself), then the keyboard and the
+* screen.  TMRINC is the byte the console's interrupt routine adds to its
+* frame counter every frame; the kernel's VSYNC waits on that counter, so it
+* must be non-zero.
 KSTART LIMI 0
        LWPI WS
        LI   R10,STKTOP
@@ -43,6 +66,13 @@ KMAIN  BL   @VSYNC             once per frame
        BL   @KEYGET            R0 = next code or 0
        MOV  @>C002,R1          the module's TICK
        BL   *R1
+* After TICK returns (or after a module's INIT) the kernel acts on the
+* module's requests.  A switch asked for by GOMOD takes effect here: the old
+* module's page is remembered in PREVPG (so GOMOD PREVPG goes back), the new
+* module's two pages are mapped at >C000 and its INIT is called with the old
+* page in R0 and the argument in R1.  The switch happens between frames, never
+* in the middle of the module's own code, because the code that asked for it
+* is running in the very window that is about to change.
 KCHK   MOV  @QUITF,R0          a quit asked for?
        JNE  KEXIT
        MOV  @NEXTPG,R0         a switch asked for (R0 = the module's page)?

@@ -9,6 +9,22 @@
 *   .callmod PAGE,N   call entry N of the module whose first page is
 *             PAGE (MODCALL: R0 returns); N counts from 0: INIT 0, TICK 1,
 *             REDRAW 2, reserved 3, your own entries from 4
+*
+* HOW THE SOFTWARE STACK WORKS.  The TMS9900 has no stack: BL puts the return
+* address in R11, so a routine that calls another with BL would overwrite its
+* own return address.  The convention here is that R10 is a stack pointer into
+* a small area in slot A, growing downward.  .enter pushes R11 (DECT R10 makes
+* room for one word; MOV R11,*R10 stores it) and .leave takes it back (MOV
+* *R10+,R11 loads it and moves R10 up); .push and .pop do the same for any
+* register.  A leaf routine (one that calls nothing) needs none of this.
+* Rules that follow: a routine's .enter and .leave must balance on every path;
+* the stack is only 128 words deep, so deep recursion overflows it silently
+* into the data above; and .leave's MOV sets the status flags from R11, so a
+* result must be returned in a register, never in the condition flags.
+* The macro bodies are assembled in place wherever the macro name is used, so
+* each .enter costs two instructions (6 bytes) and no call: macros are free of
+* any call overhead.  '#1' and '#2' in a body stand for the first and second
+* argument of the use.
        .defm enter
        DECT R10
        MOV  R11,*R10

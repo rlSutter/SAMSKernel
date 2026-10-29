@@ -19,9 +19,53 @@
 * This file is the guide's example of a program whose data does not fit in
 * the memory it can see: read PROGRAMMERS-GUIDE.md, appendix C, with it.
 *======================================================================
+* THE IDEA OF THIS PROGRAM, for anyone learning to use the SAMS memory.  The
+* TI-99/4A's CPU sees only 64K at a time, and about 7K of that is yours
+* (APPRAM).  A SAMS card holds up to 16 megabytes, in 4,096-byte PAGES, and
+* the kernel lets a program look at any page through a WINDOW: a 4K slice of
+* the CPU's address space that the SAMS card can point at any page.  The
+* kernel keeps slot A (>2000-3FFF, its own data and your APPRAM) and slot C
+* (>C000, the running module) mapped always; windows E and F (>E000-EFFF and
+* >F000-FFFF) are yours to point at pages with MAPE and MAPF.  A program with
+* more data than fits in APPRAM keeps it in pages and maps the one it needs,
+* when it needs it.  That is all this editor does, to hold a file of up to
+* 2,040 lines of 80 columns (163,200 bytes) with 7K of RAM.
+*
+* Three structures, all small:
+*   1. TEXT PAGES. Each pool page holds 51 lines of 80 bytes (4,080 of its
+*   4,096 bytes). A line lives in a SLOT: slot s is line (s mod 51) of the
+*   s/51-th text page. Pages are taken from the kernel's page pool (PALLOC) one
+*   at a time as the file grows, so a small file uses few.
+*   2. THE PAGE TABLE, EDPGT, in APPRAM: 40 words, one per block of 51 slots,
+*   each the number of the pool page that holds that block. It is the only
+*   place that says where the text is.
+*   3. THE ORDER TABLE, on a pool page of its own (EDORD): word n is the slot
+*   of line n. The order of the lines is the order of this table, so inserting
+*   or deleting a line moves at most 2,040 words in it and never moves any
+*   text.
+*
+* To find line n (LNPTR): map the order page into window F, read word n (the
+* slot s); divide s by 51; the quotient picks a word of the page table (the
+* page to map into window E) and the remainder, times 80, is the line's offset
+* in the window.  Everything else in the editor (typing, deleting, drawing,
+* saving) is built on LNPTR, so none of it needs to know any of this.  Read
+* LNPTR, NEWSLOT, INSLINE and DELLINE first, then the screen and key code.
+*
+* Why a slot table rather than moving the lines?  Insert in the middle of a
+* 2,000-line file would otherwise copy up to 160K of text.  This way it copies
+* up to 4K of table, which is a tight loop of 2,040 MOVs.  Real editors use
+* the same trick (a 'gap buffer' or a line table).
        COPY "kernel.equ"
        COPY "macros.a99"
 
+* The editor's variables, all in APPRAM.  Notice the way they are declared:
+* EQU gives each a fixed address; nothing is reserved or cleared by the
+* assembler.  The areas used here (APPRAM+128 to +255, and +744 to +823)
+* belong to the editor by agreement with the shell (wb.a99), the assembler
+* (asm.a99) and the program launcher; the table in docs/WORKBENCH.md part 5
+* says who owns what.  Because they live in APPRAM they keep their values when
+* you leave the editor for the menu and come back: that is how the buffer
+* survives a trip to the assembler.
 * storage (the shell's area: APPRAM+128 up to +255)
 SRCNAME EQU APPRAM             the file name (the shell's)
 EDN    EQU  APPRAM+128         lines in the buffer
@@ -50,12 +94,18 @@ MAXLN  EQU  2040               lines: 40 pages of 51
 MAXPG  EQU  40
 LPP    EQU  51                 lines (slots) to a page: 51 * 80 = 4,080 bytes
 
+* Colours: attribute bytes built from ROLES (see examples/hello for the
+* explanation).  ACUR is the cursor cell: background and foreground are
+* exchanged so that the cursor shows as a filled block in the accent colour.
 ANORM  EQU  (RTEXT*16+RBG)*256
 ABAR   EQU  (RBARFG*16+RBARBG)*256
 AMARK  EQU  (RMARK*16+RBG)*256
 AERR   EQU  (RERROR*16+RBG)*256
 ACUR   EQU  (RBG*16+RACCNT)*256
 
+* The module entry table (see examples/hello): INIT, TICK, REDRAW.  The shell
+* reaches this module by GOMOD PG_ED, which maps its code page at >C000 and
+* calls INIT.
        AORG >C000
        DATA INIT,TICK,REDRAW,0
 
@@ -71,6 +121,21 @@ IN1    CLR  @EDSURE
        .leave
        RT
 
+* Why the editor sets the pool up itself: the kernel never calls PINIT for
+* you.  The pool is a bitmap of free pages kept in the kernel's own memory;
+* PINIT says which range of pages it manages and marks them all free.  The
+* workbench's own code pages (PGFREE and PGFREE+1) and the two pages a program
+* under test is run from (PGUSER = PGFREE+2, +3) lie below the range, so the
+* pool never hands them out.  NPAGES is the size of the card as the kernel
+* found it at start (128 pages for 512K, up to 4096 for 16M), so the pool
+* grows with the card.
+*
+* EDPOOL is the flag that says 'done'.  The shell clears it (and EDLOAD) when
+* it runs a program, because a program may PINIT the pool its own way and the
+* editor's pages would then not be reserved any more; the editor sets
+* everything up afresh the next time it is entered.  PALLOC returns the lowest
+* free page, or 0 when there is none (page 0 is the kernel's, so 0 is never a
+* real result).
 * POOLUP - the first time (and after a program has been run, which may have
 * used the pool in its own way): the pool manages every page from the first
 * one above the workbench's own (PGFREE+4) to the end of the card, and the
@@ -110,6 +175,25 @@ SN9    RT
 *----------------------------------------------------------------------
 * the buffer
 *----------------------------------------------------------------------
+* How a line is found.  The call BL @LNPTR with R1 = n leaves R2 = the
+* address, in window E, of line n's 80 bytes.  Read it as three lookups: order
+* table (window F) gives the slot; the quotient and remainder of slot / 51
+* give the block and the place in the block; the page table gives the pool
+* page of the block, which MAPE puts in window E.
+*
+* Two TMS9900 points worth knowing.  DIV and MPY work on register PAIRS: DIV
+* R3,R4 divides the 32-bit number in R4:R5 by R3, leaving the quotient in R4
+* and the remainder in R5, so R4 must be cleared first (the high half of the
+* dividend) and R5 must hold the slot; MPY R3,R2 multiplies R2 by R3 and
+* leaves the 32-bit product in R2:R3, so the low half, the one we want, is in
+* R3.  And the code addresses a word of a table with @>F000(R1): the address
+* >F000 plus the register, which must be a BYTE offset (hence SLA R1,1 to turn
+* a line number into a word offset).
+*
+* MAPE and MAPF change the SAMS card's registers for the window and keep the
+* kernel's record (CURBE, CURBF) true, which is what makes it safe for other
+* kernel code to borrow a window and give it back.  Never write the card's
+* registers yourself.
 * LNPTR - R1 = a line number: R2 = the address of its 80 bytes (its page
 * mapped at >E000).  Uses R0-R5.
 LNPTR  .enter
@@ -133,6 +217,13 @@ LNPTR  .enter
        .leave
        RT
 
+* How a new line gets storage.  A slot is either on the FREE LIST (slots given
+* back by deleted lines, kept in EDFL, 16 of them), or never used (the numbers
+* from EDFREE up).  Taking from the free list first reuses pages that are
+* already in the table.  When a never-used slot falls in a block we have no
+* page for (the slots the pages we hold can hold are EDNPG * 51), a new page
+* is taken from the pool by NEWPAGE.  A -1 result means the buffer is full:
+* either 2,040 lines, or no free page left in the pool.
 * NEWSLOT - R0 = an unused slot (from the free list, else the next never
 * used), or -1 if the buffer is full.  Uses R0, R1.
 NEWSLOT .enter
@@ -183,6 +274,10 @@ NP8    CLR  R0
 NP9    .leave
        RT
 
+* A deleted line's slot goes on the free list if there is room; if the list is
+* full the slot is simply forgotten, which wastes 80 bytes until the file is
+* loaded again and is far cheaper than keeping a long list.  Reloading resets
+* EDFREE, so every slot is used again.
 * FREESLOT - give slot R0 back (if the list has room).  Uses R1.
 FREESLOT
        MOV  @EDNFR,R1
@@ -201,6 +296,12 @@ BL1    MOV  R1,*R2+
        JNE  BL1
        RT
 
+* The order table is a plain array of words in window F.  To open a gap at
+* line n the loop moves every word from the end back to n up by one place
+* (copying from the top downwards, so nothing is overwritten before it is
+* copied: the usual rule for an overlapping move).  Then the new line's slot
+* goes into the gap and the line count goes up.  The text itself is never
+* moved.
 * INSLINE - insert a blank line before line number R1 (R1 = EDN adds at the
 * end).  R0 = 0 done, -1 the buffer is full.  The new line is current in
 * window E at R2.  Uses R0-R5.
@@ -234,6 +335,9 @@ IL2    MOV  @EDT+4,*R4
 IL9    .leave
        RT
 
+* Deleting is the same move in the other direction (copying from the bottom
+* upwards), after giving the line's slot back.  The file always keeps at least
+* one line, so deleting the only line blanks it instead.
 * DELLINE - remove line R1 (the last line is blanked instead).  Uses R0-R5.
 DELLINE .enter
        MOV  R1,@EDT+2
@@ -267,6 +371,19 @@ DL3    DEC  @EDN
 DL9    .leave
        RT
 
+* The file service (FOPEN, FREAD, FWRITE, FCLOSE) works on any device the
+* console can reach, so the same code reads a disk, a TIPI, or a CF7+.  Each
+* call changes R6 to R9 (it runs the disk controller's own code, which uses
+* those registers), so anything the loop needs across a call is kept in
+* memory: EDT+6 here, EDT+14 in SAVEFILE.
+*
+* A record read is copied into the line and the rest of the line stays blank
+* (BLANKLN was done by INSLINE).  Records longer than 80 are cut.  Reading
+* goes on until the file service reports end of file; since each loop turn
+* inserts the line before reading it, the last line (never filled) is deleted
+* at the end.  If the buffer fills first (INSLINE answers -1) the load stops,
+* EDTRUNC is set and a message says so: SAVEFILE then refuses, so that a
+* partly loaded file can never be saved over the whole one.
 * LOADFILE - read SRCNAME into the buffer (an empty buffer of one blank
 * line if the file is not there).  Uses everything.
 LOADFILE .enter
@@ -331,6 +448,11 @@ LF10   MOVB *R1+,*R2+
        RT
 EDRBUF EQU  APPRAM+5500        a record being read or written (256 bytes)
 
+* Saving writes each line as one record with its trailing blanks cut (the
+* editor stores lines padded to 80, files store them as long as they are).
+* The loop counter EDT+14 and the lengths are in memory, not registers,
+* because FWRITE clobbers R6-R9.  A write error closes the file and returns
+* its code; otherwise the dirty flag is cleared.
 * SAVEFILE - write the buffer to SRCNAME, trailing blanks cut.  R0 = 0 or
 * the error.  Uses everything.
 SAVEFILE .enter
@@ -386,6 +508,12 @@ SPACE  BYTE >20
        EVEN
 
 *----------------------------------------------------------------------
+* The screen is Text 80 mode, 80 columns by 30 rows: row 0 the status bar,
+* rows 1 to 28 the text, row 29 the help line.  A line is copied to the screen
+* with VMBW (a block write to VRAM, the video chip's own memory); the kernel's
+* text routines hide the video chip's address registers, and keep the screen
+* consistent with the attribute table, so the editor never talks to the video
+* chip directly.
 * the screen: row 0 the status, rows 1-28 the text, row 29 the help
 *----------------------------------------------------------------------
 REDRAW .enter
@@ -530,6 +658,15 @@ CU1    MOV  @EDCUR,R3
        RT
 
 *----------------------------------------------------------------------
+* TICK is called once a frame with the key in R0's high byte.  Printable keys
+* (>20 to >7E) go to TYPECH.  Every other key is looked up in KEYTAB, a table
+* of pairs: the key's code (a byte) and the address of the routine that
+* handles it; the loop walks the pairs until it finds the key or reaches the 0
+* that ends the table, and calls the routine with BL *R1 (a call through a
+* register).  Adding a key is one line in the table and one routine.  After
+* any key the screen is brought up to date: EDDRAW says how much to redraw (0
+* nothing, 1 only the cursor's line, 2 everything), which keeps typing fast:
+* typing a character redraws one line, not the screen.
 * the keys
 *----------------------------------------------------------------------
 TICK   .enter
@@ -653,6 +790,11 @@ KE1    MOV  R1,@EDCOL
        .leave
        RT
 
+* Typing in INSERT mode moves the rest of the line one place right, from the
+* last column backwards (again so that nothing is overwritten before it is
+* copied), before putting the character in.  In overwrite mode (FCTN 2) it
+* just replaces.  Every change sets EDDIRT (the '*' in the status bar) and
+* asks for the cursor's line to be redrawn.
 * TYPECH - the character R9 (high byte) into the line at the cursor.
 TYPECH .enter
        MOV  @EDCOL,R0

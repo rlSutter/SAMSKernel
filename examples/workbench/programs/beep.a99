@@ -4,6 +4,20 @@
 * returns to the workbench, FCTN = quits.  It needs nothing but the
 * workbench's own KERNEL/EQU: assemble it with A, run it with R.
 *======================================================================
+* SOUND ON THE TI.  The console has a TMS9919 sound chip with three tone
+* voices and a noise voice.  A tone is set by a 10-bit DIVIDER: the chip
+* divides its 111,861 Hz clock by that number, so a larger divider is a lower
+* note (the A above middle C, 440 Hz, is 254).  SNDTONE takes the voice number
+* in R0, the divider in R1 and the volume in R2 (0 loudest, 15 off); SNDOFF
+* silences everything.  The kernel's music player (MUPLAY, see docs/MUSIC.md)
+* plays whole songs; this program shows the simplest use, one note at a time,
+* which is also how sound effects are made.
+*
+* Keys: the program asks for the next key each frame (TICK) and turns the
+* digits 1 to 8 into table lookups.  Note the two ways out: FCTN = (KQUIT)
+* sets the kernel's quit flag, FCTN 9 (KBACK) returns to the workbench with
+* GOMOD; both silence the chip first, because a voice left on keeps sounding
+* after the program is gone.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -46,6 +60,12 @@ T1     CI   R9,KBACK*256
        CLR  R1
        BL   @GOMOD
        JMP  T9
+* The digit keys arrive as the ASCII codes of '0' to '8' in the high byte, so
+* >3000 is '0' and >3800 is '8'.  The code subtracts >3000 and shifts the byte
+* down (SRL R9,8) to get the digit 0 to 8: 0 means 'silence'; 1 to 8 index the
+* table DIVS, whose entries are words, so the index is turned into a byte
+* offset (SLA R9,1: times two) and used as a register-indexed address,
+* @DIVS(R9).
 T2     CI   R9,>3000           the keys 0-8
        JL   T9
        CI   R9,>3800
@@ -64,6 +84,10 @@ TOFF   BL   @SNDOFF
 T9     .leave
        RT
 
+* The dividers for the C major scale from middle C: 111,861 / 428 is 261 Hz
+* (C), 381 is 293 (D), 339 is 330 (E), 320 is 349 (F), 285 is 392 (G), 254 is
+* 440 (A), 226 is 495 (B), 214 is 523 (the C above).  The chip's pitches are
+* only as exact as the integer divider allows, which is plenty for a scale.
 DIVS   DATA 428,381,339,320,285,254,226,214
 STITLE STRI ' Beep   a program made on the TI'
 SHELP  BYTE SHELPE-SHELPB

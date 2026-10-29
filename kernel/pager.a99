@@ -18,6 +18,32 @@
 * a library routine) can save the pages with GETPB and put them back with
 * SETPB.  Never write a mapper register by any other route.
 *======================================================================
+* SAMS IN ONE PARAGRAPH, for a program that has never used it.  The TI-99/4A's
+* TMS9900 can address 64K.  A SAMS card adds up to 16 megabytes of RAM and a
+* mapper: for each 4K window of the address space (there are sixteen, 0 to F)
+* the card has a 16-bit REGISTER that says which 4K PAGE of the card's RAM
+* appears there.  The card's registers are not in normal memory: the program
+* first switches the card's ROM area on with a CRU bit (SBO 0, with R12 set to
+* the card's CRU base), after which the registers appear as ordinary words at
+* >4000 to >401E (register for window n at >4000 + 2n), and writes the page
+* number; then it switches the area off again (SBZ 0) so that the card's own
+* ROM is out of the way.  Once mapping is on (the loader does that at start),
+* the page in a register is what the CPU sees in that window.  The page number
+* is stored with its two bytes swapped, which is why MAPPG uses SWPB.
+*
+* The kernel divides the memory map into SLOTS of two windows.  Slot A
+* (windows 2 and 3, >2000-3FFF) is the kernel's data and your APPRAM, and the
+* stack: it is mapped once and never changed.  Slot C (>C000-DFFF) holds the
+* module that is running.  Slot B (>E000-FFFF) is the one windows a program is
+* free to point at any page it likes.  Windows A and B (>A000-BFFF) hold the
+* kernel's code.  The rest is the console's.
+*
+* Why there is a record of what each window holds (CURA2, CURBE ...): so that
+* code that wants to borrow a window can find out what it held, use it, and
+* put it back (GETPB, SETPB), and so MAPE can skip the work when the page is
+* already there.  That only works if every change goes through these routines:
+* a mapper register written any other way leaves the record wrong and the next
+* borrower restores the wrong page.
 
 * PAGEC - map pages R0 and R0+1 into slot C (>C000, >D000): a module.
 * Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R7, R12.
@@ -67,6 +93,10 @@ PAGEB  .enter
        .leave
        RT
 
+* The check at the top is an optimisation and a safeguard: if the page is
+* already in the window, nothing is written.  The routine is entered with B to
+* MAPPG rather than BL: MAPPG's RT then returns straight to MAPE's caller,
+* because R11 still holds the caller's return address (a 'tail call').
 * MAPE / MAPF - map page R0 into window >E000 / >F000 alone, unless it is
 * there already; recorded in CURBE / CURBF.  Leaves.  Use R1-R3, R12 (nothing,
 * when the page is already mapped).

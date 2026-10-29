@@ -4,6 +4,21 @@
 * parses it into DTMON DTDAY DTYEAR DTHOUR DTMIN DTSEC); without a TIPI the
 * screen says so.  FCTN 9 returns to the workbench, FCTN = quits.
 *======================================================================
+* THE CLOCK, A DEVICE AND A RECORD.  A TIPI (an interface card for the TI that
+* is connected to a Raspberry Pi) answers to the device name PI, and among its
+* devices is PI.CLOCK: opened for input and read once, it returns one text
+* record, 'w,mm/dd/yy,HH:MM:SS', the weekday digit, date and time.  CLKGET
+* (kernel/files.a99) does the open, the read and the close, parses the text
+* and leaves the numbers in the words DTDOW DTMON DTDAY DTYEAR DTHOUR DTMIN
+* DTSEC; this program only calls it and shows the words.  Without a TIPI there
+* is no such device and CLKGET returns an error code (>FF): the program says
+* so rather than showing zeros.
+*
+* What to learn from it: a kernel routine that does I/O reports failure in R0
+* (0 means success), and the caller must test R0 before using what it
+* returned.  The year is two digits (the clock's own form), so the program
+* adds 2000 before printing.  DECW prints a number without leading zeros, so 5
+* minutes show as '5' rather than '05'.
        COPY "kernel.equ"
        COPY "macros.a99"
 

@@ -5,6 +5,28 @@
 * returns to the workbench, FCTN = quits.  Put a text file called SRC on
 * the disk first.  Assemble it with A, run it with R.
 *======================================================================
+* THE FILE SERVICE, IN THE SMALLEST USEFUL PROGRAM.  The kernel can open a
+* file on any device the console knows (a disk, a TIPI, a CF7+); the five
+* calls are FOPEN, FREAD, FWRITE, FCLOSE and FDELETE.  A file is named by a
+* length-prefixed string such as 'DSK1.SRC': the part before the first dot is
+* the DEVICE, the rest is for the device (on a disk a file name, on a TIPI a
+* path).  FOPEN takes the name's address in R2, the mode in R0 (FIN input or
+* FOUT output, plus FVAR for variable-length records, which is how text files
+* are stored) and the record length in R1; it answers in R0: 0 for success or
+* the disk system's error code (7 is 'file not found', 5 end of file ...).
+*
+* Several files at once.  The kernel offers three FILE HANDLES, numbered 0 to
+* 2, each with its own file and its own place in it.  FSEL chooses which
+* handle FOPEN, FREAD, FWRITE and FCLOSE act on: here handle 0 reads and
+* handle 1 writes, and the loop alternates between them, so the program really
+* holds two files open together, which is how a copy, a merge or a compare is
+* written.  Three is the TI disk controller's own limit.
+*
+* Remember the rule that bites everyone once: every file call runs the disk
+* controller's own code, which changes R6 to R9 (it runs in the console's 'GPL
+* workspace').  So no loop counter or pointer may live in R6-R9 across a file
+* call: here the count, the error and the length of the record in hand are in
+* memory (NREC, ERRO, RLEN).
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -86,6 +108,13 @@ COPY   .enter
        BL   @FSEL
        BL   @FCLOSE
        JMP  CP9
+* Each pass: select the input handle, read a record into BUF (FREAD returns
+* the record's length in R2), select the output handle, write the same number
+* of bytes (FWRITE takes the buffer in R1 and the length in R2), count it.
+* The length is kept in memory (RLEN) because FSEL and FWRITE would not leave
+* it in R2.  When FREAD reports anything but 0 the loop ends; end of file
+* (FEEOF, error 5) is the normal way for a copy to finish, any other code is
+* an error to report.
 CP1    CLR  R0
        BL   @FSEL
        LI   R1,BUF
@@ -105,6 +134,11 @@ CP1    CLR  R0
 CP2    CI   R0,FEEOF           the end of the file is not an error
        JEQ  CP4
 CP3    MOV  R0,@ERRO
+* Both handles are closed at the end, even after an error.  On TI's own
+* controller a file that has been read to its end is already closed, so the
+* second FCLOSE of the input answers an error that we ignore; what matters is
+* that the output file is closed, because that is what makes the disk write
+* the file's last sectors and its directory entry.
 CP4    CLR  R0
        BL   @FSEL
 * (TI's controller has already closed it at the end)

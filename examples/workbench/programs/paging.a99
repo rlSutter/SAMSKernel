@@ -5,6 +5,20 @@
 * every page kept its own, and puts slot B back as it found it (GETPB and
 * SETPB).  FCTN 9 returns to the workbench, FCTN = quits.
 *======================================================================
+* A SECOND LOOK AT MULTI-PAGE PROGRAMMING, in the smallest form.  This program
+* does only what a program that uses SAMS memory has to do: ask the page pool
+* for pages, look at each through a window, and put the window back as it
+* found it.  The editor (examples/workbench/ed.a99) does the same on a larger
+* scale; read this first.
+*
+* The four steps in TEST: (1) GETPB / SETPB: a window is shared, and whoever
+* borrows it must give it back, so the first thing is to record which pages
+* slot B holds now; (2) PINIT / PALLOC: the pool hands out page NUMBERS; a
+* page is not 'there' until it is mapped; (3) MAPE: put page n in the window
+* at >E000: from then on addresses >E000 to >EFFF are that page's 4,096 bytes;
+* (4) write something in it, map the next page, and so on; mapping a page back
+* shows what it still holds, which is how SAMS memory is used as a larger
+* store than the 64K address space.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -13,6 +27,13 @@ ABAR   EQU  (RBARFG*16+RBARBG)*256
 ABOLD  EQU  (RBOLD*16+RBG)*256
 AERR   EQU  (RERROR*16+RBG)*256
 
+* These variables are above APPRAM+5760 so that they do not overwrite the
+* workbench's own state (the shell, the editor, the assembler) which lives
+* below: when a program is run from the workbench it shares APPRAM with them.
+* A program built for a cartridge of its own may use APPRAM from offset 0.
+* Note the comment on CHK: the file and page routines change R6-R9 (and MAPE
+* changes R1-R3), so a loop counter that must survive a call is kept in
+* memory, not in a register.
 * (free when run from the workbench: see docs/WORKBENCH.md)
 WORK   EQU   APPRAM+5760
 PGS    EQU  WORK+0             the four pages (words)
@@ -20,6 +41,12 @@ GOOD   EQU  WORK+8             pages that kept their number
 IDX    EQU  WORK+10            pages allocated
 CHK    EQU  WORK+12            the page being checked (memory: not R6-R9)
 TMPP   EQU  WORK+14            a page number in hand
+* The pool is given every page from POOLP to the end of the card (NPAGES).
+* Pages below it are the workbench's own: its code, and the pages the program
+* being tested runs from.  The workbench gives up the editor's pages when it
+* runs a program, so the whole range above the workbench's own pages is free.
+* Calling PINIT again resets the pool completely, so a program that has run
+* once starts clean on the next ENTER.
 POOLP  EQU  PGFREE+30          the pool starts above the workbench's own pages
 
        AORG >C000
@@ -70,6 +97,13 @@ T2     CI   R9,KENTER*256
 T9     .leave
        RT
 
+* The loop at TS1 is the whole idiom.  PALLOC returns a page number in R0 (0
+* means the pool is empty); keep it (the table PGS); MAPE puts it in the
+* window; the first word of the page becomes the page's own number, a pattern
+* that makes a wrongly mapped page obvious.  Because MAPE changes R1-R3 the
+* index is reloaded from memory afterwards.  The second loop (TS4) maps each
+* page again and checks the number is still there: if the pages really are
+* separate 4K stores, all four match.
 * TEST - four pages from the pool, each filled with its own number, then
 * checked.
 TEST   .enter
@@ -115,6 +149,8 @@ TS6    .pop R1
        .leave
        RT
 
+* HEX4 is the kernel's routine for four hexadecimal digits; the page numbers
+* are shown in hex because the card's pages are numbered from 0 to >FFF.
 * SHOW - the page numbers and the verdict.
 SHOW   .enter
        LI   R0,5*COLS+2

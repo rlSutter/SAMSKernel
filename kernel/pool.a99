@@ -10,6 +10,19 @@
 * touched: the application clears what it needs.  Pages the pool hands
 * out are not mapped anywhere; map them with MAPE, MAPF or MAPPG.
 *======================================================================
+* A POOL OF PAGES, for programs that need memory without choosing where.  A
+* SAMS card of 1M has 256 pages, one of 16M has 4,096; a program that wants a
+* buffer larger than slot A can hold asks the pool for a page and gets a
+* number; it maps the number into a window to use it (MAPE, MAPF) and gives
+* the number back when it has finished (PRELS).  The pool is a bitmap: one bit
+* per page, 1 meaning free, so 4,096 pages need 512 bytes (POOLBM).  The
+* bitmap is kept in the kernel's own pages, out of your 7K.
+*
+* The pool does not clear a page, map a page or know what a page holds: it
+* only says which numbers are in use.  Two programs that share the card (the
+* workbench's editor and a program under test) must agree on who owns which
+* pages; the workbench's way is described in examples/workbench/ed.a99
+* (POOLUP) and docs/WORKBENCH.md.
 
 * PINIT - the pool manages pages R0 up to (not including) R1; all free.
 * Pages outside the range are never handed out.  Uses R0-R6.  Leaf.
@@ -30,6 +43,12 @@ PI2    C    R0,R1              each page of the range: free
        JMP  PI2
 PI9    B    *R6
 
+* The routines here avoid the software stack and keep their return address in
+* a spare register instead (MOV R11,R3 ... B *R3), because they are leaf
+* routines that call each other.  BL changes R11, so a routine that calls
+* another with BL must save R11 first; saving it in a register is cheaper than
+* a push and is safe as long as the callee does not use that register (the
+* 'Uses' lists say which).
 * PSET - mark page R0 free in the bitmap.  Leaf (R11 is kept in R3).
 * Uses R2, R3, R4, R5.
 PSET   MOV  R11,R3
@@ -37,6 +56,11 @@ PSET   MOV  R11,R3
        SOCB R4,*R2
        B    *R3
 
+* Page n is bit (n mod 8) of byte (n / 8), counted from the left (the top bit
+* of the byte is page 0): the code computes the byte's address (SRL R2,3:
+* divide by 8) and builds the mask by shifting a 1 in the top bit right n mod
+* 8 places.  COC and SZCB / SOCB then test, clear and set that bit in the
+* byte.
 * PBIT - R2 = the address of page R0's bitmap byte, R4 = its mask (in the
 * high byte).  Leaf.  Uses R2, R4, R5.
 PBIT   MOV  R0,R2

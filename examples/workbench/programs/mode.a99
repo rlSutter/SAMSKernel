@@ -4,6 +4,20 @@
 * returns to the workbench, FCTN = quits.  Positions are row * TXCOLS + column,
 * so the same code draws in either mode.  Assemble it with A, run it with R.
 *======================================================================
+* VIDEO MODES AND POSITIONS.  The F18A can show the screen in many modes; the
+* two this program switches between are Text 80 (80 columns) and Text 40 (40
+* columns, wider characters).  VMODE takes a base mode in R0 (VMT80, VMT40
+* ...) and a set of options in R1 (VO30: 30 rows rather than 24; VOPOS: a
+* colour attribute per cell, the way the kernel's roles work).  It rewrites
+* the screen's tables and clears it, so the program must draw again
+* afterwards: that is DRAW.
+*
+* The point to learn is that the screen's size is not a constant: it is the
+* current mode's.  TXCOLS and TXROWS are kernel variables holding the current
+* width and height, so a program that must work in either mode computes
+* positions from them (row * TXCOLS + column: the routine POS) rather than
+* from 80.  The programs that run only in Text 80 may use the constant COLS,
+* which is the Text 80 value assembled in.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -61,6 +75,11 @@ DRAW   .enter
        .leave
        RT
 
+* MPY multiplies two words and gives a 32-bit product: MPY @TXCOLS,R1
+* multiplies R1 by the variable and leaves the result in the register PAIR
+* R1:R2, the high half in R1 and the low half in R2, which is the one we need
+* (a position is below 65,536).  It is a common mistake to look for the result
+* in R1.
 * POS - R0 = a row: R0 = the position of column 2 on it, in this mode.
 POS    MOV  R0,R1
        MPY  @TXCOLS,R1         R2 = row * columns
@@ -82,6 +101,10 @@ TICK   .enter
        JNE  T1
        SETO @QUITF
        JMP  T9
+* Going back to the workbench: the workbench's own screen is Text 80 with 30
+* rows and per-cell attributes, so this program restores that mode before it
+* hands over; a program that leaves the video mode changed would leave the
+* workbench's menu drawn wrongly.
 T1     CI   R9,KBACK*256
        JNE  T2
        LI   R0,VMT80           back to the workbench's own mode first

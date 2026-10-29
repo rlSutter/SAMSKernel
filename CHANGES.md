@@ -1,5 +1,17 @@
 # Changes
 
+## 1.7.0 (30 October 2026)
+
+The editor is the guide's multi-page example, and the sources begin to be commented for learning.
+
+- **The workbench editor keeps its lines in pool pages** (`PALLOC`, as the file grows) instead of a fixed block of 16 pages: up to 2,040 lines (was 800), a 51-line block per page, a page table (`EDPGT`) in APPRAM and an order table on a page of its own. `REVERS/A99` (986 lines) could not be opened whole by the old editor; commented sources would be longer still. `PROGRAMMERS-GUIDE.md` appendix C explains the design; `ed.a99` is commented for it.
+- **A file too long for the buffer** is loaded in part, the screen says so, and saving is refused (before, it was cut silently and a later save would have cut the file on the disk).
+- **Running a program (`R`) gives the editor's pages up**, so a program may use the whole pool and `PINIT` it; `R` refuses to run while the editor holds unsaved changes.
+- **Fixed:** with 1.6.0's 31-character names the editor's 24-byte name buffer overflowed into its free list (a name over 23 characters).
+- **Comments** (the assembled output is byte for byte unchanged, checked on all 54 build outputs and on each program): `examples/hello` (a tutorial header and the idioms explained), `ed.a99`, `kernel/pager.a99`, `kernel/pool.a99`, `kernel/kernel.a99`, `kernel/macros.a99` and the workbench programs `beep`, `mode`, `clock`, `copy`, `paging`. **Not yet commented to this depth:** the rest of the kernel (`video`, `keys`, `text`, `vdp`, `loader`, `music`, `f18a`; `files` and `kdefs` already had thorough comments), `examples/browser`, `diag`, `modes`, `music`, `joystick`, `reversi` (already well commented), and `wb.a99` and the assembler (`asm_*.a99`).
+- **Two workbench disks** (`workbench.dsk`, `examples.dsk`): the commented programs no longer fit on one 90K disk.
+- Tests: group `editorpages` (a 1,100-line file in 22 pool pages, edit and save of 600 lines, the 2,040-line limit and the refusal to save a cut file, no run over unsaved edits).
+
 ## 1.6.0 (29 October 2026)
 
 Support for a TIPI (and any second DSR card).

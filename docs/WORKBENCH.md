@@ -19,9 +19,11 @@ exercised by key scripts. **It has not run on a real TI-99/4A**, and I have not 
 
 The same source assembles on both: it is [PC or TI] code, with the **[TI]** limits in part 4 and part 5.
 
-**Programs on the workbench disk** (each assembles and runs on the TI; the tests do exactly that): `HELLO/A99` (keys echoed), `BEEP/A99` (notes on keys 1-8: `SNDTONE`), `MODE/A99` (Text 80 / Text 40: `VMODE`, `TXCOLS`),
-`PAGING/A99` (SAMS pages from the pool: `PINIT`, `PALLOC`, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once: `FSEL`; the sample `SRC` on the disk is what it copies), `JOY/A99` (both joysticks: `JOYGET`, `JOYKEY`), `CLOCK/A99` (the date and time from a TIPI's clock: `CLKGET`), `REVERS/A99` (Reversi: a whole program, 3,392 bytes, takes under a minute and a half to assemble at the simulator's estimate of the TI's speed; I have not timed it on a real TI),
-`MODES/A99` (fifteen display screens) and `PROBE1/A99` (an assembler test). Each is the example for one part of PROGRAMMERS-GUIDE.md (parts 1, 5, 6, 7, 9).
+**Programs on the two disks** (each assembles and runs on the TI; the tests do exactly that). A 90K disk cannot hold every program with its comments, so there are two, each with its own `KERNEL/EQU` (put the one you want in drive 1):
+- `workbench.dsk` (volume SKWORKBNCH): `HELLO/A99` (keys echoed), `BEEP/A99` (notes on keys 1-8: `SNDTONE`), `MODE/A99` (Text 80 / Text 40: `VMODE`, `TXCOLS`), `PAGING/A99` (SAMS pages from the pool: `PINIT`, `PALLOC`, `MAPE`, `GETPB`/`SETPB`), `COPY/A99` (two files at once: `FSEL`; the sample `SRC` on the disk is what it copies), `JOY/A99` (both joysticks: `JOYGET`, `JOYKEY`), `CLOCK/A99` (the date and time from a TIPI's clock: `CLKGET`) and `PROBE1/A99` (an assembler test).
+- `examples.dsk` (volume SKEXAMPLES): the two long ones, `REVERS/A99` (Reversi: a whole program, 3,392 bytes, which takes under a minute and a half to assemble at the simulator's estimate of the TI's speed; I have not timed it on a real TI) and `MODES/A99` (fifteen display screens).
+
+Each is the example for one part of PROGRAMMERS-GUIDE.md (parts 1, 5, 6, 7, 9). The sources are commented to be read: the longer comments make them too big to edit in a hurry on the TI, which is what the 2,040-line editor is for.
 
 ## 1. Getting it onto the TI
 
