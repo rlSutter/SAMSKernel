@@ -1,0 +1,544 @@
+*======================================================================
+* wb.a99 - the workbench's shell: pick a source file on disk, assemble
+* it with the native assembler (asm.a99), read the errors, run the
+* program it made.
+*
+*   N  type a file name        C  the disk's catalog: pick a file
+*   A  assemble it             R  run the assembled program
+*   FCTN = quits
+*
+* A program is run by putting its image in two SAMS pages (PGUSER) and
+* switching to them with GOMOD, so it is a module of the kernel the
+* workbench itself runs on.  It comes back with
+*       LI   R0,PG_WB
+*       CLR  R1
+*       BL   @GOMOD
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* storage shared with asm.a99 (APPRAM+0 up to +255 is the shell's)
+SRCNAME EQU APPRAM             the file name, length-prefixed (32 bytes)
+NAMLN  EQU  APPRAM+32          (the typed name's length is SRCNAME's first byte)
+MODE   EQU  APPRAM+34          0 the menu, 1 typing a name, 2 the catalog
+RESULT EQU  APPRAM+36          0 nothing yet, 1 assembled, 2 errors
+SEL    EQU  APPRAM+38          the catalog's selection
+NFILES EQU  APPRAM+40
+EPTR   EQU  APPRAM+42
+DEVLEN EQU  APPRAM+44
+CATBUF EQU  APPRAM+64          a catalog record: 40 bytes
+CATTAB EQU  APPRAM+5200         the names: 20 entries of 12 bytes (the
+*                              assembler overwrites them: the catalog is read
+*                              afresh each time)
+CATMAX EQU  20
+ERRTAB EQU  APPRAM+640
+NERR   EQU  APPRAM+526
+OUTLEN EQU  APPRAM+524
+ORGB   EQU  APPRAM+520
+INARG  EQU  APPRAM+50          the argument INIT was given (1: assemble now)
+PGUSER EQU  PGFREE+2
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+ASEL   EQU  (RSELFG*16+RSELBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+INIT   .enter
+       MOV  R1,@INARG
+       MOV  @MODE,@MODE        first start: the default device
+       MOV  @SRCNAME,@SRCNAME
+       JNE  IN1
+       LI   R1,SDSK
+       LI   R2,SRCNAME
+       LI   R3,6
+IN0    MOVB *R1+,*R2+
+       DEC  R3
+       JNE  IN0
+IN1    CLR  @MODE
+       BL   @REDRAW
+       MOV  @INARG,R0
+       CI   R0,1
+       JNE  IN2
+       BL   @ASSEMB
+IN2    .leave
+       RT
+
+*----------------------------------------------------------------------
+* the screen
+*----------------------------------------------------------------------
+REDRAW .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       MOV  @MODE,R0
+       CI   R0,2
+       JNE  RD1
+       BL   @DRAWCAT
+       JMP  RD9
+RD1    LI   R0,2*COLS+2
+       LI   R1,SFILE
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,2*COLS+8
+       LI   R1,SRCNAME
+       LI   R2,ABOLD
+       BL   @PUTS
+       MOV  @MODE,R0
+       CI   R0,1
+       JNE  RD2
+       CLR  R0                 the cursor: a block after the name
+       MOVB @SRCNAME,R0
+       SRL  R0,8
+       AI   R0,2*COLS+8+1
+       LI   R1,>1500
+       LI   R2,1
+       BL   @FILLN
+RD2    LI   R9,HELP
+RD3    MOV  *R9+,R0
+       JEQ  RD4
+       MOV  *R9+,R1
+       LI   R2,ANORM
+       BL   @PUTS
+       JMP  RD3
+RD4    BL   @RESULTS
+RD9    .leave
+       RT
+
+* RESULTS - what the last assembly said.
+RESULTS .enter
+       MOV  @RESULT,R0
+       JEQ  RS9
+       CI   R0,1
+       JNE  RS2
+       LI   R0,9*COLS+2        assembled
+       LI   R1,SOK
+       LI   R2,ABOLD
+       BL   @PUTS
+       LI   R0,9*COLS+14
+       MOV  @OUTLEN,R1
+       LI   R2,ABOLD
+       BL   @DECW
+       LI   R0,9*COLS+19
+       LI   R1,SBYTES
+       LI   R2,ABOLD
+       BL   @PUTS
+       LI   R0,9*COLS+29
+       MOV  @ORGB,R1
+       LI   R2,ABOLD
+       BL   @HEX4
+       JMP  RS9
+RS2    LI   R0,9*COLS+2
+       MOV  @NERR,R1
+       LI   R2,AERR
+       BL   @DECW
+       LI   R0,9*COLS+6
+       LI   R1,SERRS
+       LI   R2,AERR
+       BL   @PUTS
+       CLR  R9                 the error list
+RS3    C    R9,@NERR
+       JHE  RS9
+       CI   R9,18
+       JHE  RS9
+       MOV  R9,R1
+       SLA  R1,2
+       AI   R1,ERRTAB
+       MOV  *R1+,R6            the line
+       MOV  *R1,R7             depth << 8 | code
+       MOV  R9,R0
+       AI   R0,10
+       MPY  @C80,R0            R1 = the row's first cell
+       MOV  R1,@TMPW
+       MOV  @TMPW,R0
+       AI   R0,2
+       MOV  R6,R1
+       LI   R2,ANORM
+       BL   @DECW
+       MOV  @TMPW,R0
+       AI   R0,8
+       MOV  R7,R2
+       ANDI R2,>00FF
+       CI   R2,13
+       JLE  RS4
+       LI   R2,13
+RS4    SLA  R2,1
+       MOV  @MSGTAB-2(R2),R1
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  R7,R2
+       SRL  R2,8
+       JEQ  RS5
+       MOV  @TMPW,R0           (in a COPYed file)
+       AI   R0,40
+       LI   R1,SINC
+       LI   R2,AMARK
+       BL   @PUTS
+RS5    INC  R9
+       JMP  RS3
+RS9    .leave
+       RT
+TMPW   EQU  APPRAM+48
+C80    DATA 80
+
+*----------------------------------------------------------------------
+* the keys
+*----------------------------------------------------------------------
+TICK   .enter
+       MOV  R0,R9
+       JEQ  TK9
+       CI   R9,KQUIT*256
+       JNE  TK1
+       SETO @QUITF
+       JMP  TK9
+TK1    MOV  @MODE,R0
+       CI   R0,1
+       JNE  TK1A
+       B    @TKNAME
+TK1A   CI   R0,2
+       JNE  TK1B
+       B    @TKCAT
+TK1B
+       CI   R9,>6100           letters to capitals
+       JL   TK2
+       CI   R9,>7A00
+       JH   TK2
+       AI   R9,->2000
+TK2    CI   R9,>4E00           N: type a name
+       JNE  TK3
+       LI   R0,1
+       MOV  R0,@MODE
+       BL   @REDRAW
+       JMP  TK9
+TK3    CI   R9,>4100           A: assemble
+       JNE  TK4
+       BL   @ASSEMB
+       JMP  TK9
+TK4    CI   R9,>5200           R: run
+       JNE  TK5
+       BL   @RUN
+       JMP  TK9
+TK5    CI   R9,>4300           C: the catalog
+       JNE  TK6
+       BL   @CATOPEN
+       JMP  TK9
+TK6    CI   R9,>4500           E: edit
+       JNE  TK9
+       LI   R0,PG_ED
+       CLR  R1
+       BL   @GOMOD
+TK9    .leave
+       RT
+
+* typing a file name
+TKNAME CI   R9,KENTER*256
+       JEQ  TKN9
+       CI   R9,KBACK*256
+       JEQ  TKN9
+       CI   R9,KLEFT*256
+       JEQ  TKNDEL
+       CI   R9,KDEL*256
+       JEQ  TKNDEL
+       CI   R9,>2000
+       JL   TKN8
+       CI   R9,>7E00
+       JH   TKN8
+       CLR  R1
+       MOVB @SRCNAME,R1
+       SRL  R1,8
+       CI   R1,31
+       JHE  TKN8
+       CI   R9,>6100           upper case
+       JL   TKN1
+       CI   R9,>7A00
+       JH   TKN1
+       AI   R9,->2000
+TKN1   MOVB R9,@SRCNAME+1(R1)
+       INC  R1
+       SWPB R1
+       MOVB R1,@SRCNAME
+       JMP  TKN8
+TKNDEL CLR  R1
+       MOVB @SRCNAME,R1
+       SRL  R1,8
+       JEQ  TKN8
+       DEC  R1
+       SWPB R1
+       MOVB R1,@SRCNAME
+       JMP  TKN8
+TKN9   CLR  @MODE
+TKN8   BL   @REDRAW
+       B    @TK9
+
+* ASSEMB - assemble SRCNAME with the native assembler.
+ASSEMB .enter
+       LI   R0,3*COLS+2
+       LI   R1,SWORK
+       LI   R2,AMARK
+       BL   @PUTS
+       .callmod PG_ASM,4
+       MOV  @NERR,R0
+       LI   R1,1
+       MOV  R0,R0
+       JEQ  AS1
+       LI   R1,2
+AS1    MOV  R1,@RESULT
+       BL   @REDRAW
+       .leave
+       RT
+
+* RUN - the assembled program into its two pages, and switch to it.
+RUN    .enter
+       MOV  @RESULT,R0
+       CI   R0,1
+       JEQ  RN1
+       LI   R0,3*COLS+2
+       LI   R1,SNOPRG
+       LI   R2,AERR
+       BL   @PUTS
+       JMP  RN9
+* the image must fit the pair of pages mapped at >C000
+RN1    MOV   @ORGB,R2
+       CI   R2,>C000
+       JL   RNBAD
+       MOV  @OUTLEN,R3
+       A    R2,R3
+       CI   R3,>E000
+       JH   RNBAD
+       LI   R0,PGUSER
+       BL   @MAPE
+       LI   R0,PGUSER+1
+       BL   @MAPF
+       LI   R1,>E000           the pages cleared ...
+       LI   R2,2048
+RN2    CLR  *R1+
+       DEC  R2
+       JNE  RN2
+       MOV  @ORGB,R2           ... and the image copied in at its address
+       AI   R2,>2000
+       LI   R1,OUTBUF
+       MOV  @OUTLEN,R3
+       INC  R3
+       SRL  R3,1
+RN3    MOV  *R1+,*R2+
+       DEC  R3
+       JNE  RN3
+       LI   R0,PGUSER
+       CLR  R1
+       BL   @GOMOD
+       JMP  RN9
+RNBAD  LI   R0,3*COLS+2
+       LI   R1,SBADORG
+       LI   R2,AERR
+       BL   @PUTS
+RN9    .leave
+       RT
+OUTBUF EQU  APPRAM+1024
+
+*----------------------------------------------------------------------
+* the catalog
+*----------------------------------------------------------------------
+* CATOPEN - read the catalog of the file name's device into CATTAB.
+CATOPEN .enter
+       CLR  @NFILES
+       CLR  @SEL
+       LI   R1,2
+       MOV  R1,@MODE
+       LI   R2,CATNM           the device: "DSK1." from the file name
+       CLR  R3
+       LI   R1,SRCNAME+1
+       CLR  R4
+       MOVB @SRCNAME,R4
+       SRL  R4,8
+       LI   R5,CATNM+1
+CO1    MOV  R4,R4
+       JEQ  CO3
+       MOVB *R1+,R0
+       MOVB R0,*R5+
+       INC  R3
+       DEC  R4
+       CI   R0,>2E00
+       JNE  CO1
+       JMP  CO4
+CO3    LI   R3,5               no dot: DSK1.
+       LI   R1,SDSK+1
+       LI   R5,CATNM+1
+       LI   R4,5
+CO3A   MOVB *R1+,*R5+
+       DEC  R4
+       JNE  CO3A
+CO4    SWPB R3
+       MOVB R3,@CATNM
+       MOV  R3,@DEVLEN
+       LI   R2,CATNM
+       LI   R0,FIN+FINTL
+       LI   R1,38
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  CO9
+       LI   R1,CATBUF          the first record: the disk
+       BL   @FREAD
+CO5    LI   R1,CATBUF
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  CO8
+       MOVB @CATBUF,R0
+       JEQ  CO8
+       MOV  @NFILES,R0
+       CI   R0,CATMAX
+       JHE  CO8
+       MOV  R0,R1              the entry: CATTAB + n * 12 (in the area at +1000)
+       SLA  R1,3
+       MOV  R0,R2
+       SLA  R2,2
+       A    R2,R1
+       AI   R1,CATTAB
+       MOV  R1,@EPTR
+       LI   R2,CATBUF
+       LI   R3,11
+CO6    MOVB *R2+,*R1+
+       DEC  R3
+       JNE  CO6
+       INC  @NFILES
+       JMP  CO5
+CO8    BL   @FCLOSE
+CO9    BL   @REDRAW
+       .leave
+       RT
+CATNM  EQU  APPRAM+1000
+
+* DRAWCAT - the catalog screen.
+DRAWCAT .enter
+       LI   R0,2*COLS+2
+       LI   R1,SPICK
+       LI   R2,AMARK
+       BL   @PUTS
+       MOV  @NFILES,R0
+       JNE  DC0
+       LI   R0,4*COLS+2
+       LI   R1,SNOFIL
+       LI   R2,AERR
+       BL   @PUTS
+       JMP  DC9
+DC0    CLR  R9
+DC1    C    R9,@NFILES
+       JHE  DC9
+       MOV  R9,R1
+       SLA  R1,3
+       MOV  R9,R2
+       SLA  R2,2
+       A    R2,R1
+       AI   R1,CATTAB
+       MOV  R1,@TMPW+2
+       MOV  R9,R0
+       AI   R0,4
+       MPY  @C80,R0            R1 = the row's first cell
+       MOV  R1,R0
+       AI   R0,4
+       MOV  @TMPW+2,R1
+       LI   R2,ANORM
+       C    R9,@SEL
+       JNE  DC2
+       LI   R2,ASEL
+DC2    BL   @PUTS
+       INC  R9
+       JMP  DC1
+DC9    .leave
+       RT
+
+* the catalog's keys: UP, DOWN, ENTER picks, BACK returns
+TKCAT  CI   R9,KBACK*256
+       JEQ  TKC9
+       CI   R9,KUP*256
+       JNE  TKC1
+       MOV  @SEL,R1
+       JEQ  TKC8
+       DEC  @SEL
+       JMP  TKC8
+TKC1   CI   R9,KDOWN*256
+       JNE  TKC2
+       MOV  @SEL,R1
+       INC  R1
+       C    R1,@NFILES
+       JHE  TKC8
+       INC  @SEL
+       JMP  TKC8
+TKC2   CI   R9,KENTER*256
+       JNE  TKC8
+       MOV  @NFILES,R0
+       JEQ  TKC9
+       MOV  @SEL,R1            the name: the device, then the file
+       SLA  R1,3
+       MOV  @SEL,R2
+       SLA  R2,2
+       A    R2,R1
+       AI   R1,CATTAB
+       LI   R2,SRCNAME+1
+       MOV  @DEVLEN,R3
+       LI   R4,CATNM+1
+TKC3   MOV  R3,R3
+       JEQ  TKC4
+       MOVB *R4+,*R2+
+       DEC  R3
+       JMP  TKC3
+TKC4   CLR  R3
+       MOVB *R1+,R3
+       SRL  R3,8
+       MOV  R3,R5
+       A    @DEVLEN,R5
+       SWPB R5
+       MOVB R5,@SRCNAME
+TKC5   MOV  R3,R3
+       JEQ  TKC9
+       MOVB *R1+,*R2+
+       DEC  R3
+       JMP  TKC5
+TKC9   CLR  @MODE
+TKC8   BL   @REDRAW
+       B    @TK9
+
+*----------------------------------------------------------------------
+* text
+*----------------------------------------------------------------------
+STITLE STRI ' SAMS Kernel   workbench'
+SFILE  STRI 'File:'
+SDSK   STRI 'DSK1.'
+SH1    STRI 'N  type a file name          C  the catalog of the disk'
+SH2    STRI 'E  edit the file             A  assemble it         R  run the program'
+SH3    STRI 'FCTN =  quit'
+SOK    STRI 'Assembled:'
+SBYTES STRI 'bytes at >'
+SERRS  STRI 'errors:'
+SINC   STRI '(in a COPYed file)'
+SWORK  STRI 'assembling ...                '
+SNOPRG STRI 'nothing assembled to run                    '
+SBADORG STRI 'the program must be at >C000 and fit 8K        '
+SPICK  STRI 'UP DOWN pick a file, ENTER chooses it, BACK returns'
+SNOFIL STRI 'no files, or the disk could not be read'
+M1     STRI 'unknown operation'
+M2     STRI 'bad operand'
+M3     STRI 'undefined symbol'
+M4     STRI 'label defined twice'
+M5     STRI 'jump out of range'
+M6     STRI 'value out of range'
+M7     STRI 'file not found'
+M8     STRI 'program over 4096 bytes'
+M9     STRI 'bad AORG'
+M10    STRI 'name over 8 characters'
+M11    STRI 'bad expression'
+M12    STRI 'EQU needs a label and a value'
+M13    STRI 'label changed between passes'
+       EVEN
+MSGTAB DATA M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12,M13
+HELP   DATA 4*COLS+2,SH1,5*COLS+2,SH2,6*COLS+2,SH3,0

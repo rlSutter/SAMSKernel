@@ -81,7 +81,8 @@ def fix_line(line):
         # the length is the difference of two labels, so editing the text later cannot leave it stale
         base = label if label else 'S%04d' % (abs(hash(operand)) % 10000)
         out = [lab + 'BYTE %sE-%sB' % (base, base)]
-        out += [('%sB' % base).ljust(7) + 'TEXT \'' + chunks[0].replace("'", "''") + '\'']
+        lb = '%sB' % base
+        out += [lb + ' ' * max(1, 7 - len(lb)) + 'TEXT \'' + chunks[0].replace("'", "''") + '\'']
         out += ['       TEXT \'' + c.replace("'", "''") + '\'' for c in chunks[1:]]
         out += ['%sE' % base]
         return out

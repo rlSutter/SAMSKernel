@@ -2,6 +2,18 @@
   "name": "WORKBENCH",
   "min_pages": 128,
   "modules": [
-    {"name": "asm", "source": "asm.a99"}
-  ]
+    {
+      "name": "wb",
+      "source": "wb.a99"
+    },
+    {
+      "name": "asm",
+      "source": "asm.a99"
+    },
+    {
+      "name": "ed",
+      "source": "ed.a99"
+    }
+  ],
+  "boot": "wb"
 }

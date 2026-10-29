@@ -1,0 +1,790 @@
+*======================================================================
+* ed.a99 - the workbench's editor: a full-screen editor for DIS/VAR 80
+* source files, up to 800 lines of 80 columns.
+*
+*   arrows move            FCTN 5 BEGIN start of line    FCTN 6 PROC'D end
+*   FCTN 7 AID / 8 REDO    a page up / down
+*   type                   inserts (FCTN 2 INS switches to overwriting)
+*   ENTER splits the line  CTRL H deletes the character before the cursor
+*   FCTN 1 DEL             deletes the character under it
+*   FCTN 3 ERASE           deletes the line
+*   CTRL S saves           CTRL A saves and assembles
+*   CTRL X back to the menu (twice if there are unsaved changes)
+*
+* The lines are kept in SAMS pages, 51 lines of 80 bytes to a page, in the
+* order of a table of slot numbers (so inserting and deleting a line moves
+* only the table): pages EDPG0 on for the text, ORDPG for the table.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+* storage (the shell's area: APPRAM+128 up to +255)
+SRCNAME EQU APPRAM             the file name (the shell's)
+EDN    EQU  APPRAM+128         lines in the buffer
+EDTOP  EQU  APPRAM+130         the line at the top of the screen
+EDCUR  EQU  APPRAM+132         the cursor's line
+EDCOL  EQU  APPRAM+134         the cursor's column (0-79)
+EDINS  EQU  APPRAM+136         non-zero: typing inserts
+EDDIRT EQU  APPRAM+138         unsaved changes
+EDFREE EQU  APPRAM+140         the next never-used slot
+EDNFR  EQU  APPRAM+142         slots on the free list
+EDLOAD EQU  APPRAM+144         non-zero: a buffer is loaded (its name in EDNAME)
+EDSURE EQU  APPRAM+146         CTRL X was pressed once with unsaved changes
+EDT    EQU  APPRAM+148         scratch words (6)
+EDOLD  EQU  APPRAM+248         the cursor's cell on screen (-1: none)
+EDDRAW EQU  APPRAM+250         0 nothing, 1 this line, 2 everything to draw
+EDMSG  EQU  APPRAM+252         a message to show instead of the help (0: none)
+EDNAME EQU  APPRAM+160         the loaded file's name (24 bytes)
+EDFL   EQU  APPRAM+184         the free list: 32 slots
+EDPG0  EQU  PGFREE+4           16 pages of text
+ORDPG  EQU  PGFREE+20          the order table
+MAXLN  EQU  800
+LPP    EQU  51
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+AMARK  EQU  (RMARK*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+ACUR   EQU  (RBG*16+RACCNT)*256
+
+       AORG >C000
+       DATA INIT,TICK,REDRAW,0
+
+* INIT - from the shell: load the file unless it is the one already here.
+INIT   .enter
+       BL   @SAMENAME
+       MOV  R0,R0
+       JNE  IN1
+       BL   @LOADFILE
+IN1    CLR  @EDSURE
+       BL   @REDRAW
+       .leave
+       RT
+
+* SAMENAME - R0 = 1 if a buffer is loaded and its name is SRCNAME's.
+SAMENAME
+       CLR  R0
+       MOV  @EDLOAD,@EDLOAD
+       JEQ  SN9
+       CLR  R1
+       MOVB @SRCNAME,R1
+       SRL  R1,8
+       INC  R1
+       LI   R2,SRCNAME
+       LI   R3,EDNAME
+SN1    CB   *R2+,*R3+
+       JNE  SN9
+       DEC  R1
+       JNE  SN1
+       LI   R0,1
+SN9    RT
+
+*----------------------------------------------------------------------
+* the buffer
+*----------------------------------------------------------------------
+* LNPTR - R1 = a line number: R2 = the address of its 80 bytes (its page
+* mapped at >E000).  Uses R0-R5.
+LNPTR  .enter
+       MOV  R1,@EDT
+       LI   R0,ORDPG
+       BL   @MAPF
+       MOV  @EDT,R1
+       SLA  R1,1
+       MOV  @>F000(R1),R5      the slot
+       CLR  R4
+       LI   R3,LPP
+       DIV  R3,R4              R4 = the page, R5 = the place in it
+       MOV  R4,R0
+       AI   R0,EDPG0
+       BL   @MAPE
+       LI   R3,80
+       MOV  R5,R2
+       MPY  R3,R2              R3 = place * 80
+       AI   R3,>E000
+       MOV  R3,R2
+       .leave
+       RT
+
+* NEWSLOT - R0 = an unused slot (from the free list, else the next never
+* used), or -1 if the buffer is full.  Uses R0, R1.
+NEWSLOT MOV @EDNFR,R1
+       JEQ  NS1
+       DEC  R1
+       MOV  R1,@EDNFR
+       SLA  R1,1
+       MOV  @EDFL(R1),R0
+       RT
+NS1    MOV  @EDFREE,R0
+       CI   R0,MAXLN
+       JL   NS2
+       SETO R0
+       RT
+NS2    INC  @EDFREE
+       RT
+
+* FREESLOT - give slot R0 back (if the list has room).  Uses R1.
+FREESLOT
+       MOV  @EDNFR,R1
+       CI   R1,32
+       JHE  FS9
+       SLA  R1,1
+       MOV  R0,@EDFL(R1)
+       INC  @EDNFR
+FS9    RT
+
+* BLANKLN - R2 = a line's address: 80 spaces.  Uses R1, R2, R3.
+BLANKLN LI  R1,>2020
+       LI   R3,40
+BL1    MOV  R1,*R2+
+       DEC  R3
+       JNE  BL1
+       RT
+
+* INSLINE - insert a blank line before line number R1 (R1 = EDN adds at the
+* end).  R0 = 0 done, -1 the buffer is full.  The new line is current in
+* window E at R2.  Uses R0-R5.
+INSLINE .enter
+       MOV  R1,@EDT+2
+       BL   @NEWSLOT
+       CI   R0,-1
+       JEQ  IL9
+       MOV  R0,@EDT+4          the slot
+       LI   R0,ORDPG
+       BL   @MAPF
+       MOV  @EDN,R3            shift the table up from the end
+       SLA  R3,1
+       AI   R3,>F000
+       MOV  @EDT+2,R4
+       SLA  R4,1
+       AI   R4,>F000
+IL1    C    R3,R4
+       JLE  IL2
+       MOV  @-2(R3),*R3
+       DECT R3
+       JMP  IL1
+IL2    MOV  @EDT+4,*R4
+       INC  @EDN
+       MOV  @EDT+2,R1
+       BL   @LNPTR
+       BL   @BLANKLN
+       MOV  @EDT+2,R1
+       BL   @LNPTR
+       CLR  R0
+IL9    .leave
+       RT
+
+* DELLINE - remove line R1 (the last line is blanked instead).  Uses R0-R5.
+DELLINE .enter
+       MOV  R1,@EDT+2
+       MOV  @EDN,R0
+       DEC  R0
+       JNE  DL1
+       MOV  @EDT+2,R1          the only line: blank it
+       BL   @LNPTR
+       BL   @BLANKLN
+       JMP  DL9
+DL1    LI   R0,ORDPG
+       BL   @MAPF
+       MOV  @EDT+2,R4
+       SLA  R4,1
+       MOV  @>F000(R4),R0
+       BL   @FREESLOT
+       MOV  @EDT+2,R4
+       SLA  R4,1
+       AI   R4,>F000
+       MOV  @EDN,R3
+       SLA  R3,1
+       AI   R3,>F000
+DL2    MOV  R4,R0
+       INCT R0
+       C    R0,R3
+       JHE  DL3
+       MOV  *R0,*R4
+       INCT R4
+       JMP  DL2
+DL3    DEC  @EDN
+DL9    .leave
+       RT
+
+* LOADFILE - read SRCNAME into the buffer (an empty buffer of one blank
+* line if the file is not there).  Uses everything.
+LOADFILE .enter
+       CLR  @EDN
+       CLR  @EDTOP
+       CLR  @EDCUR
+       CLR  @EDCOL
+       CLR  @EDDIRT
+       CLR  @EDFREE
+       CLR  @EDNFR
+       SETO @EDINS
+       LI   R2,SRCNAME
+       LI   R0,FIN+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  LF8
+LF1    MOV  @EDN,R1
+       BL   @INSLINE
+       CI   R0,-1
+       JEQ  LF7
+       MOV  R2,@EDT+6          the line's address
+       LI   R1,EDRBUF
+       BL   @FREAD
+       MOV  R0,R0
+       JNE  LF6
+       MOV  @EDT+6,R3          the record, then spaces, into the line
+       LI   R1,EDRBUF
+       CI   R2,80
+       JLE  LF2
+       LI   R2,80
+LF2    MOV  R2,R4
+       JEQ  LF4
+LF3    MOVB *R1+,*R3+
+       DEC  R4
+       JNE  LF3
+LF4    JMP  LF1
+LF6    MOV  @EDN,R1            end of file: the last line was never filled
+       DEC  R1
+       BL   @DELLINE
+LF7    BL   @FCLOSE
+LF8    MOV  @EDN,R0
+       JNE  LF9
+       CLR  R1
+       BL   @INSLINE
+LF9    LI   R1,SRCNAME         remember the name
+       LI   R2,EDNAME
+       CLR  R3
+       MOVB *R1,R3
+       SRL  R3,8
+       INC  R3
+LF10   MOVB *R1+,*R2+
+       DEC  R3
+       JNE  LF10
+       SETO @EDLOAD
+       .leave
+       RT
+EDRBUF EQU  APPRAM+5500        a record being read or written (256 bytes)
+
+* SAVEFILE - write the buffer to SRCNAME, trailing blanks cut.  R0 = 0 or
+* the error.  Uses everything.
+SAVEFILE .enter
+       LI   R2,SRCNAME
+       LI   R0,FOUT+FVAR
+       LI   R1,80
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  SV9
+       CLR  R9
+SV1    C    R9,@EDN
+       JHE  SV8
+       MOV  R9,R1
+       BL   @LNPTR
+       MOV  R2,R3              cut the trailing blanks
+       AI   R3,80
+SV2    C    R3,R2
+       JLE  SV3
+       DEC  R3
+       CB   *R3,@SPACE
+       JEQ  SV2
+       INC  R3
+SV3    S    R2,R3
+       MOV  R3,@EDT+8          the length
+       LI   R4,EDRBUF
+       MOV  R3,R5
+       JEQ  SV5
+SV4    MOVB *R2+,*R4+
+       DEC  R5
+       JNE  SV4
+SV5    LI   R1,EDRBUF
+       MOV  @EDT+8,R2
+       BL   @FWRITE
+       MOV  R0,R0
+       JNE  SV7
+       INC  R9
+       JMP  SV1
+SV7    MOV  R0,@EDT+10
+       BL   @FCLOSE
+       MOV  @EDT+10,R0
+       JMP  SV9
+SV8    BL   @FCLOSE
+       CLR  @EDDIRT
+       CLR  R0
+SV9    .leave
+       RT
+SPACE  BYTE >20
+       EVEN
+
+*----------------------------------------------------------------------
+* the screen: row 0 the status, rows 1-28 the text, row 29 the help
+*----------------------------------------------------------------------
+REDRAW .enter
+       SETO @EDOLD
+       LI   R1,ANORM
+       BL   @CLS
+       BL   @DRAWALL
+       .leave
+       RT
+
+DRAWALL .enter
+       BL   @FIXTOP
+       CLR  R9
+DA1    BL   @DRAWROW
+       INC  R9
+       CI   R9,28
+       JL   DA1
+       BL   @STATUS
+       BL   @CURSOR
+       .leave
+       RT
+
+* FIXTOP - scroll so that the cursor's line shows.  Uses R0.
+FIXTOP MOV  @EDCUR,R0
+       C    R0,@EDTOP
+       JHE  FT1
+       MOV  R0,@EDTOP
+       RT
+FT1    AI   R0,-27
+       C    R0,@EDTOP
+       JLE  FT9
+       MOV  R0,@EDTOP
+FT9    RT
+
+* DRAWROW - screen row R9 (0-27): its line, or blanks.  Uses R0-R5.
+DRAWROW .enter
+       MOV  R9,R3
+       INC  R3
+       LI   R4,80
+       MPY  R4,R3              R4 = the row's first cell
+       MOV  @EDTOP,R1
+       A    R9,R1
+       C    R1,@EDN
+       JHE  DR2
+       MOV  R4,@EDT+12
+       BL   @LNPTR
+       MOV  R2,R1
+       MOV  @EDT+12,R0
+       LI   R2,80
+       BL   @VMBW
+       JMP  DR9
+DR2    MOV  R4,R0
+       LI   R1,>2000
+       LI   R2,80
+       BL   @FILLN
+DR9    .leave
+       RT
+
+* STATUS - the bar on row 0, and the help line or a message on row 29.
+STATUS .enter
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,SEDIT
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,7
+       LI   R1,SRCNAME
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,40
+       LI   R1,SLINE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,45
+       MOV  @EDCUR,R1
+       INC  R1
+       LI   R2,ABAR
+       BL   @DECW
+       LI   R0,50
+       LI   R1,SOF
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,53
+       MOV  @EDN,R1
+       LI   R2,ABAR
+       BL   @DECW
+       LI   R0,60
+       LI   R1,SCOL
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,64
+       MOV  @EDCOL,R1
+       INC  R1
+       LI   R2,ABAR
+       BL   @DECW
+       LI   R0,70
+       LI   R1,SOVR
+       MOV  @EDINS,@EDINS
+       JEQ  ST1
+       LI   R1,SINS
+ST1    LI   R2,ABAR
+       BL   @PUTS
+       MOV  @EDDIRT,@EDDIRT
+       JEQ  ST2
+       LI   R0,78
+       LI   R1,>2A00           * : unsaved changes
+       LI   R2,ABAR
+       BL   @PUTC
+ST2    LI   R0,29*COLS+1
+       LI   R1,SHELP
+       MOV  @EDMSG,@EDMSG
+       JEQ  ST3
+       MOV  @EDMSG,R1
+ST3    LI   R2,AMARK
+       BL   @PUTS
+       .leave
+       RT
+
+* CURSOR - the cell under the cursor in the accent colour; the old one back.
+CURSOR .enter
+       MOV  @EDOLD,R0
+       JLT  CU1
+       LI   R1,ANORM
+       LI   R2,1
+       BL   @FILLA
+CU1    MOV  @EDCUR,R3
+       S    @EDTOP,R3
+       INC  R3
+       LI   R4,80
+       MPY  R4,R3              R4 = the row's first cell
+       A    @EDCOL,R4
+       MOV  R4,@EDOLD
+       MOV  R4,R0
+       LI   R1,ACUR
+       LI   R2,1
+       BL   @FILLA
+       .leave
+       RT
+
+*----------------------------------------------------------------------
+* the keys
+*----------------------------------------------------------------------
+TICK   .enter
+       MOV  R0,R9
+       JNE  TK0
+       B    @TK9
+TK0    CI   R9,KQUIT*256
+       JNE  TK1
+       SETO @QUITF
+       B    @TK9
+TK1    CLR  @EDMSG
+       MOV  @EDTOP,@EDT+10
+       CLR  @EDDRAW
+       CI   R9,>9800           CTRL X (any other key cancels its confirmation)
+       JEQ  TKX
+       CLR  @EDSURE
+TKX    CI   R9,>2000
+       JL   TK2
+       CI   R9,>7F00
+       JHE  TK2
+       BL   @TYPECH
+       JMP  TKEND
+TK2    MOV  R9,R0              the other keys, by a table
+       SRL  R0,8
+       LI   R1,KEYTAB
+TK3    MOV  *R1,R2
+       JEQ  TKEND              the table's end
+       C    R2,R0
+       JEQ  TK4
+       AI   R1,4
+       JMP  TK3
+TK4    MOV  @2(R1),R1
+       BL   *R1
+TKEND  BL   @FIXTOP
+       C    @EDTOP,@EDT+10
+       JEQ  TK5
+       LI   R1,2
+       MOV  R1,@EDDRAW
+TK5    MOV  @EDDRAW,R0
+       CI   R0,2
+       JNE  TK6
+       BL   @DRAWALL
+       B    @TK9
+TK6    CI   R0,1
+       JNE  TK7
+       MOV  @EDCUR,R9          this line only
+       S    @EDTOP,R9
+       BL   @DRAWROW
+TK7    BL   @STATUS
+       BL   @CURSOR
+TK9    .leave
+       RT
+
+* the editing keys: key code (the low byte), routine
+KEYTAB DATA >00C5,KEYUP,>00D8,KEYDN,>00D3,KEYLT,>00C4,KEYRT
+       DATA >000D,KEYENT,>0088,KEYBS,>00F1,KEYDEL,>00F3,KEYERA
+       DATA >00F2,KEYINS,>00F5,KEYHOM,>00F6,KEYEND,>00F7,KEYPGU
+       DATA >00F8,KEYPGD,>0093,KEYSAV,>0098,KEYEXIT,>0081,KEYASM,0
+
+KEYUP  MOV  @EDCUR,R0
+       JEQ  KU9
+       DEC  @EDCUR
+KU9    RT
+KEYDN  MOV  @EDCUR,R0
+       INC  R0
+       C    R0,@EDN
+       JHE  KD9
+       MOV  R0,@EDCUR
+KD9    RT
+KEYLT  MOV  @EDCOL,R0
+       JEQ  KL9
+       DEC  @EDCOL
+KL9    RT
+KEYRT  MOV  @EDCOL,R0
+       CI   R0,79
+       JHE  KR9
+       INC  @EDCOL
+KR9    RT
+KEYHOM CLR  @EDCOL
+       RT
+KEYPGU MOV  @EDCUR,R0
+       AI   R0,-20
+       JGT  KP1
+       CLR  R0
+KP1    MOV  R0,@EDCUR
+       RT
+KEYPGD MOV  @EDCUR,R0
+       AI   R0,20
+       C    R0,@EDN
+       JL   KP2
+       MOV  @EDN,R0
+       DEC  R0
+KP2    MOV  R0,@EDCUR
+       RT
+KEYINS INV  @EDINS
+       RT
+
+* LINELEN - R1 = a line's length without its trailing blanks; R2 = its
+* address (the line must be mapped: LNPTR first).  Uses R1, R3.
+LINELEN
+       MOV  R2,R3
+       AI   R3,80
+LL1    C    R3,R2
+       JLE  LL2
+       DEC  R3
+       CB   *R3,@SPACE
+       JEQ  LL1
+       INC  R3
+LL2    MOV  R3,R1
+       S    R2,R1
+       RT
+
+KEYEND .enter
+       MOV  @EDCUR,R1
+       BL   @LNPTR
+       BL   @LINELEN
+       CI   R1,79
+       JLE  KE1
+       LI   R1,79
+KE1    MOV  R1,@EDCOL
+       .leave
+       RT
+
+* TYPECH - the character R9 (high byte) into the line at the cursor.
+TYPECH .enter
+       MOV  @EDCOL,R0
+       CI   R0,80
+       JHE  TC9
+       MOV  @EDCUR,R1
+       BL   @LNPTR
+       MOV  @EDCOL,R3
+       MOV  @EDINS,@EDINS
+       JEQ  TC2
+       LI   R4,79              slide the rest of the line right
+TC1    C    R4,R3
+       JLE  TC2
+       MOV  R2,R5
+       A    R4,R5
+       MOVB @-1(R5),*R5
+       DEC  R4
+       JMP  TC1
+TC2    A    R3,R2
+       MOVB R9,*R2
+       INC  @EDCOL
+       SETO @EDDIRT
+       LI   R0,1
+       MOV  R0,@EDDRAW
+TC9    .leave
+       RT
+
+* KEYDEL - delete the character under the cursor.
+KEYDEL .enter
+       BL   @DELCH
+       .leave
+       RT
+DELCH  .enter
+       MOV  @EDCUR,R1
+       BL   @LNPTR
+       MOV  @EDCOL,R4
+DC1    CI   R4,79
+       JHE  DC2
+       MOV  R2,R5
+       A    R4,R5
+       MOVB @1(R5),*R5
+       INC  R4
+       JMP  DC1
+DC2    MOV  R2,R5
+       AI   R5,79
+       MOVB @SPACE,*R5
+       SETO @EDDIRT
+       LI   R0,1
+       MOV  R0,@EDDRAW
+       .leave
+       RT
+
+* KEYBS - delete the character before the cursor; at the start of a line,
+* join it to the one before if both fit in 80 columns.
+KEYBS  .enter
+       MOV  @EDCOL,R0
+       JEQ  KB1
+       DEC  @EDCOL
+       BL   @DELCH
+       JMP  KB9
+KB1    MOV  @EDCUR,R0
+       JEQ  KB9
+       MOV  @EDCUR,R1          this line's text to EDRBUF
+       BL   @LNPTR
+       BL   @LINELEN
+       MOV  R1,@EDT+4
+       LI   R4,EDRBUF
+       MOV  R1,R5
+       JEQ  KB2
+KB1A   MOVB *R2+,*R4+
+       DEC  R5
+       JNE  KB1A
+KB2    MOV  @EDCUR,R1
+       DEC  R1
+       BL   @LNPTR
+       BL   @LINELEN
+       MOV  R1,@EDT+6          the previous line's length
+       A    @EDT+4,R1
+       CI   R1,80
+       JH   KB9
+       MOV  @EDT+6,R3
+       A    R3,R2
+       LI   R4,EDRBUF
+       MOV  @EDT+4,R5
+       JEQ  KB3
+KB2A   MOVB *R4+,*R2+
+       DEC  R5
+       JNE  KB2A
+KB3    MOV  @EDCUR,R1
+       BL   @DELLINE
+       DEC  @EDCUR
+       MOV  @EDT+6,@EDCOL
+       SETO @EDDIRT
+       LI   R0,2
+       MOV  R0,@EDDRAW
+KB9    .leave
+       RT
+
+* KEYENT - split the line at the cursor.
+KEYENT .enter
+       MOV  @EDN,R0
+       CI   R0,MAXLN-1
+       JHE  KT9
+       MOV  @EDCUR,R1          the tail (from the cursor on) to EDRBUF, blanked
+       BL   @LNPTR
+       MOV  R2,R3
+       A    @EDCOL,R3
+       LI   R4,EDRBUF
+       LI   R5,80
+       S    @EDCOL,R5
+       MOV  R5,@EDT+4
+KT1    MOVB *R3,*R4+
+       MOVB @SPACE,*R3+
+       DEC  R5
+       JNE  KT1
+       MOV  @EDCUR,R1
+       INC  R1
+       BL   @INSLINE
+       LI   R3,EDRBUF
+       MOV  @EDT+4,R5
+KT2    MOVB *R3+,*R2+
+       DEC  R5
+       JNE  KT2
+       INC  @EDCUR
+       CLR  @EDCOL
+       SETO @EDDIRT
+       LI   R0,2
+       MOV  R0,@EDDRAW
+KT9    .leave
+       RT
+
+* KEYERA - delete the line.
+KEYERA .enter
+       MOV  @EDCUR,R1
+       BL   @DELLINE
+       MOV  @EDCUR,R0
+       C    R0,@EDN
+       JL   KA1
+       MOV  @EDN,R0
+       DEC  R0
+       MOV  R0,@EDCUR
+KA1    CLR  @EDCOL
+       SETO @EDDIRT
+       LI   R0,2
+       MOV  R0,@EDDRAW
+       .leave
+       RT
+
+* KEYSAV - save.
+KEYSAV .enter
+       BL   @SAVEFILE
+       MOV  R0,R0
+       JEQ  KS1
+       LI   R1,SSERR
+       JMP  KS2
+KS1    LI   R1,SSAVED
+KS2    MOV  R1,@EDMSG
+       .leave
+       RT
+
+* KEYEXIT - back to the menu; twice if there are unsaved changes.
+KEYEXIT .enter
+       MOV  @EDDIRT,@EDDIRT
+       JEQ  KX1
+       MOV  @EDSURE,@EDSURE
+       JNE  KX1
+       SETO @EDSURE
+       LI   R0,SUNS
+       MOV  R0,@EDMSG
+       JMP  KX9
+KX1    LI   R0,PG_WB
+       CLR  R1
+       BL   @GOMOD
+KX9    .leave
+       RT
+
+* KEYASM - save and go to the menu to assemble.
+KEYASM .enter
+       BL   @SAVEFILE
+       MOV  R0,R0
+       JEQ  KM1
+       LI   R0,SSERR
+       MOV  R0,@EDMSG
+       JMP  KM9
+KM1    LI   R0,PG_WB
+       LI   R1,1
+       BL   @GOMOD
+KM9    .leave
+       RT
+
+SEDIT  STRI 'Edit'
+SLINE  STRI 'line'
+SOF    STRI 'of'
+SCOL   STRI 'col'
+SINS   STRI 'INS'
+SOVR   STRI 'OVR'
+SHELP  BYTE SHELPE-SHELPB
+SHELPB TEXT 'CTRL S save  CTRL A save+assemble  CTRL X menu  CTRL H b'
+       TEXT 'ackspace  FCTN 3 line'
+SHELPE
+SSAVED STRI 'saved                                                          '
+SSERR  STRI 'the file could not be written                                    '
+SUNS   BYTE SUNSE-SUNSB
+SUNSB  TEXT 'unsaved changes: CTRL S saves, CTRL X again leaves witho'
+       TEXT 'ut saving   '
+SUNSE
+       EVEN
