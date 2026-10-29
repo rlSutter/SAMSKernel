@@ -54,7 +54,7 @@ Shell commands are **[PC]**; key sequences like "N, type a name, ENTER" are **[T
 
 | | **[PC]** | **[TI]** |
 | --- | --- | --- |
-| Write the source | any editor | the workbench editor (80 columns, up to 800 lines) |
+| Write the source | any editor | the workbench editor (80 columns, up to 2,040 lines) |
 | Assemble | xas99: the full dialect, user macros, large programs | the workbench's native assembler: xas99's dialect without user macros (`.defm`) or forward `EQU`; image up to 4,096 bytes; symbols up to 12 characters |
 | Modules | as many as you like (`app.json`); `GOMOD` and `.callmod` between them | one module; the only switch is back to the workbench (`GOMOD PG_WB`) |
 | Data in SAMS pages (`data`), music compiled at build (`from`), `PD_` equates | yes | no |
@@ -917,7 +917,7 @@ overwrite the workbench's own state (WORKBENCH.md part 5).
 - A TIPI is reached through the file service (any `PI.` name) and `CLKGET`; there is no catalog of a TIPI directory, no URL or network access, and its open-file limit is unknown to me.
 - No cooperative multitasking: one module's `TICK` runs at a time.
 
-## Appendix: a second module in five minutes
+## Appendix A: a second module in five minutes
 
 1. `app.json`: add `{"name": "about", "source": "about.a99"}`.
 2. `about.a99`: copy the scaffold; give it its own `INIT` that draws and `TICK` that, on any key, does
@@ -926,7 +926,7 @@ overwrite the workbench's own state (WORKBENCH.md part 5).
 4. Build and run. In the first module, make `INIT` redraw everything from slot A state, because it runs
    again when you come back.
 
-## Appendix: a whole program, Reversi
+## Appendix B: a whole program, Reversi
 
 **[PC or TI]** `examples/reversi/revers.a99` is Reversi against the computer: one module of 3,392 bytes (the TI route's limit is 4,096), so it builds on a PC (`python3 tools/skbuild.py examples/reversi`) and assembles on the TI (it is on the workbench disk: `N`, `REVERS/A99`, `A`, `R`).
 
@@ -946,3 +946,44 @@ What to read in it, by part of this guide:
 The rules are a 10 by 10 board with a border of 3s, so a line is followed by adding a step (`-11 -10 -9 -1 1 9 10 11`) until the cell is not the opponent's: `FLIPN` counts the discs a move would flip, or makes the move. Level 2 picks the legal move with the best weight plus flips (`WEIGHT`, a table that likes corners and dislikes the squares beside them); level 1 picks a legal move at random (each legal move replaces the choice with chance 1 in the number seen so far). It does not look ahead, so it is a beatable opponent.
 
 **Tested** by `test_kernel.py reversi`: 76,800 cell checks and 1,200 moves from random games, and the computer's two levels, against `tests/reversi_model.py`; a whole game of 29 of your moves played through the keyboard, ending in the model's board and scores and the right message; the joystick; hints and level; save and open. `reversiti` assembles it on the simulated TI (byte for byte as xas99) and plays a move there. **Not tried:** a real TI; the colours in the four schemes other than the default (the discs and squares are roles, so contrast changes with the scheme).
+
+## Appendix C: how the editor holds a file in SAMS pages
+
+**[PC or TI]** The workbench's editor (`examples/workbench/ed.a99`) is the guide's example of a program whose data does not fit in the memory it can see. It edits a file of up to 2,040 lines of 80 columns (163,200 bytes) with 7K of RAM. Read this part with the source open: the source is commented for it.
+
+**The problem.** The CPU sees 64K at a time and about 7K of that is yours (`APPRAM`). A SAMS card holds up to 16M in 4K pages and shows any page through a *window*: a 4K slice of the address space that a mapper register points at a page. The kernel keeps slot A (`>2000-3FFF`) and slot C (`>C000`, the module) mapped; the windows at `>E000` and `>F000` are the program's to point where it likes (`MAPE`, `MAPF`), provided it keeps the kernel's record true (never write a mapper register yourself) and gives back what it borrowed (`GETPB`, `SETPB`).
+
+**Three small structures**
+
+```
+  APPRAM                         the pool's pages (4K each)
+  EDPGT (40 words)               text page 0   51 lines x 80 bytes
+  +--------------+  block 0 -->  +-----------------------------+
+  | pool page    |               | slot 0, slot 1, ... slot 50 |
+  | of block 0   |               +-----------------------------+
+  | of block 1   |  block 1 -->  text page 1 ...
+  | ...          |
+  +--------------+               the order page (EDORD)
+                                 +-----------------------------+
+                                 | word n = the slot of line n |
+                                 +-----------------------------+
+```
+
+1. **Text pages.** A pool page holds 51 lines. Line storage is addressed by a *slot*: slot `s` is line `s mod 51` of the page for block `s / 51`. Pages are taken from the pool (`PALLOC`) one at a time as the file grows (`NEWPAGE`), so a short file uses few pages.
+2. **The page table** `EDPGT`, 40 words in `APPRAM`: the pool page of each block of 51 slots. It is the only record of where the text is.
+3. **The order table**, on a pool page of its own (`EDORD`): word `n` is the slot of line `n`. The order of the lines is the order of this table, so inserting a line moves up to 2,040 words (`INSLINE`) and deleting one moves them back (`DELLINE`); the text never moves. A plain editor would copy up to 160K per insert.
+
+**Finding a line (`LNPTR`).** Map the order page into window F, read word `n` (the slot); divide by 51 (`DIV`: quotient the block, remainder the place in it); the page table gives the block's pool page, which `MAPE` puts in window E; the line is at `>E000 + place * 80`. Every other routine (typing, deleting, drawing, saving) calls `LNPTR` and knows nothing of pages.
+
+**Taking pages (`POOLUP`, `NEWSLOT`, `NEWPAGE`).** The pool is a bitmap in the kernel's memory; the kernel never starts it for you, so the editor calls `PINIT` the first time (every page from `PGFREE+4` to the end of the card: below that are the assembler's symbol-table pages and the two pages a program under test runs from) and takes one page for the order table. A slot comes from the free list (slots of deleted lines) or is the next never-used one; if that slot's block has no page yet, `NEWPAGE` takes one. 40 blocks of 51 is the 2,040-line limit; an empty pool gives the same answer, 'full'.
+
+**Not losing the file.** `LOADFILE` stops when the buffer fills, sets `EDTRUNC` and says so, and `SAVEFILE` then refuses: saving would cut the file on the disk. The shell will not run a program while the buffer has unsaved changes, and when it does run one it gives the editor's pages up (clears `EDPOOL` and `EDLOAD`): a program may `PINIT` the pool itself, and the editor loads the file again, and sets the pool up again, when it is next entered.
+
+**What to take from it for your own program**
+- Keep a *page table* of what you hold in a block of `APPRAM` and write one routine (like `LNPTR`) that turns your own index into an address, mapping what it needs; everything else calls it.
+- Take pages from the pool when you need them, not all at once; a program should work on a 512K card (about 100 free pages) and use more on a bigger one.
+- Map windows only through `MAPE`/`MAPF`; a routine that borrows one saves and restores it.
+- Keep loop state in memory across file calls (they change R6-R9) and across `MAPE` (it changes R1-R3).
+- Test the limits: the tests (`test_kernel.py editorpages`) load 1,100 lines, edit and save 600, load 2,100 and check that saving is refused.
+
+**Exercises.** Raise the limit by giving the order table a second page; add a search key by walking the lines with `LNPTR`; make `CTRL Z` undo the last delete by keeping the deleted line's slot one step longer.

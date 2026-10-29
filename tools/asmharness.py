@@ -115,14 +115,15 @@ def workbench_ui(keys, frames, files=(), rom=None, setup2=None):
 
 
 def editor_lines(m):
-    """The editor's buffer, line by line, read out of SAMS."""
-    pgfree = int(re.search(r'pgfree:\s*equ\s+>([0-9a-f]+)', open(os.path.join(ROOT, 'build', 'workbench', 'kernel.equ')).read().lower()).group(1), 16)
+    """The editor's buffer, line by line, read out of SAMS: the order table's pool page (EDORD, APPRAM+198), the
+    pool page of each block of 51 slots (EDPGT, APPRAM+744) and the slots in the order table."""
     n = m.rw(0x2300 + 128)
-    o = m.ams[(pgfree + 20) * 4096:(pgfree + 20) * 4096 + 2 * n]
+    ordpg = m.rw(0x2300 + 198)
+    o = m.ams[ordpg * 4096:ordpg * 4096 + 2 * n]
     out = []
     for i in range(n):
         s = o[2 * i] << 8 | o[2 * i + 1]
-        pg, off = pgfree + 4 + s // 51, (s % 51) * 80
+        pg, off = m.rw(0x2300 + 744 + 2 * (s // 51)), (s % 51) * 80
         out.append(bytes(m.ams[pg * 4096 + off:pg * 4096 + off + 80]).rstrip().decode('latin-1'))
     return out
 

@@ -13,7 +13,11 @@
 *
 * The lines are kept in SAMS pages, 51 lines of 80 bytes to a page, in the
 * order of a table of slot numbers (so inserting and deleting a line moves
-* only the table): pages EDPG0 on for the text, ORDPG for the table.
+* only the table).  The pages come from the kernel's page pool (PALLOC) as the
+* file grows, up to 2,040 lines (40 text pages and one page for the table);
+* a table in APPRAM (EDPGT) says which pool page holds each block of 51 slots.
+* This file is the guide's example of a program whose data does not fit in
+* the memory it can see: read PROGRAMMERS-GUIDE.md, appendix C, with it.
 *======================================================================
        COPY "kernel.equ"
        COPY "macros.a99"
@@ -34,12 +38,17 @@ EDT    EQU  APPRAM+148         scratch words (8)
 EDOLD  EQU  APPRAM+248         the cursor's cell on screen (-1: none)
 EDDRAW EQU  APPRAM+250         0 nothing, 1 this line, 2 everything to draw
 EDMSG  EQU  APPRAM+252         a message to show instead of the help (0: none)
-EDNAME EQU  APPRAM+164         the loaded file's name (24 bytes)
-EDFL   EQU  APPRAM+188         the free list: 16 slots
-EDPG0  EQU  PGFREE+4           16 pages of text
-ORDPG  EQU  PGFREE+20          the order table
-MAXLN  EQU  800
-LPP    EQU  51
+* the loaded file's name (32 bytes: 31 and a length)
+EDNAME EQU   APPRAM+164
+EDNPG  EQU  APPRAM+196         text pages taken from the pool so far
+EDORD  EQU  APPRAM+198         the pool page that holds the order table
+EDFL   EQU  APPRAM+200         the free list: 16 slots
+EDPOOL EQU  APPRAM+232         non-zero: the pool has been set up (PINIT)
+EDTRUNC EQU APPRAM+234         non-zero: the file was too long to load whole
+EDPGT  EQU  APPRAM+744         40 words: the pool page of each block of slots
+MAXLN  EQU  2040               lines: 40 pages of 51
+MAXPG  EQU  40
+LPP    EQU  51                 lines (slots) to a page: 51 * 80 = 4,080 bytes
 
 ANORM  EQU  (RTEXT*16+RBG)*256
 ABAR   EQU  (RBARFG*16+RBARBG)*256
@@ -52,6 +61,7 @@ ACUR   EQU  (RBG*16+RACCNT)*256
 
 * INIT - from the shell: load the file unless it is the one already here.
 INIT   .enter
+       BL   @POOLUP            the pool and the table's page, once
        BL   @SAMENAME
        MOV  R0,R0
        JNE  IN1
@@ -59,6 +69,24 @@ INIT   .enter
 IN1    CLR  @EDSURE
        BL   @REDRAW
        .leave
+       RT
+
+* POOLUP - the first time (and after a program has been run, which may have
+* used the pool in its own way): the pool manages every page from the first
+* one above the workbench's own (PGFREE+4) to the end of the card, and the
+* editor takes one page for its order table.  Uses R0-R6.
+POOLUP .enter
+       MOV  @EDPOOL,@EDPOOL
+       JNE  PU9                already done
+       LI   R0,PGFREE+4        (PGFREE, +1: the workbench's pages; +2, +3:
+       MOV  @NPAGES,R1         PGUSER, the program being run)
+       BL   @PINIT
+       SETO @EDPOOL
+       CLR  @EDNPG             no text pages yet
+       CLR  @EDLOAD            and so no buffer
+       BL   @PALLOC            a page for the order table
+       MOV  R0,@EDORD
+PU9    .leave
        RT
 
 * SAMENAME - R0 = 1 if a buffer is loaded and its name is SRCNAME's.
@@ -86,17 +114,17 @@ SN9    RT
 * mapped at >E000).  Uses R0-R5.
 LNPTR  .enter
        MOV  R1,@EDT
-       LI   R0,ORDPG
+       MOV  @EDORD,R0          the order table's page into window F ...
        BL   @MAPF
        MOV  @EDT,R1
        SLA  R1,1
-       MOV  @>F000(R1),R5      the slot
+       MOV  @>F000(R1),R5      ... the line's slot
        CLR  R4
        LI   R3,LPP
-       DIV  R3,R4              R4 = the page, R5 = the place in it
-       MOV  R4,R0
-       AI   R0,EDPG0
-       BL   @MAPE
+       DIV  R3,R4              R4 = the block of slots, R5 = the place in it
+       SLA  R4,1
+       MOV  @EDPGT(R4),R0      the pool page that holds that block ...
+       BL   @MAPE              ... into window E
        LI   R3,80
        MOV  R5,R2
        MPY  R3,R2              R3 = place * 80
@@ -107,19 +135,52 @@ LNPTR  .enter
 
 * NEWSLOT - R0 = an unused slot (from the free list, else the next never
 * used), or -1 if the buffer is full.  Uses R0, R1.
-NEWSLOT MOV @EDNFR,R1
+NEWSLOT .enter
+       MOV  @EDNFR,R1
        JEQ  NS1
-       DEC  R1
+       DEC  R1                 a slot on the free list: take the last
        MOV  R1,@EDNFR
        SLA  R1,1
        MOV  @EDFL(R1),R0
-       RT
-NS1    MOV  @EDFREE,R0
+       JMP  NS9
+NS1    MOV  @EDFREE,R0         else the next never-used slot ...
        CI   R0,MAXLN
        JL   NS2
-       SETO R0
+       SETO R0                 ... unless the buffer is full
+       JMP  NS9
+NS2    MOV  @EDNPG,R2          the slots the pages taken so far hold
+       LI   R3,LPP
+       MPY  R3,R2              R3 = pages * 51
+       C    R0,R3
+       JL   NS3                the slot is in a page we have
+       BL   @NEWPAGE           else take another page from the pool
+       MOV  R0,R0
+       JNE  NS3
+       SETO R0                 the pool is empty: full
+       JMP  NS9
+NS3    INC  @EDFREE
+       MOV  @EDFREE,R0
+       DEC  R0                 the slot just taken
+NS9    .leave
        RT
-NS2    INC  @EDFREE
+
+* NEWPAGE - take a page from the pool for the next block of 51 slots and
+* note it in EDPGT.  R0 = the page, or 0 if there is none (or the table is
+* full).  Uses R0-R5.
+NEWPAGE .enter
+       MOV  @EDNPG,R1
+       CI   R1,MAXPG
+       JHE  NP8
+       BL   @PALLOC            R0 = a page, 0 if the pool is empty
+       MOV  R0,R0
+       JEQ  NP9
+       MOV  @EDNPG,R1
+       SLA  R1,1
+       MOV  R0,@EDPGT(R1)
+       INC  @EDNPG
+       JMP  NP9
+NP8    CLR  R0
+NP9    .leave
        RT
 
 * FREESLOT - give slot R0 back (if the list has room).  Uses R1.
@@ -149,7 +210,7 @@ INSLINE .enter
        CI   R0,-1
        JEQ  IL9
        MOV  R0,@EDT+4          the slot
-       LI   R0,ORDPG
+       MOV  @EDORD,R0
        BL   @MAPF
        MOV  @EDN,R3            shift the table up from the end
        SLA  R3,1
@@ -183,7 +244,7 @@ DELLINE .enter
        BL   @LNPTR
        BL   @BLANKLN
        JMP  DL9
-DL1    LI   R0,ORDPG
+DL1    MOV  @EDORD,R0
        BL   @MAPF
        MOV  @EDT+2,R4
        SLA  R4,1
@@ -214,8 +275,9 @@ LOADFILE .enter
        CLR  @EDCUR
        CLR  @EDCOL
        CLR  @EDDIRT
-       CLR  @EDFREE
+       CLR  @EDFREE            (the pages already taken are used again)
        CLR  @EDNFR
+       CLR  @EDTRUNC
        SETO @EDINS
        LI   R2,SRCNAME
        LI   R0,FIN+FVAR
@@ -246,7 +308,11 @@ LF4    JMP  LF1
 LF6    MOV  @EDN,R1            end of file: the last line was never filled
        DEC  R1
        BL   @DELLINE
-LF7    BL   @FCLOSE
+       JMP  LF7C
+LF7    SETO @EDTRUNC           the buffer filled before the file ended:
+       LI   R0,SLONG           say so, and SAVEFILE will refuse (saving
+       MOV  R0,@EDMSG          would cut the file on the disk)
+LF7C   BL   @FCLOSE
 LF8    MOV  @EDN,R0
        JNE  LF9
        CLR  R1
@@ -268,7 +334,11 @@ EDRBUF EQU  APPRAM+5500        a record being read or written (256 bytes)
 * SAVEFILE - write the buffer to SRCNAME, trailing blanks cut.  R0 = 0 or
 * the error.  Uses everything.
 SAVEFILE .enter
-       LI   R2,SRCNAME
+       MOV  @EDTRUNC,@EDTRUNC
+       JEQ  SVOK
+       LI   R0,>00FE           a file that was only partly loaded: not saved
+       JMP  SV9
+SVOK   LI   R2,SRCNAME
        LI   R0,FOUT+FVAR
        LI   R1,80
        BL   @FOPEN
@@ -784,6 +854,10 @@ SHELPB TEXT 'CTRL S save  CTRL A save+assemble  CTRL X menu  CTRL H b'
        TEXT 'ackspace  FCTN 3 line'
 SHELPE
 SSAVED STRI 'saved                                                          '
+SLONG  BYTE SLONGE-SLONGB
+SLONGB TEXT 'the file is longer than 2,040 lines: only part is loaded and'
+       TEXT ' it cannot be saved'
+SLONGE
 SSERR  STRI 'the file could not be written                                    '
 SUNS   BYTE SUNSE-SUNSB
 SUNSB  TEXT 'unsaved changes: CTRL S saves, CTRL X again leaves witho'

@@ -92,7 +92,7 @@ which the **[TI]** route cannot make.
 
 ## 3. The editor
 
-A full-screen editor for DIS/VAR 80 files, up to 800 lines of 80 columns. The status bar shows the line, the column, INS or OVR, and `*` when there are unsaved changes.
+A full-screen editor for DIS/VAR 80 files, up to 2,040 lines of 80 columns (a longer file is loaded in part, the screen says so, and saving is refused so that the file on the disk is not cut). The status bar shows the line, the column, INS or OVR, and `*` when there are unsaved changes.
 
 | Key | |
 | --- | --- |
@@ -151,7 +151,7 @@ INIT   ...
 
 - `R` puts the image into two SAMS pages, `PGUSER` (an equate in KERNEL/EQU: the workbench's first free page + 2), and switches to them with `GOMOD`; the program's `INIT` runs with R0 = the workbench's page.
 - **To come back**: `LI R0,PG_WB / CLR R1 / BL @GOMOD`. The assembled image stays in the workbench's memory, so `R` runs it again without assembling. FCTN = quits the whole workbench.
-- The program shares the kernel with the workbench. Free SAMS pages for your own use start at `PGUSER+2`; the editor's buffer uses the pages above that, and a program that uses them loses the editor's text (the file on the disk is safe).
+- The program shares the kernel with the workbench. SAMS pages: `PGFREE` and `PGFREE+1` are the assembler's symbol table, `PGUSER` and `PGUSER+1` the program itself, and everything from `PGFREE+4` up is the page pool, which the editor draws on. **When `R` runs a program the editor gives its pages up**: the program may use the whole pool and even `PINIT` it itself, and the editor loads the file again the next time it is entered. `R` refuses to run while the editor holds unsaved changes (E, CTRL S first).
 - The program is not a cartridge: it exists in SAMS while the workbench runs. The workbench cannot write a cartridge image (a FinalGROM's storage is not something the TI can write); for that, build the program on the PC with `skbuild.py`.
 
 ## 5a. On a TIPI
@@ -168,7 +168,7 @@ INIT   ...
 
 `asm.a99` is a module of 5.3K. It reads the source a line at a time with the kernel's file service, **twice** (pass 1 gives every label its address, pass 2 produces the bytes). The symbol table is a hash table of 14-byte entries in two SAMS pages mapped
 at `>E000`; the image is built in a 4K buffer in slot A. A `COPY` closes the file, assembles the included file, and reopens the first file, reading on to where it was (it could keep both open now that the file service has handles; it still closes and reopens, which is simpler and was tested first). Pass 2 does not read KERNEL/EQU again: its symbols stay in the table.
-The editor (`ed.a99`, 2.4K) keeps lines in SAMS pages (51 lines of 80 bytes a page) in the order of a table of slot numbers. The shell is `wb.a99` (2K).
+The editor (`ed.a99`, 2.7K) keeps lines in SAMS pages taken from the page pool as the file grows (51 lines of 80 bytes a page, up to 40 pages) in the order of a table of slot numbers on a page of its own: PROGRAMMERS-GUIDE.md appendix C explains it, and the source is commented for it. The shell is `wb.a99` (2.2K).
 
 Instructions executed, in the simulator, including reading the disk through TI's disk controller ROM and the 274-line KERNEL/EQU:
 

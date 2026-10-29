@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -697,6 +697,45 @@ def reversiti():
     got = [m.rb(B + (r_ + 1) * 10 + c2 + 1) for r_ in range(8) for c2 in range(8)]
     check(got == b1, 'run from the workbench on the TI: ENTER plays d3 and the computer answers like the model')
 
+def editorpages():
+    """The editor keeps its lines in SAMS pages taken from the pool as the file grows (examples/workbench/ed.a99,
+    guide appendix B): a file of 1,500 lines is held in 30 pool pages and the order table's page, edited and saved
+    whole; a file over the limit of 2,040 lines is loaded in part, said so, and cannot be saved over the original;
+    the shell will not run a program over unsaved edits."""
+    import asmharness, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    big = ['line %04d of the big file: the quick brown fox' % i for i in range(1, 1101)]
+    open('/tmp/big.txt', 'w').write('\n'.join(big) + '\n')
+    m, img = asmharness.workbench_ui('<WAIT 10>nBIG/TXT<ENTER><WAIT 10>e<WAIT 2300>', 2400, ['/tmp/big.txt'])
+    lines = asmharness.editor_lines(m)
+    npg, ordpg = m.rw(0x2300 + 196), m.rw(0x2300 + 198)
+    pages = [m.rw(0x2300 + 744 + 2 * i) for i in range(npg)]
+    check(lines == big and npg == 22, 'a 1,100-line file is in the buffer, line for line, in %d pool pages (%d lines)' % (npg, len(lines)))
+    check(len(set(pages + [ordpg])) == 23 and min(pages + [ordpg]) >= 0x18 + 4, 'the 22 text pages and the table\'s page are distinct pool pages, none of the workbench\'s own (%s...)' % pages[:3])
+    # edit the first line of a 600-line file and save: the file on the disk is the original with that change
+    mid = big[:600]
+    open('/tmp/mid.txt', 'w').write('\n'.join(mid) + '\n')
+    keys = '<WAIT 10>nMID/TXT<ENTER><WAIT 10>e<WAIT 1300>XY<C-s><WAIT 2500>'
+    m, img = asmharness.workbench_ui(keys, 4000, ['/tmp/mid.txt'])
+    got = tifdc.read_file(img, 'MID/TXT')
+    want = [b'XY' + mid[0].encode()] + [x.encode() for x in mid[1:]]
+    check(got == want, 'XY typed on line 1 of 600 lines (12 pool pages) and CTRL S: the file on the disk has 600 lines, the first changed (%d lines)' % len(got))
+    # a file past the limit
+    huge = ['row %04d' % i for i in range(1, 2101)]
+    open('/tmp/huge.txt', 'w').write('\n'.join(huge) + '\n')
+    m, img = asmharness.workbench_ui('<WAIT 10>nHUGE/TXT<ENTER><WAIT 10>e<WAIT 3400>', 3500, ['/tmp/huge.txt'])
+    check(m.rw(0x2300 + 234) != 0 and m.rw(0x2300 + 128) == 2040, 'a 2,100-line file: %d lines loaded, marked as cut' % m.rw(0x2300 + 128))
+    check('only part is loaded' in ' '.join(sim9900.screen(m).split('\n')), 'and the screen says only part of it is loaded')
+    m, img = asmharness.workbench_ui('<WAIT 10>nHUGE/TXT<ENTER><WAIT 10>e<WAIT 3400>Z<C-s><WAIT 100>', 3700, ['/tmp/huge.txt'])
+    check(tifdc.read_file(img, 'HUGE/TXT') == [x.encode() for x in huge] and 'could not be written' in ' '.join(sim9900.screen(m).split('\n')), 'CTRL S then refuses: the 2,100 lines on the disk are as they were, and it says so')
+    # unsaved edits: the shell will not run a program over them
+    prog = ['       AORG >C000', '       DATA INIT,TICK,INIT,0', 'INIT   RT', 'TICK   RT']
+    keys = '<WAIT 10>nNEW2<ENTER><WAIT 10>e<WAIT 300>' + '<ENTER>'.join(prog) + '<WAIT 30><C-a><WAIT 2700>e<WAIT 60>X<WAIT 5><C-x><WAIT 5><C-x><WAIT 30>r<WAIT 60>'
+    m, img = asmharness.workbench_ui(keys, 5000, [])
+    check('unsaved changes: E, CTRL S' in ' '.join(sim9900.screen(m).split('\n')), 'R with unsaved edits in the editor does not run: it says to save first')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -837,7 +876,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

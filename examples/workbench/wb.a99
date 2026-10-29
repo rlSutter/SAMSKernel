@@ -37,6 +37,9 @@ OUTLEN EQU  APPRAM+524
 ORGB   EQU  APPRAM+520
 INARG  EQU  APPRAM+50          the argument INIT was given (1: assemble now)
 PGUSER EQU  PGFREE+2
+EDDIRT EQU  APPRAM+138         the editor's: unsaved changes (ed.a99)
+EDLOAD EQU  APPRAM+144         the editor's: a buffer is loaded
+EDPOOL EQU  APPRAM+232         the editor's: the pool is set up for it
 
 ANORM  EQU  (RTEXT*16+RBG)*256
 ABAR   EQU  (RBARFG*16+RBARBG)*256
@@ -300,7 +303,14 @@ AS1    MOV  R1,@RESULT
 
 * RUN - the assembled program into its two pages, and switch to it.
 RUN    .enter
-       MOV  @RESULT,R0
+       MOV  @EDDIRT,@EDDIRT    unsaved changes in the editor's buffer would be
+       JEQ  RN0                lost (running a program frees the editor's pages)
+       LI   R0,3*COLS+2
+       LI   R1,SDIRTY
+       LI   R2,AERR
+       BL   @PUTS
+       JMP  RN9
+RN0    MOV  @RESULT,R0
        CI   R0,1
        JEQ  RN1
        LI   R0,3*COLS+2
@@ -334,6 +344,9 @@ RN2    CLR  *R1+
 RN3    MOV  *R1+,*R2+
        DEC  R3
        JNE  RN3
+       CLR  @EDLOAD            the program may use the whole pool (even PINIT it
+       CLR  @EDPOOL            afresh): the editor's pages are given up, and it
+*                              loads the file again and sets the pool up again
        LI   R0,PGUSER
        CLR  R1
        BL   @GOMOD
@@ -526,6 +539,7 @@ SERRS  STRI 'errors:'
 SINC   STRI '(in a COPYed file)'
 SWORK  STRI 'assembling ...                '
 SNOPRG STRI 'nothing assembled to run                    '
+SDIRTY STRI 'unsaved changes: E, CTRL S, then run     '
 SBADORG STRI 'the program must be at >C000 and fit 8K        '
 SPICK  STRI 'UP DOWN pick a file, ENTER chooses it, BACK returns'
 SNOFIL STRI 'no files, or the disk could not be read'
