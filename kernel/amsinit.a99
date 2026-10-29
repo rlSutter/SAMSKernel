@@ -32,7 +32,8 @@ AMSINI LI   R12,AMSCRU         CRU base for the mapper card
        LI   R3,AMSREG          register for window 0
 AMSI1  MOV  R1,R2              identity: window n gets page n, in the high
        SLA  R2,8               byte only (see MAPPG): with mapping off the
-       MOV  R2,*R3+            card puts page n in window n, so this code runs on
+* card puts page n in window n, so this code runs on
+       MOV   R2,*R3+
        INC  R1
        CI   R1,16
        JL   AMSI1
