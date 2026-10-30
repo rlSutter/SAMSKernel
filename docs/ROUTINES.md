@@ -362,7 +362,7 @@ delete the file named by R2 (DSR opcode 7).  R0 = 0 or the error.  Uses R0-R9.
 
 ### `FCALL`
 
-call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it uses kept and put back, >8356 at the name length. R0 = 0, the error, or >FF.  Uses R0-R9.
+call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it uses kept and put back, >8356 at the name length. R0 = 0, the error, or >FF.  After the call it polls the keyboard and steps the music (KIDLE) if a frame passed meanwhile: a DSR runs with interrupts off, so without this the keys typed and the song playing during a long job (an assembly, a load, a save) would be lost.  Uses R0-R9.
 
 ### `FCNUM`
 
@@ -407,6 +407,10 @@ open the catalog of the device named by R2 (a length-prefixed device alone: 'DSK
 ### `FCATNX`
 
 the next file of the catalog opened by FCATOP: R1 = the same 38-byte buffer, R2 = a CE_SIZE-byte entry to fill (CE_NAME, CE_TYPE, CE_SECT, CE_RLEN, the numbers decoded).  R0 = 0 for a file, FCEND when there are no more (the catalog is then closed), or the error.  Uses R0-R9.
+
+### `FSYNC`
+
+make everything written so far safe on the disk, keeping the file open and its place.  TI's controller keeps a file's size and its last sector in its own buffers until the file is closed, so records written since the last close are lost if the power goes (or the program crashes): FSYNC closes the selected handle and opens it again.  What can be reopened where it was: an OUTPUT or APPEND file (sequential): reopened for APPEND, so the next record goes on the end, as before; a RELATIVE file (FREL): reopened for UPDATE; the next record is whichever record number the next FRREAD / FRWRITE names; an INPUT file has nothing to flush: R0 = 0 and nothing is done; a sequential UPDATE file cannot be put back at its record: R0 = FNOPL and the file is left open as it was. R0 = 0, FNOPL, or the error of the close or the open.  The record length and the file's type are those of the first open.  Uses R0-R9.
 
 ### `FEXIST`
 

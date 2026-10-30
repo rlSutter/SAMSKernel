@@ -1,5 +1,10 @@
 # Changes
 
+## 1.9.0 (30 October 2026)
+
+- **`FSYNC`**: close and reopen the selected handle so everything written so far is safe on the disk, keeping the file open and its place: output and append files (reopened for append) and relative files (reopened for update); an input file does nothing; a sequential update file answers `FNOPL` (>FD) and stays open. Test (real controller ROM): after three `FWRITE`s the disk holds no record of the file until `FSYNC`, then all three; writing goes on at the end; five records in order after two syncs and the close; four relative records across two syncs.
+- **Keys and music are kept during file calls**: `FCALL` calls `KIDLE` after every DSR call. A key tapped during 40 `FREAD`s is in the key buffer afterwards, and a song goes on playing (27 sound bytes in the test); both tests fail without the change. Cost measured in the simulator: about 200 instructions a call, +3.4% for open, 200 reads and close (1,171,841 to 1,211,646 instructions), which is little beside real disk time. Note: `FRAME` now counts the frames that pass during file work.
+
 ## 1.8.0 (30 October 2026)
 
 New routines, from what F18Base had to work around (all tested in group `fileapi`; the file ones against TI's real controller ROM):

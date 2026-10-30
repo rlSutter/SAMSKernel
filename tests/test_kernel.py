@@ -761,11 +761,11 @@ def fileapi():
     import random, subprocess, tempfile, asmharness, skdisk, tifdc
     c = build('hello')
     syms = asmharness.symbols(os.path.join(ROOT, 'build', 'hello', 'kernel.equ'))
-    def boot(img=None):
-        m = sim9900.Machine(c)
+    def boot(img=None, keys='', cart=None):
+        m = sim9900.Machine(cart or c)
         if img is not None:
             m.tifdc = tifdc.TIFDC(image=img)
-        m.presses, m.toggles, end = sim9900.schedule([])
+        m.presses, m.toggles, end = sim9900.schedule(sim9900.parse_keys(keys))
         cpu = sim9900.CPU(m)
         cpu.pc = m.rw(m.rw(0x6006) + 2)
         while m.insns < 100 * sim9900.VSYNC_INSNS:
@@ -895,6 +895,83 @@ def fileapi():
     check(rr[0] != 0, 'a record far past the end is an error (%d), not silent garbage' % rr[0])
     put(m, W, lp('DSK1.RELFILE'))
     check(call(m, cpu, 'FEXIST', {2: W})[0] == 0, 'FEXIST sees the relative file, whatever kind it is')
+
+    # FSYNC
+    def disk(name):
+        try:
+            return tifdc.read_file(m.tifdc.image, name)
+        except Exception:
+            return None
+    m, cpu = boot(bytearray(open(p, 'rb').read()))
+    put(m, W, lp('DSK1.SYNC')); call(m, cpu, 'FSEL', {0: 0})
+    check(call(m, cpu, 'FOPEN', {0: 0x0200 | 0x1000, 1: 80, 2: W})[0] == 0, 'FSYNC: a new DIS/VAR 80 file opened for output')
+    recs = [('record %d of the synced file' % i).encode() for i in range(1, 6)]
+    for r_ in recs[:3]:
+        put(m, REC, r_); call(m, cpu, 'FWRITE', {1: REC, 2: len(r_)})
+    before = disk('SYNC')
+    r = call(m, cpu, 'FSYNC')[0]
+    after = disk('SYNC')
+    check(r == 0 and after == recs[:3] and before != recs[:3], 'FSYNC makes the three records written so far safe on the disk while the file stays open (before: %s; after: %s)' % (before, [x.decode()[:8] for x in after or []]))
+    for r_ in recs[3:]:
+        put(m, REC, r_); call(m, cpu, 'FWRITE', {1: REC, 2: len(r_)})
+    r2 = call(m, cpu, 'FSYNC')[0]
+    mid = disk('SYNC')
+    call(m, cpu, 'FCLOSE')
+    check(r2 == 0 and mid == recs and disk('SYNC') == recs, 'writing goes on at the end after FSYNC: five records in order, safe after the second FSYNC and after the close')
+    put(m, W, lp('DSK1.RSYNC')); call(m, cpu, 'FSEL', {0: 0})
+    call(m, cpu, 'FOPEN', {0: 0x0300, 1: 32, 2: W})
+    errs = 0
+    for k in (0, 1):
+        put(m, REC, ('rel %d' % k).ljust(32).encode()); errs += call(m, cpu, 'FRWRITE', {1: REC, 2: 32, 3: k})[0]
+    errs += call(m, cpu, 'FSYNC')[0]
+    for k in (2, 3):
+        put(m, REC, ('rel %d' % k).ljust(32).encode()); errs += call(m, cpu, 'FRWRITE', {1: REC, 2: 32, 3: k})[0]
+    errs += call(m, cpu, 'FSYNC')[0]
+    call(m, cpu, 'FCLOSE')
+    put(m, W, lp('DSK1.RSYNC')); call(m, cpu, 'FOPEN', {0: 0x0500, 1: 32, 2: W})
+    got = []
+    for k in range(4):
+        call(m, cpu, 'FRREAD', {1: REC, 3: k}); got.append(bytes(m.rb(REC + i) for i in range(32)).decode().rstrip())
+    call(m, cpu, 'FCLOSE')
+    check(errs == 0 and got == ['rel %d' % k for k in range(4)], 'FSYNC on a RELATIVE file (reopened for update): four records written across two syncs read back (errors %d, %s)' % (errs, got))
+    put(m, W, lp('DSK1.ALPHA/TXT')); call(m, cpu, 'FOPEN', {0: 0x1400, 1: 80, 2: W})
+    call(m, cpu, 'FREAD', {1: REC}); one = bytes(m.rb(REC + i) for i in range(19)).decode()
+    rs = call(m, cpu, 'FSYNC')[0]
+    call(m, cpu, 'FREAD', {1: REC}); two = bytes(m.rb(REC + i) for i in range(19)).decode()
+    call(m, cpu, 'FCLOSE')
+    check(rs == 0 and one == 'line 0 of alpha.txt' and two == 'line 1 of alpha.txt', 'FSYNC on an INPUT file does nothing and the place is kept (%r then %r)' % (one, two))
+    put(m, W, lp('DSK1.ALPHA/TXT')); call(m, cpu, 'FOPEN', {0: 0x1000, 1: 80, 2: W})
+    rs = call(m, cpu, 'FSYNC')[0]
+    call(m, cpu, 'FREAD', {1: REC}); first = bytes(m.rb(REC + i) for i in range(19)).decode()
+    call(m, cpu, 'FCLOSE')
+    check(rs == 0xFD and first == 'line 0 of alpha.txt', 'FSYNC on a sequential UPDATE file answers FNOPL (%d) and leaves it open as it was (next record %r)' % (rs, first))
+
+    # keys and music during file calls: the kernel polls after every DSR call (FCALL calls KIDLE)
+    def read_all(m, cpu, name):
+        put(m, W, lp(name)); call(m, cpu, 'FSEL', {0: 0})
+        call(m, cpu, 'FOPEN', {0: 0x1400, 1: 80, 2: W})
+        n = 0
+        while call(m, cpu, 'FREAD', {1: REC})[0] == 0:
+            n += 1
+        call(m, cpu, 'FCLOSE')
+        return n
+    m, cpu = boot(bytearray(open(p, 'rb').read()), keys='<WAIT 50>q')      # a tap at frame 110, over in 4 frames
+    n = read_all(m, cpu, 'DSK1.GAMMA/TXT')
+    check(n == 40 and m.rw(0x200E) == 1 and m.rb(0x2040) == 0x51, 'a key tapped while 40 records are being read is in the key buffer afterwards (%d records, buffer %d, code >%02X)' % (n, m.rw(0x200E), m.rb(0x2040)))
+    cm = build('music')
+    msyms = asmharness.symbols(os.path.join(ROOT, 'build', 'music', 'kernel.equ'))
+    m = sim9900.Machine(cm); m.tifdc = tifdc.TIFDC(image=bytearray(open(p, 'rb').read()))
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m); cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    asmharness.call(m, cpu, msyms['muplay'], {0: msyms['pd_tune']})
+    w0 = len(m.cpu_sound)
+    syms_save = syms
+    syms = msyms
+    n = read_all(m, cpu, 'DSK1.GAMMA/TXT')
+    syms = syms_save
+    check(n == 40 and len(m.cpu_sound) - w0 >= 10, 'the music plays on while files are read: the song wrote %d bytes to the sound chip during 40 reads' % (len(m.cpu_sound) - w0))
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,

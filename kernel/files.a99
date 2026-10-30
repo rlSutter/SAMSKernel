@@ -191,7 +191,10 @@ FDELETE LI  R3,>0700           opcode 7: DELETE
 
 * FCALL - call the DSR for the PAB at FPABV: the previous error cleared,
 * the scratchpad it uses kept and put back, >8356 at the name length.
-* R0 = 0, the error, or >FF.  Uses R0-R9.
+* R0 = 0, the error, or >FF.  After the call it polls the keyboard and steps the
+* music (KIDLE) if a frame passed meanwhile: a DSR runs with interrupts off, so
+* without this the keys typed and the song playing during a long job (an
+* assembly, a load, a save) would be lost.  Uses R0-R9.
 FCALL  .enter
        BL   @FPADR
        INC  R0                 the previous call's error bits (the top three
@@ -225,6 +228,9 @@ FC2    MOV  *R1+,*R2+
        MOV  R5,R0              bottom of its buffers, which it finds through
 *                              it; restoring the old value hangs every later
 *                              access on a real TI controller)
+       .push R0
+       BL   @KIDLE             a frame passed during the call?  take the keys
+       .pop R0                 (the keyboard and the music: see KIDLE)
        .leave
        RT
 
@@ -637,6 +643,69 @@ FCN5X  MOV   @FCRB,R1
        MOV  R0,@CE_RLEN(R2)
        CLR  R0
 FCNX9  .leave
+       RT
+
+* FSYNC - make everything written so far safe on the disk, keeping the file
+* open and its place.  TI's controller keeps a file's size and its last sector
+* in its own buffers until the file is closed, so records written since the
+* last close are lost if the power goes (or the program crashes): FSYNC closes
+* the
+* selected handle and opens it again.  What can be reopened where it was:
+*   an OUTPUT or APPEND file (sequential): reopened for APPEND, so the next
+*   record goes on the end, as before;
+*   a RELATIVE file (FREL): reopened for UPDATE; the next record is whichever
+*   record number the next FRREAD / FRWRITE names;
+*   an INPUT file has nothing to flush: R0 = 0 and nothing is done;
+*   a sequential UPDATE file cannot be put back at its record: R0 = FNOPL and
+*   the file is left open as it was.
+* R0 = 0, FNOPL, or the error of the close or the open.  The record length and
+* the file's type are those of the first open.  Uses R0-R9.
+FSYNC  .enter
+       BL   @FPADR
+       INC  R0
+       BL   @VSBR              R1 = the flag byte (in the high byte)
+       SRL  R1,8
+       MOV  R1,@FRBUF          the flags, kept
+       MOV  R1,R2
+       ANDI R2,>0006           the mode: 0 update, 2 output, 4 input, 6 append
+       CI   R2,>0004
+       JEQ  FSY0               an input file: nothing to flush
+       MOV  @FRBUF,R3
+       ANDI R3,>0001           a relative file?
+       JNE  FSY1
+       MOV  R2,R2
+       JNE  FSY1               a sequential output or append file
+       LI   R0,FNOPL           a sequential update file: the place is lost
+       JMP  FSY9
+FSY0   CLR  R0
+       JMP  FSY9
+FSY1   BL   @FCLOSE
+       MOV  R0,R0
+       JNE  FSY9
+* the flags of the new open: the file's kind kept ...
+       MOV   @FRBUF,R1
+       ANDI R1,>0019
+       MOV  @FRBUF,R3
+       ANDI R3,>0001
+       JNE  FSY2               a relative file: UPDATE (mode 0)
+       ORI  R1,>0006           else APPEND
+FSY2   SWPB R1
+       BL   @FPADR
+       INC  R0
+       BL   @VSBW              ... and put in the PAB
+       CLR  @FPAB              the character count, record number and screen
+       CLR  @FPAB+2            offset: zero again
+       BL   @FPADR
+       AI   R0,5
+       LI   R1,FPAB
+       LI   R2,4
+       BL   @VMBW
+       BL   @FPADR             opcode 0: OPEN
+       CLR  R1
+       BL   @VSBW
+       BL   @FCALL
+       MOV  R0,@FERR
+FSY9   .leave
        RT
 
 * FEXIST - is the file named by R2 ('DSK1.NAME') on the device?  R0 = 0 if it

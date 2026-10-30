@@ -441,6 +441,9 @@ CE_RLEN EQU  16              record length
 CE_SIZE EQU  18
 * FCATNX: R0 when the catalog has no more files (not a DSR error code)
 FCEND  EQU   >00FE
+* FSYNC: R0 when the file cannot be reopened at its place (a sequential update
+* file)
+FNOPL  EQU   >00FD
 * results (R0): 0 = done; 1-7 = the PAB's error code; >FF = no such device
 FEEOF  EQU  5                reading past the end of the file
 * a file error (the stand-in disk's answer for a missing input file;
