@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi fileapi editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -754,6 +754,148 @@ def editorpages():
     m, img = asmharness.workbench_ui(keys, 5000, [])
     check('unsaved changes: E, CTRL S' in ' '.join(sim9900.screen(m).split('\n')), 'R with unsaved edits in the editor does not run: it says to save first')
 
+def fileapi():
+    """The kernel's newer file and screen routines, called one at a time on a booted machine: records addressed by
+    number in a RELATIVE file through TI's real disk controller ROM (FRREAD, FRWRITE), the catalog (FCATOP, FCATNX), FEXIST,
+    DECD (32-bit decimals), YESNO and PRESSK."""
+    import random, subprocess, tempfile, asmharness, skdisk, tifdc
+    c = build('hello')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'hello', 'kernel.equ'))
+    def boot(img=None):
+        m = sim9900.Machine(c)
+        if img is not None:
+            m.tifdc = tifdc.TIFDC(image=img)
+        m.presses, m.toggles, end = sim9900.schedule([])
+        cpu = sim9900.CPU(m)
+        cpu.pc = m.rw(m.rw(0x6006) + 2)
+        while m.insns < 100 * sim9900.VSYNC_INSNS:
+            cpu.step()
+        return m, cpu
+    def call(m, cpu, name, regs=None, limit=30_000_000):
+        return asmharness.call(m, cpu, syms[name.lower()], regs or {}, limit=limit)
+    def put(m, addr, data):
+        for i, b in enumerate(data):
+            m.wb(addr + i, b)
+    def lp(s):
+        return bytes([len(s)]) + s.encode()
+    W = 0x2300 + 5000                       # scratch in APPRAM for names and buffers
+    # --- DECD ---
+    m, cpu = boot()
+    random.seed(4)
+    cases = [(0, 0, 0), (9, 0, 0), (10, 0, 0), (65535, 0, 0), (0, 1, 0), (0xFFFF, 0xFFFF, 0), (1, 0, 8), (12345, 0, 11), (0x3B9A, 0xCA00, 0)]
+    cases += [(random.randrange(65536), random.randrange(65536), random.choice([0, 5, 10, 11])) for _ in range(40)]
+    bad = 0
+    for lo, hi, width in cases:
+        pos = 10 * 80
+        for i in range(80): m.vram[pos + i] = 32
+        r = call(m, cpu, 'DECD', {0: pos, 1: hi, 2: lo, 3: 0x2100, 4: width})
+        n = hi << 16 | lo
+        want = str(n).rjust(width)
+        got = bytes(m.vram[pos:pos + len(want)]).decode('latin-1')
+        if got != want or r[3] != len(want) or m.vram[pos + len(want)] != 32:
+            bad += 1
+            print('   DECD', n, width, repr(got), repr(want), r[3])
+    check(bad == 0, 'DECD: %d 32-bit numbers (0, 9, 10, 65535, 65536, 4294967295, random), with and without a width, all print right' % len(cases))
+    # --- YESNO, PRESSK (keys already in the buffer) ---
+    def feed(m, keys):
+        for i, k in enumerate(keys): m.wb(0x2040 + i, k)
+        m.ww(0x200E, len(keys)); m.ww(0x2010, 0)
+    results = []
+    for key, want in ((ord('y'), 1), (ord('Y'), 1), (ord('n'), 0), (0xF9, 0)):
+        m, cpu = boot()
+        put(m, W, lp('Overwrite it?'))
+        feed(m, [ord('x'), ord('1'), key])      # two other keys are ignored first
+        r = call(m, cpu, 'YESNO', {0: 20 * 80 + 2, 1: W, 2: 0x2100})
+        text = bytes(m.vram[20 * 80 + 2:20 * 80 + 2 + 19]).decode('latin-1')
+        results.append((r[0] == want, text == 'Overwrite it? (Y/N)'))
+    check(all(a and b for a, b in results), 'YESNO: Y and y give 1, N and BACK give 0, other keys are ignored, and the prompt reads "Overwrite it? (Y/N)": %s' % results)
+    m, cpu = boot()
+    put(m, W, lp('Press a key'))
+    feed(m, [ord('q')])
+    r = call(m, cpu, 'PRESSK', {0: 22 * 80, 1: W, 2: 0x2100})
+    check(r[0] == 0x7100 and bytes(m.vram[22 * 80:22 * 80 + 11]) == b'Press a key', 'PRESSK writes the prompt and returns the key (>%04X)' % r[0])
+    # --- files, through TI's real controller ROM ---
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (the file checks need TIFDC_ROM)')
+        return
+    d = tempfile.mkdtemp()
+    for name, n in (('alpha.txt', 3), ('beta.a99', 12), ('gamma.txt', 40)):
+        open(d + '/' + name, 'w').write(''.join('line %d of %s\n' % (i, name) for i in range(n)))
+    p = d + '/d.dsk'
+    skdisk.make_disk(p, [d + '/alpha.txt', d + '/beta.a99', d + '/gamma.txt'], None, 'FILEAPI')
+    img = bytearray(open(p, 'rb').read())
+    listing = subprocess.run([sys.executable, os.path.join(os.environ['XAS99'].rsplit('/', 1)[0], 'xdm99.py'), p], capture_output=True, text=True).stdout.split('\n')
+    want = {}
+    for l in listing[2:]:
+        f = l.split()
+        if len(f) >= 4 and f[2].startswith('DIS'):
+            want[f[0]] = (2 if 'VAR' in f[2] else 1, int(f[1]), int(f[3]))
+    m, cpu = boot(img)
+    REC, ENT = W + 100, W + 200
+    put(m, W, lp('DSK1.'))
+    r = call(m, cpu, 'FCATOP', {1: REC, 2: W})
+    check(r[0] == 0, 'FCATOP opens the catalog of DSK1 (error %d)' % r[0])
+    got, guard = {}, 0
+    while guard < 20:
+        r = call(m, cpu, 'FCATNX', {1: REC, 2: ENT})
+        if r[0] != 0:
+            break
+        nm = bytes(m.rb(ENT + 1 + i) for i in range(m.rb(ENT))).decode()
+        got[nm] = (m.rw(ENT + 12), m.rw(ENT + 14), m.rw(ENT + 16))
+        guard += 1
+    check(r[0] == 0xFE and got == want and len(got) == 3, 'FCATNX returns each file with its type, sectors and record length, then FCEND: %s' % got)
+    res = {}
+    for nm in ('DSK1.' + k for k in want):
+        put(m, W, lp(nm)); res[nm] = call(m, cpu, 'FEXIST', {2: W})[0]
+    for nm in ('DSK1.NOSUCH', 'DSK1.ALPHA/TX', 'DSK1.BETA/A9'):
+        put(m, W, lp(nm)); res[nm] = call(m, cpu, 'FEXIST', {2: W})[0]
+    for nm in ('XYZ9.FILE', 'NODOT'):
+        put(m, W, lp(nm)); res[nm] = call(m, cpu, 'FEXIST', {2: W})[0]
+    ok = all(res['DSK1.' + k] == 0 for k in want)
+    check(ok and res['DSK1.NOSUCH'] == 7 and res['DSK1.ALPHA/TX'] == 7 and res['DSK1.BETA/A9'] == 7 and res['XYZ9.FILE'] == 0xFF and res['NODOT'] == 0xFF,
+          'FEXIST: every file on the disk exists, a missing one answers 7 (a shorter name too), a bad device or no device >FF: %s' % res)
+    # the same through the catalog (FEXCAT), for a device that does not answer STATUS
+    res2 = {}
+    for nm in ['DSK1.' + k for k in want] + ['DSK1.NOSUCH', 'DSK1.ALPHA/TX', 'XYZ9.FILE', 'NODOT']:
+        put(m, W, lp(nm)); res2[nm] = call(m, cpu, 'FEXCAT', {2: W})[0]
+    check(all(res[k] == v for k, v in res2.items()), 'FEXCAT (the catalog scan) gives the same answers as FEXIST (STATUS) for every name above: %s' % {k: (res[k], v) for k, v in res2.items() if res.get(k) != v})
+    # why not just open it?  TI's controller answers 2 for a missing file in every mode, and for a file of the wrong kind
+    def opn(name, flags, rl):
+        put(m, W, lp(name)); call(m, cpu, 'FSEL', {0: 0})
+        r = call(m, cpu, 'FOPEN', {0: flags, 1: rl, 2: W})[0]; call(m, cpu, 'FCLOSE'); return r
+    miss = [opn('DSK1.NOSUCH', f, rl) for f, rl in ((0x1400, 80), (0x0500, 32), (0x0400, 32), (0x1C00, 80))]
+    wrong = opn('DSK1.ALPHA/TXT', 0x0500, 32)
+    check(miss == [2, 2, 2, 2] and wrong == 2, 'opening a missing file answers 2 in every mode tried, and so does a file of the wrong kind (%s, %d): FEXIST cannot be built on opens' % (miss, wrong))
+    # relative records: write records out of order, read them back by number
+    put(m, W, lp('DSK1.RELFILE'))
+    call(m, cpu, 'FSEL', {0: 0})
+    r = call(m, cpu, 'FOPEN', {0: 0x0200 | 0x0100, 1: 32, 2: W})     # FOUT + FREL: fixed records of 32
+    opened = r[0]
+    check(opened == 0, 'FOPEN of a new RELATIVE file (FOUT+FREL, fixed records of 32): error %d' % opened)
+    order = [5, 2, 9, 0, 7]
+    errs = 0
+    for k in order:
+        put(m, REC, ('record %d' % k).ljust(32).encode())
+        errs += call(m, cpu, 'FRWRITE', {1: REC, 2: 32, 3: k})[0]
+    call(m, cpu, 'FCLOSE')
+    check(errs == 0, 'FRWRITE puts records 5, 2, 9, 0 and 7 in that order without error')
+    put(m, W, lp('DSK1.RELFILE'))
+    r = call(m, cpu, 'FOPEN', {0: 0x0400 | 0x0100, 1: 32, 2: W})
+    back = {}
+    for k in sorted(order, reverse=True):
+        for i in range(32): m.wb(REC + i, 0)
+        rr = call(m, cpu, 'FRREAD', {1: REC, 3: k})
+        back[k] = (rr[0], bytes(m.rb(REC + i) for i in range(32)).decode('latin-1').rstrip())
+    call(m, cpu, 'FCLOSE')
+    check(r[0] == 0 and all(v == (0, 'record %d' % k) for k, v in back.items()), 'FRREAD reads them back by number, in a different order (9, 7, 5, 2, 0): %s' % back)
+    put(m, W, lp('DSK1.RELFILE'))
+    call(m, cpu, 'FOPEN', {0: 0x0400 | 0x0100, 1: 32, 2: W})
+    rr = call(m, cpu, 'FRREAD', {1: REC, 3: 100})
+    call(m, cpu, 'FCLOSE')
+    check(rr[0] != 0, 'a record far past the end is an error (%d), not silent garbage' % rr[0])
+    put(m, W, lp('DSK1.RELFILE'))
+    check(call(m, cpu, 'FEXIST', {2: W})[0] == 0, 'FEXIST sees the relative file, whatever kind it is')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -901,7 +1043,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('fileapi', fileapi), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

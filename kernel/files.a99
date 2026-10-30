@@ -230,7 +230,9 @@ FC2    MOV  *R1+,*R2+
 
 * FCNUM - number n of a catalog record: R1 = the record's address (as
 * FREAD left it after opening "DSK1." as FIN+FINTL, record length 38),
-* R2 = n.  R0 = the integer.  Record 0 is the disk (name, 0, its size in
+* R2 = n, counting the numbers after the name from 0 (a file's type is 0, its
+* size 1, its record length 2). R0 = the integer. Record 0 is the disk (name,
+* 0, its size in
 * sectors, sectors free); every other record is a file (name, type,
 * size in sectors, record length; a type is 1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX,
 * 4 INT/VAR, 5 program, negative for a protected file) and an empty name
@@ -523,3 +525,241 @@ CK2D   MOVB *R1+,R0
        AI   R2,-48
        A    R2,R0
        RT
+
+*----------------------------------------------------------------------
+* relative records, the catalog, whether a file exists
+*----------------------------------------------------------------------
+* FRN - make R3 the record number of the selected handle's PAB (what a
+* RELATIVE file's next FREAD or FWRITE addresses).  Uses R0-R2.
+FRN    .enter
+       MOV  R3,@FPAB           the two bytes, high byte first (the PAB staging
+       BL   @FPADR             area is free between calls)
+       AI   R0,6               the PAB's record number
+       LI   R1,FPAB
+       LI   R2,2
+       BL   @VMBW
+       .leave
+       RT
+
+* FRREAD - read record number R3 (0 up) of a RELATIVE file into the buffer at
+* R1.  Open the file with FREL + FFIXED (or FINTL) + a mode and the record
+* length; then every FRREAD and FRWRITE names the record it wants, in any
+* order.  R0 = 0 or the error; R2 = the record's length.  Uses R0-R9.
+FRREAD .enter
+       MOV  R1,@FRBUF
+       BL   @FRN
+       MOV  @FRBUF,R1
+       BL   @FREAD
+       .leave
+       RT
+
+* FRWRITE - write R2 bytes from the buffer at R1 as record number R3 of a
+* RELATIVE file (see FRREAD).  R0 = 0 or the error.  Uses R0-R9.
+FRWRITE .enter
+       MOV  R1,@FRBUF
+       MOV  R2,@FRLEN
+       BL   @FRN
+       MOV  @FRBUF,R1
+       MOV  @FRLEN,R2
+       BL   @FWRITE
+       .leave
+       RT
+
+* FCATOP - open the catalog of the device named by R2 (a length-prefixed
+* device alone: 'DSK1.') on the selected handle and read its first record, the
+* disk's own (FCNUM 1 of it is the size in sectors, 2 the sectors free), into
+* the 38-byte buffer at R1.  R0 = 0 or the error.  Then call FCATNX with the
+* same buffer until it answers FCEND.  Uses R0-R9.
+FCATOP .enter
+       MOV  R1,@FCRB
+       LI   R0,FIN+FINTL       INTERNAL, FIXED, input
+       LI   R1,38
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  FCO9
+       MOV  @FCRB,R1
+       BL   @FREAD
+FCO9   .leave
+       RT
+
+* FCATNX - the next file of the catalog opened by FCATOP: R1 = the same 38-byte
+* buffer, R2 = a CE_SIZE-byte entry to fill (CE_NAME, CE_TYPE, CE_SECT,
+* CE_RLEN, the numbers decoded).  R0 = 0 for a file, FCEND when there are no
+* more (the catalog is then closed), or the error.  Uses R0-R9.
+FCATNX .enter
+       MOV  R1,@FCRB
+       MOV  R2,@FCEA
+       BL   @FREAD
+       MOV  R0,R0
+       JEQ  FCN1X
+       CI   R0,FEEOF           the end of the file: the end of the catalog
+       JNE  FCNX9
+       LI   R0,FCEND
+       JMP  FCNX9
+FCN1X  MOV  @FCRB,R1
+       MOVB *R1,R0             an empty name ends the catalog too
+       JNE  FCN2X
+       BL   @FCLOSE
+       LI   R0,FCEND
+       JMP  FCNX9
+FCN2X  MOV  @FCEA,R2           the name, at most 10 characters
+       CLR  R3
+       MOVB *R1,R3
+       SWPB R3
+       CI   R3,10
+       JLE  FCN3X
+       LI   R3,10
+FCN3X  MOV  R3,R4
+       SWPB R4
+       MOVB R4,*R2+            its length byte
+       MOV  @FCRB,R1
+       INC  R1
+FCN4X  MOV  R3,R3
+       JEQ  FCN5X
+       MOVB *R1+,*R2+
+       DEC  R3
+       JMP  FCN4X
+* the three numbers after the name (FCNUM counts from 0)
+FCN5X  MOV   @FCRB,R1
+       CLR  R2
+       BL   @FCNUM
+       MOV  @FCEA,R2
+       MOV  R0,@CE_TYPE(R2)
+       MOV  @FCRB,R1
+       LI   R2,1
+       BL   @FCNUM
+       MOV  @FCEA,R2
+       MOV  R0,@CE_SECT(R2)
+       MOV  @FCRB,R1
+       LI   R2,2
+       BL   @FCNUM
+       MOV  @FCEA,R2
+       MOV  R0,@CE_RLEN(R2)
+       CLR  R0
+FCNX9  .leave
+       RT
+
+* FEXIST - is the file named by R2 ('DSK1.NAME') on the device?  R0 = 0 if it
+* is, FENOFI (7) if it is not, >FF for no such device, else the DSR's error.
+* It asks the DSR for the file's STATUS (opcode 9) and looks at bit 7 of the
+* answer, which is set for a file that does not exist: opening cannot tell the
+* cases apart, because TI's controller answers error 2 for a missing file in
+* every mode and for a file of the wrong kind alike.  A device that does not
+* answer STATUS (an error other than >FF) is asked through its catalog instead
+* (FEXCAT).  It uses file handle 2 for a moment, because the call overwrites a
+* PAB (keep that handle free), and puts the selected handle back.  Uses R0-R9.
+FEXIST .enter
+       .push R2
+       MOV  @FSELH,R0
+       .push R0
+       LI   R0,2
+       BL   @FSEL
+       LI   R3,>0900           opcode 9: STATUS
+       CLR  R0
+       CLR  R1
+       MOV  @2(R10),R2         the name
+       BL   @FPABOP
+       MOV  R0,R0
+       JNE  FX1
+       BL   @FPADR             the status byte comes back in the PAB's byte 8
+       AI   R0,8
+       BL   @VRAD
+       MOVB @VDPRD,R1
+       ANDI R1,>8000           bit 7: no such file
+       LI   R0,FENOFI
+       MOV  R1,R1
+       JNE  FX9
+       CLR  R0
+       JMP  FX9
+FX1    CI   R0,>00FF           no such device: said
+       JEQ  FX9
+       MOV  @2(R10),R2         any other error: STATUS is not understood there
+       BL   @FEXCAT
+FX9    .pop R1
+       MOV  R1,@FSELH
+       .pop R2
+       .leave
+       RT
+
+* FEXCAT - is the file named by R2 ('DSK1.NAME') on the disk, found by reading
+* the catalog (FCATOP, FCATNX)? R0 = 0 if it is, FENOFI (7) if it is not, else
+* the
+* error (>FF: no such device or no dot in the name; or the catalog of that
+* device
+* cannot be read).  FEXIST uses it for a device that does not answer STATUS.  It
+* uses file handle 2 for a moment (keep it free) and puts the selected handle
+* back.  Uses R0-R9.
+FEXCAT .enter
+       MOV  R2,@FEXN
+       MOV  @FSELH,R0
+       .push R0
+       LI   R0,2
+       BL   @FSEL
+* a frame on the stack: the catalog record (38 bytes
+       AI    R10,-72
+* from R10), the entry (R10+40), the device (R10+60)
+       MOV  @FEXN,R1           the device: the name up to and including the dot
+       MOVB *R1+,R3
+       SRL  R3,8
+       MOV  R10,R4
+       AI   R4,61              (the length byte goes in first)
+       CLR  R5
+FE1    MOV  R3,R3
+       JEQ  FEBAD              no dot: no such device
+       MOVB *R1+,R0
+       MOVB R0,*R4+
+       INC  R5
+       DEC  R3
+       CI   R5,11
+       JH   FEBAD
+       CB   R0,@FEDOT
+       JNE  FE1
+       MOV  R1,@FEXN           (the file's own name follows the dot)
+       MOV  R3,@FRLEN          its length
+       MOV  R10,R4
+       AI   R4,60
+       SWPB R5
+       MOVB R5,*R4             the device's length byte
+       MOV  R10,R1             FCATOP: the record buffer ...
+       MOV  R4,R2              ... and the device name
+       BL   @FCATOP
+       MOV  R0,R0
+       JNE  FE9
+FE2    MOV  R10,R1
+       MOV  R10,R2
+       AI   R2,40
+       BL   @FCATNX
+       MOV  R0,R0
+       JEQ  FE3
+       CI   R0,FCEND
+       JNE  FE9
+       LI   R0,FENOFI          not in the catalog
+       JMP  FE9
+FE3    MOV  R10,R1             the entry's name against the one asked for
+       AI   R1,40
+       MOVB *R1+,R3
+       SRL  R3,8
+       C    R3,@FRLEN
+       JNE  FE2
+       MOV  @FEXN,R2
+FE4    MOV  R3,R3
+       JEQ  FE5                every character the same: it is there
+       MOVB *R1+,R0
+       MOVB *R2+,R4
+       CB   R0,R4
+       JNE  FE2
+       DEC  R3
+       JMP  FE4
+FE5    CLR  R0
+       JMP  FE9
+FEBAD  LI   R0,>00FF
+FE9    AI   R10,72
+       .push R0
+       BL   @FCLOSE            (it answers an error if the catalog ended)
+       .pop R0
+       .pop R1
+       MOV  R1,@FSELH
+       .leave
+       RT
+FEDOT  BYTE '.'
+       EVEN

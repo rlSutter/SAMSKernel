@@ -1,5 +1,17 @@
 # Changes
 
+## 1.8.0 (30 October 2026)
+
+New routines, from what F18Base had to work around (all tested in group `fileapi`; the file ones against TI's real controller ROM):
+
+- **`FRREAD` / `FRWRITE`**: records of a RELATIVE file by number (R3), with the new open flag `FREL` (>0100). Records written out of order, read back in another order.
+- **`FCATOP` / `FCATNX`**: the catalog one file at a time, the radix-100 numbers decoded into an entry (`CE_NAME`, `CE_TYPE`, `CE_SECT`, `CE_RLEN`); `FCEND` at the end.
+- **`FEXIST`**: is a named file on the device? It asks for the file's STATUS (opcode 9: bit 7 = no such file), which is the same whatever kind of file it is (checked on TI's real ROM for sequential, relative and internal files). Opening cannot answer it: the real controller answers 2 for a missing file in every mode and for a file of the wrong kind alike, so a second open without the relative flag does not tell them apart (tested). A device that does not answer STATUS is asked through the catalog (`FEXCAT`, also public). Uses file handle 2.
+- **`DECD`**: an unsigned 32-bit number as decimal, with a width (right-aligned).
+- **`YESNO`**, **`PRESSK`**: a question on the message line answered with Y or N; a prompt that waits for a key.
+- The kernel grows by about 500 bytes (now about 6.1K of the 7.7K it may have). KERNEL/EQU has 325 symbols (the TI assembler's table holds 580).
+- **Not done** (proposed, see the review of the F18Base list): `FSYNC` (needs a specification: only output and relative files can be reopened at their place), key polling inside `FCALL` (to be measured against assembly speed), `LINEIN`, resident code for multi-module applications.
+
 ## 1.7.3 (30 October 2026)
 
 - **Fixed: the arrow keys did nothing in js99er** (editor, and every application on the kernel, with js99er's option "Map arrow keys to Fctn+SDEX"). Since 1.5.0 `KPOLL` read the joystick columns (keyboard columns 6 and 7) every frame. js99er (`keyboard.js`, `isKeyDown`) takes any read of those columns to mean 'this program uses the joystick' and, for the next 250 reads, stops mapping the PC's arrow keys to FCTN+S/D/E/X; the arrows then act only as joystick 1, which a program that is not looking at the joystick ignores. Press, which reads no joystick, was not affected. Now the kernel reads the joysticks only for a program that uses them: the first `JOYGET` call (its own answer is 0) or a non-zero `JOYKEY` starts it (`JOYON`, `>20CE`). Tests (`joystick` group): `hello` never reads columns 6 or 7; the joystick example does.

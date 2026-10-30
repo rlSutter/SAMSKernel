@@ -298,6 +298,9 @@ the names; use them as you like.
 | `FILLN` | R0 = position, R1 = glyph (high byte), R2 = count: glyphs only |
 | `FILLA` | R0 = position, R1 = attribute (high byte), R2 = count: attributes only |
 | `DECW` | R0 = position, R1 = unsigned number, R2 = attribute; returns R3 = digits |
+| `DECD` | R0 = position, R1:R2 = an unsigned 32-bit number (high word, low word), R3 = attribute, R4 = minimum width (0: none; spaces pad on the left, so numbers line up); returns R3 = characters. Uses R0-R8 |
+| `YESNO` | R0 = position, R1 = a prompt (length-prefixed), R2 = attribute: writes the prompt and ' (Y/N)', waits (`KWAIT`) for a key; R0 = 1 for Y, 0 for N or BACK |
+| `PRESSK` | R0 = position, R1 = a prompt, R2 = attribute: writes it and waits for any key; R0 = the key |
 | `HEX2` / `HEX4` | R0 = position, R1 = number, R2 = attribute: two / four hex digits |
 | `CLS` | R1 = attribute: every cell a space in it |
 | `BOX` | R0 = top-left position, R1 = interior width, R2 = interior height, R3 = attribute: a frame |
@@ -701,6 +704,21 @@ LOOP   CLR  R0
 `FSEL` answers `>FF` for a handle above 2 (and keeps the old choice). The limit is the disk controller's: it keeps three file buffers, so a fourth open fails with its error; a printer or another device's
 file counts as one of the three. Each handle has its own PAB in VRAM (`>3700`, `>3740`, `>3780`: the controller tells open files apart by their PABs) and they share one record buffer, since a call finishes with it. `FDELETE` uses the
 selected handle's PAB, so close that handle's file first. `tests/apps/files2` is a working copy-while-reading example, checked against TI's own controller ROM.
+
+### Records by number, the catalog, and "is it there?"
+
+**[PC or TI]** `FREAD` and `FWRITE` take the next record. A **relative** file is one whose records you address by number, in any order (the way a table or index file is used): open it with `FREL` added to the flags (fixed records only: `FOUT+FREL` or `FIN+FREL` or `FUPDT+FREL`, with the record length in R1), then use
+
+| Routine | |
+| --- | --- |
+| `FRREAD` | R1 = buffer, R3 = record number (0 up) → R0 = 0 or the error, R2 = the length read |
+| `FRWRITE` | R1 = buffer, R2 = length, R3 = record number → R0 = 0 or the error |
+
+Records need not be written in order (writing 5, then 2, then 9 works; the others are empty); reading past the end is an error (5). `FRREAD` and `FRWRITE` set the PAB's record number and then do what `FREAD` and `FWRITE` do, so the same handle rules (`FSEL`) apply. Tested against TI's real controller ROM.
+
+**The catalog.** `FCATOP` opens the catalog of a device on the selected handle (R2 = `'DSK1.'`, R1 = a 38-byte buffer) and reads the disk's own record into the buffer (`FCNUM` 1 of it is the size in sectors, 2 the sectors free). `FCATNX` (R1 = the same buffer, R2 = an 18-byte entry) then returns one file per call: R0 = 0 and the entry holds the name (`CE_NAME`: a length byte and up to 10 characters), `CE_TYPE` (1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX, 4 INT/VAR, 5 program; negative if protected), `CE_SECT` (sectors) and `CE_RLEN`; R0 = `FCEND` (>FE) when there are no more. The radix-100 numbers in a catalog record are decoded for you.
+
+**Is it there?** `FEXIST` (R2 = `'DSK1.NAME'`) answers 0 if the file is on the disk, `FENOFI` (7) if not, `>FF` for no such device. It asks the device for the file's STATUS (PAB opcode 9) and looks at bit 7 of the answer, which is set for a file that does not exist. It does not try to open the file: TI's controller answers error 2 for a missing file in every mode (sequential or relative, fixed or variable, tried against its real ROM) and also for a file of the wrong kind, so no second open can tell the cases apart. A device that does not answer STATUS is asked through its catalog instead (`FEXCAT`, same answers: it needs a device whose catalog can be read; a TIPI path: not tried). `FEXIST` uses file handle 2 for a moment, like `CLKGET`, because STATUS overwrites a PAB.
 
 ### Devices: a disk controller, a TIPI, and others
 

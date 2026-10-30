@@ -417,10 +417,30 @@ FDISP  EQU  >0000            DISPLAY records
 FINTL  EQU  >0800            INTERNAL records
 FFIXED EQU  >0000            FIXED-length records
 FVAR   EQU  >1000            VARIABLE-length records
+* file type: RELATIVE (records addressed by number: FRREAD, FRWRITE; FIXED
+* only)
+FREL   EQU   >0100
 FUPDT  EQU  >0000            mode: update
 FOUT   EQU  >0200            mode: output (creates the file)
 FIN    EQU  >0400            mode: input
 FAPP   EQU  >0600            mode: append
+* the file service's own scratch words (>20D0-20DE): record buffers' addresses
+* and the like
+FRBUF  EQU  >20D0            FRREAD, FRWRITE: the caller's buffer
+FRLEN  EQU  >20D2            FRWRITE: its length
+FEXN   EQU  >20D4            FEXIST: the caller's file name
+FCRB   EQU  >20D6            FCATOP, FCATNX: the catalog record buffer
+FCEA   EQU  >20D8            FCATNX: the entry to fill
+* one file of a catalog, as FCATNX returns it (CE_SIZE bytes)
+* name: a length byte and up to 10 characters (11 bytes)
+CE_NAME EQU   0
+* type: 1 DIS/FIX 2 DIS/VAR 3 INT/FIX 4 INT/VAR 5 program (negative: protected)
+CE_TYPE EQU   12
+CE_SECT EQU  14              size in sectors
+CE_RLEN EQU  16              record length
+CE_SIZE EQU  18
+* FCATNX: R0 when the catalog has no more files (not a DSR error code)
+FCEND  EQU   >00FE
 * results (R0): 0 = done; 1-7 = the PAB's error code; >FF = no such device
 FEEOF  EQU  5                reading past the end of the file
 * a file error (the stand-in disk's answer for a missing input file;

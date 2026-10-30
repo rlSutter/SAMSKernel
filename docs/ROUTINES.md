@@ -286,6 +286,18 @@ a single-line frame in glyphs 1-6 (the UI glyphs: docs/GLYPHS.md): R0 = the top-
 
 one cell; BXRUN - R2 cells: glyph R1 (high byte) from position R0, attribute R7.  Use R0-R2.
 
+### `DECD`
+
+the unsigned 32-bit number R1:R2 (high word, low word) as a decimal number at position R0, attribute R3, at least R4 characters wide (0: as wide as it is; padded with spaces on the left, so that numbers line up; at most 11). The digits come out of two divisions by ten: the high word first (its remainder is the high half of the next dividend), then that and the low word. R3 = the number of characters written.  Uses R0-R8.
+
+### `YESNO`
+
+ask a question: the prompt at R1 (length-prefixed) is written at position R0 with attribute R2, followed by ' (Y/N)'; then it waits (KWAIT) for Y or N.  R0 = 1 for Y, 0 for N or BACK (FCTN 9).  Any other key is ignored. The line is left as it is: the caller redraws it.  Uses R0-R8, R12.
+
+### `PRESSK`
+
+the prompt at R1 (length-prefixed) at position R0, attribute R2, then wait for any key (KWAIT): R0 = its code.  Uses R0-R8, R12.
+
 ## Modules (modules.a99)
 
 ### `MODCALL`
@@ -354,7 +366,7 @@ call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it
 
 ### `FCNUM`
 
-number n of a catalog record: R1 = the record's address (as FREAD left it after opening "DSK1." as FIN+FINTL, record length 38), R2 = n.  R0 = the integer.  Record 0 is the disk (name, 0, its size in sectors, sectors free); every other record is a file (name, type, size in sectors, record length; a type is 1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX, 4 INT/VAR, 5 program, negative for a protected file) and an empty name ends the catalog.  Numbers are 8-byte radix-100 floats after the name; this reads small integers only (under 10,000), as catalogs hold.  The name is the length-prefixed string at the record's start.  Uses R0-R5. Leaf. R2:R3 = n * 9 (each number is a length byte and 8 bytes)
+number n of a catalog record: R1 = the record's address (as FREAD left it after opening "DSK1." as FIN+FINTL, record length 38), R2 = n, counting the numbers after the name from 0 (a file's type is 0, its size 1, its record length 2). R0 = the integer. Record 0 is the disk (name, 0, its size in sectors, sectors free); every other record is a file (name, type, size in sectors, record length; a type is 1 DIS/FIX, 2 DIS/VAR, 3 INT/FIX, 4 INT/VAR, 5 program, negative for a protected file) and an empty name ends the catalog.  Numbers are 8-byte radix-100 floats after the name; this reads small integers only (under 10,000), as catalogs hold.  The name is the length-prefixed string at the record's start.  Uses R0-R5. Leaf. R2:R3 = n * 9 (each number is a length byte and 8 bytes)
 
 ### `DSRLNK`
 
@@ -375,6 +387,34 @@ read TIPI's clock (the device PI.CLOCK, one record "w,mm/dd/yy,HH:MM:SS": the fo
 ### `CK2D` *(internal)*
 
 the two decimal digits at R1 into R0, R1 past them.  Leaf.  Uses R0-R2.
+
+### `FRN` *(internal)*
+
+make R3 the record number of the selected handle's PAB (what a RELATIVE file's next FREAD or FWRITE addresses).  Uses R0-R2.
+
+### `FRREAD`
+
+read record number R3 (0 up) of a RELATIVE file into the buffer at R1.  Open the file with FREL + FFIXED (or FINTL) + a mode and the record length; then every FRREAD and FRWRITE names the record it wants, in any order.  R0 = 0 or the error; R2 = the record's length.  Uses R0-R9.
+
+### `FRWRITE`
+
+write R2 bytes from the buffer at R1 as record number R3 of a RELATIVE file (see FRREAD).  R0 = 0 or the error.  Uses R0-R9.
+
+### `FCATOP`
+
+open the catalog of the device named by R2 (a length-prefixed device alone: 'DSK1.') on the selected handle and read its first record, the disk's own (FCNUM 1 of it is the size in sectors, 2 the sectors free), into the 38-byte buffer at R1.  R0 = 0 or the error.  Then call FCATNX with the same buffer until it answers FCEND.  Uses R0-R9.
+
+### `FCATNX`
+
+the next file of the catalog opened by FCATOP: R1 = the same 38-byte buffer, R2 = a CE_SIZE-byte entry to fill (CE_NAME, CE_TYPE, CE_SECT, CE_RLEN, the numbers decoded).  R0 = 0 for a file, FCEND when there are no more (the catalog is then closed), or the error.  Uses R0-R9.
+
+### `FEXIST`
+
+is the file named by R2 ('DSK1.NAME') on the device?  R0 = 0 if it is, FENOFI (7) if it is not, >FF for no such device, else the DSR's error. It asks the DSR for the file's STATUS (opcode 9) and looks at bit 7 of the answer, which is set for a file that does not exist: opening cannot tell the cases apart, because TI's controller answers error 2 for a missing file in every mode and for a file of the wrong kind alike.  A device that does not answer STATUS (an error other than >FF) is asked through its catalog instead (FEXCAT).  It uses file handle 2 for a moment, because the call overwrites a PAB (keep that handle free), and puts the selected handle back.  Uses R0-R9.
+
+### `FEXCAT`
+
+is the file named by R2 ('DSK1.NAME') on the disk, found by reading the catalog (FCATOP, FCATNX)? R0 = 0 if it is, FENOFI (7) if it is not, else the error (>FF: no such device or no dot in the name; or the catalog of that device cannot be read).  FEXIST uses it for a device that does not answer STATUS.  It uses file handle 2 for a moment (keep it free) and puts the selected handle back.  Uses R0-R9.
 
 ## Music and sound (music.a99)
 

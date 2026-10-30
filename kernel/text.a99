@@ -258,3 +258,102 @@ BXRUN  .enter
        BL   @FILLA
 BXR9   .leave
        RT
+
+* DECD - the unsigned 32-bit number R1:R2 (high word, low word) as a decimal
+* number at position R0, attribute R3, at least R4 characters wide (0: as wide
+* as it is; padded with spaces on the left, so that numbers line up; at most
+* 11).
+* The digits come out of two divisions by ten: the high word first (its
+* remainder is the high half of the next dividend), then that and the low word.
+* R3 = the number of characters written.  Uses R0-R8.
+DECD   .enter
+       .push R0
+       .push R3
+       .push R4
+       LI   R6,TXTBUF+11       the digits are built backwards from here
+       LI   R7,10
+DD1    CLR  R4                 divide the high word by ten ...
+       MOV  R1,R5
+       DIV  R7,R4              R4 = its quotient, R5 = the remainder
+       MOV  R4,R1
+       MOV  R5,R4              ... then (that remainder : the low word) by ten
+       MOV  R2,R5
+       DIV  R7,R4              R4 = the new low word, R5 = the digit
+       MOV  R4,R2
+       AI   R5,>30
+       SWPB R5
+       MOVB R5,*R6
+       DEC  R6
+       MOV  R1,R4
+       SOC  R2,R4              both words zero?
+       JNE  DD1
+       LI   R1,TXTBUF+11       R1 = the digits written
+       S    R6,R1
+       .pop R0                 the width asked for
+       CI   R0,11
+       JLE  DD2
+       LI   R0,11
+DD2    LI   R5,>2000
+DD2A   C    R1,R0              pad with spaces up to it
+       JHE  DD3
+       MOVB R5,*R6
+       DEC  R6
+       INC  R1
+       JMP  DD2A
+DD3    MOV  R1,R5              the length byte before it all
+       SWPB R5
+       MOVB R5,*R6
+       .pop R2                 the attribute
+       .pop R0                 the position
+       .push R1                (the length: the result)
+       MOV  R6,R1
+       BL   @PUTS
+       .pop R3
+       .leave
+       RT
+
+* YESNO - ask a question: the prompt at R1 (length-prefixed) is written at
+* position R0 with attribute R2, followed by ' (Y/N)'; then it waits (KWAIT) for
+* Y or N.  R0 = 1 for Y, 0 for N or BACK (FCTN 9).  Any other key is ignored.
+* The line is left as it is: the caller redraws it.  Uses R0-R8, R12.
+YESNO  .enter
+       .push R0
+       .push R1
+       .push R2
+       BL   @PUTS
+       .pop R2
+       .pop R1
+       .pop R0
+       CLR  R3                 the suffix goes right after the prompt
+       MOVB *R1,R3
+       SWPB R3
+       A    R3,R0
+       LI   R1,YNSUF
+       BL   @PUTS
+YN1    BL   @KWAIT
+       CI   R0,>6100           letters to capitals
+       JL   YN2
+       CI   R0,>7A00
+       JH   YN2
+       AI   R0,->2000
+YN2    CI   R0,>5900           Y
+       JEQ  YN3
+       CI   R0,>4E00           N
+       JEQ  YN4
+       CI   R0,KBACK*256
+       JNE  YN1
+YN4    CLR  R0
+       JMP  YN9
+YN3    LI   R0,1
+YN9    .leave
+       RT
+YNSUF  STRI ' (Y/N)'
+       EVEN
+
+* PRESSK - the prompt at R1 (length-prefixed) at position R0, attribute R2, then
+* wait for any key (KWAIT): R0 = its code.  Uses R0-R8, R12.
+PRESSK .enter
+       BL   @PUTS
+       BL   @KWAIT
+       .leave
+       RT
