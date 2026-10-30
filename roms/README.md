@@ -40,7 +40,7 @@ that unstuck it is from MAME's source for the card (`myarcfdc.cpp`, Michael Zapf
 The DSR first tries single density, and the model answers 'record not found' when the density asked for is not the disk's, which is how the DSR finds a double-density disk.
 
 **Myarc HFDC (`hfdc_dsr.u34`).** A different card: a hard and floppy disk controller (devices `DSK` and `WDS`), header version `>0B`, 16K in two halves, with a controller chip
-that drives both kinds of disk. Not modelled. It does not supply anything the DDCC-1 lacked (that was my misreading of the DDCC-1's bank-switching, not a missing ROM).
+that drives both kinds of disk. **Not modelled, and not modellable from the ROM alone in reasonable time**: the card's controller is not a WD177x, it has its own RAM and paging, and the ROM reaches it through computed registers and CRU values, so unlike the DDCC-1 (where MAME's description unblocked it) the model needs a hardware description (MAME's `myarcfdc.cpp` for the HFDC and the HDC9234 device would do). It does not supply anything the DDCC-1 lacked (that was my misreading of the DDCC-1's bank-switching, not a missing ROM).
 
 **Where they came from, and what you may do with them.** You supplied them on 30 October 2026 as `ti99_ccdcc.zip`, `ti99_ddcc1.zip` and `ti99_hfdc.zip`; the
 archives say nothing about their authors or licence. They are the firmware of commercial cards (CorComp, Myarc) whose makers are no longer

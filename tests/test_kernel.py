@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi fileapi dsdd editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1063,6 +1063,42 @@ def dsdd():
     for label, make_card in cards:
         _dsdd(label, make_card)
 
+def dsddworkbench():
+    """The workbench on a 360K double-density disk, through each double-density card's real DSR: the catalog lists every
+    program on the disk, and HELLO/A99 is assembled on the (simulated) TI and equals what xas99 makes of it.  The disk is
+    built here as the distribution's workbench-360k.dsk is (tools/skdisk.py --geometry dsdd)."""
+    import tempfile, asmharness, skdisk, ccfdc, myfdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    build('workbench')
+    kequ = os.path.join(ROOT, 'build', 'workbench', 'kernel.equ')
+    files = [os.path.join(ROOT, f) for f in (
+        'examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/workbench/programs/mode.a99',
+        'examples/workbench/programs/copy.a99', 'examples/workbench/programs/paging.a99', 'examples/workbench/programs/clock.a99',
+        'examples/joystick/joy.a99', 'tests/asm/probe1.a99', 'examples/reversi/revers.a99', 'examples/modes/modes.a99',
+        'examples/workbench/wb.a99', 'examples/workbench/ed.a99', 'examples/workbench/asm.a99')]
+    d = tempfile.mkdtemp()
+    p = d + '/w.dsk'
+    open(d + '/SRC', 'w').write('a short sample text file\nfor COPY/A99 to copy\n')
+    files.append(d + '/SRC')
+    skdisk.make_disk(p, files, kequ, 'WORKBENCH', 'dsdd')
+    disk = open(p, 'rb').read()
+    want = asmharness.assemble(files[0], 'workbench')
+    cards = []
+    if ccfdc.available(): cards.append(('CorComp', lambda img: ccfdc.CCFDC(image=img)))
+    if myfdc.available(): cards.append(('Myarc DDCC-1', lambda img: myfdc.MYFDC(image=img)))
+    for label, make in cards:
+        def hook(m, make=make):
+            m.tifdc = make(bytearray(disk))
+        m, img = asmharness.workbench_ui('<WAIT 10>c<WAIT 400>', 700, [], setup2=hook)
+        text = ' '.join(sim9900.screen(m).split('\n'))
+        names = ['HELLO/A99', 'REVERS/A99', 'MODES/A99', 'KERNEL/EQU', 'WB/A99', 'ED/A99', 'ASM/A99', 'SRC']
+        check(all(n in text for n in names), '[%s] the catalog of the 360K disk lists the programs (%d of %d names seen)' % (label, sum(n in text for n in names), len(names)))
+        m, img = asmharness.workbench_ui('<WAIT 10>nHELLO/A99<ENTER><WAIT 10>a<WAIT 2600>', 2900, [], setup2=hook)
+        text = ' '.join(sim9900.screen(m).split('\n'))
+        check('Assembled' in text and ('%d' % want.length) in text.replace(' ', ' '), '[%s] HELLO/A99 assembles on the TI from the 360K disk: %d bytes as xas99 makes it' % (label, want.length))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1210,7 +1246,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('fileapi', fileapi), ('dsdd', dsdd), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

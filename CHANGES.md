@@ -1,5 +1,10 @@
 # Changes
 
+## 1.12.0 (31 October 2026)
+
+- **`images/workbench-360k.dsk`**: the workbench's disk as a 360K double-sided double-density disk: `KERNEL/EQU`, `SRC`, every program (the two 90K disks' contents together) and the sources of the workbench itself (`WB/A99`, `ED/A99`, `ASM/A99`) to read on the TI: 855 of 1,440 sectors used. For the CorComp and Myarc cards, a TIPI or CF7+, or js99er's generic disk controller; TI's own single-density controller cannot read it, so the 90K `workbench.dsk` and `examples.dsk` stay. New test group `dsddworkbench`: through each double-density card's real DSR, the catalog lists the disk's files and `HELLO/A99` assembles on the simulated TI, identical to xas99.
+- **The Myarc HFDC is still not modelled.** Its DSR ROM is in `roms/`, but its controller chip (not a WD177x) and its card RAM and paging need a hardware description that I do not have: see the status note in `roms/README.md`.
+
 ## 1.11.0 (31 October 2026)
 
 - **The Myarc DDCC-1 in the simulator** (`tools/myfdc.py`), on its real ROM: two 4K ROM banks at `>4000`, 2K RAM at `>5000-57FF`, the WD177x at the odd addresses `>5F01-5F07`, the CRU latch (card enable, reset, side, bank and density, drive select) and the INTRQ / DRQ inputs. Built from the hardware description in MAME's source for the card (supplied by the project owner; the model is written from that description). A 360K double-density disk opens, reads, writes and catalogues through it.
