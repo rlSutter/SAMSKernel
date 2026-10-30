@@ -1,5 +1,9 @@
 # Changes
 
+## 1.7.2 (30 October 2026)
+
+- **Fixed:** the workbench's file-name cursor was drawn one cell too far right, leaving a blank cell between the last character typed and the cursor (reported in js99er as offset to the right). It is now the cell right after the last character. Test: `workbench` (cursor at column 15 after 'DSK1.AB').
+
 ## 1.7.1 (30 October 2026)
 
 The comment pass (assembled output unchanged except one message).

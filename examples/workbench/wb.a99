@@ -124,10 +124,10 @@ RD1    LI   R0,2*COLS+2
        MOV  @MODE,R0
        CI   R0,1
        JNE  RD2
-       CLR  R0                 the cursor: a block after the name
+       CLR  R0                 the cursor: a block right after the name
        MOVB @SRCNAME,R0
        SRL  R0,8
-       AI   R0,2*COLS+8+1
+       AI   R0,2*COLS+8        (the cell right after the last character)
        LI   R1,>1500
        LI   R2,1
        BL   @FILLN

@@ -775,6 +775,13 @@ def workbench():
     ln = sim9900.screen(m).split('\n')
     check(ln[0].strip() == 'SAMS Kernel   workbench' and 'Assembled' in ln[9], 'a program returns to the workbench with GOMOD PG_WB, and its result is still there: %r' % ln[9].strip())
 
+    # the file-name cursor is the cell right after the last character typed
+    m, img = asmharness.workbench_ui('<WAIT 10>nAB<WAIT 20>', 200, [])
+    row = [m.vram[2 * 80 + c] for c in range(0, 30)]
+    end = 8 + 7                     # 'DSK1.AB' starts at column 8: the next cell is 15
+    check(row[end] == 0x15 and row[end - 1] == ord('B') and row[end + 1] == 32,
+          'the name\'s cursor (glyph >15) is at column %d, right after the B at %d' % (row.index(0x15), end - 1))
+
 def workbenchfull():
     """The whole round on the simulated TI: type a program in the editor, assemble it, run it."""
     import asmharness, tifdc
