@@ -78,11 +78,11 @@ TI_CONSOLE_ROM=/path/to/console-rom TIFDC_ROM=/path/to/disk-controller-rom pytho
 
 The tests run the examples in `tools/sim9900.py`, a headless TMS9900 + F18A + SAMS + keyboard + stand-in disk simulator. With `TI_CONSOLE_ROM` set to your
 own copy of the 8K console ROM (a raw dump, or an EA5 image), it runs TI's real interrupt routine; with `TIFDC_ROM` set to the 8K disk controller ROM (the two 4K EPROM images joined, low half first) the file service and the
-disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc.py`). The console and disk controller ROMs are TI's: they are not, and must not be, part of this repository. The ROMs that are here (`roms/`, see `roms/README.md`) are the CF7+ DSR (no test uses it yet) and the CorComp and Myarc controller cards' ROMs, added at the project owner's request; the CorComp ROMs are used by the tests (a double-density disk, `tools/ccfdc.py`), the Myarc ROM is waiting for its card model. Their licence is not the project's: see `roms/README.md`.
+disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc.py`). The console and disk controller ROMs are TI's: they are not, and must not be, part of this repository. The ROMs that are here (`roms/`, see `roms/README.md`) are the CF7+ DSR (no test uses it yet) and the CorComp and Myarc controller cards' ROMs, added at the project owner's request; the CorComp and Myarc DDCC-1 ROMs are used by the tests (double-density disks, `tools/ccfdc.py`, `tools/myfdc.py`); the Myarc HFDC's is not modelled. Their licence is not the project's: see `roms/README.md`.
 
 ## Status
 
-Version 1.10.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.11.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

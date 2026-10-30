@@ -1,5 +1,14 @@
 # Changes
 
+## 1.11.0 (31 October 2026)
+
+- **The Myarc DDCC-1 in the simulator** (`tools/myfdc.py`), on its real ROM: two 4K ROM banks at `>4000`, 2K RAM at `>5000-57FF`, the WD177x at the odd addresses `>5F01-5F07`, the CRU latch (card enable, reset, side, bank and density, drive select) and the INTRQ / DRQ inputs. Built from the hardware description in MAME's source for the card (supplied by the project owner; the model is written from that description). A 360K double-density disk opens, reads, writes and catalogues through it.
+- **The chip now answers 'record not found' for the wrong density** (`fdc.py`: the disk's density is read from its volume block; a card that has a density line is asked). The Myarc DSR tries single density first and finds a double-density disk this way.
+- **Simulator bug fixed**: `B Rn` (branch to a register) went to the register's contents instead of the register's own address, so code running in the workspace registers (the Myarc DSR's bank trampoline) derailed.
+- `fileapi` now runs on three cards (TI 90K, CorComp 360K, Myarc 360K), `dsdd` on both double-density cards.
+- **A finding about open errors:** a missing file opened for input answers 2 on TI's and the CorComp's controllers, but **7 on the Myarc DDCC-1**, while a file of the wrong kind answers 2 on all three. So F18Base's double open (7 = missing, 2 = wrong kind) would work on a Myarc but not on the other two cards; `FEXIST` asks STATUS, which all three answer alike (bit 7 = no such file).
+- **`roms/hfdc_dsr.u34`** (the Myarc HFDC's DSR, 16K) added to the distribution; the HFDC is a different card (hard and floppy), not modelled.
+
 ## 1.10.0 (30 October 2026)
 
 Double-density disks, through the CorComp controller's real DSR.

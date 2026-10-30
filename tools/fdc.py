@@ -17,8 +17,9 @@ class Geometry:
         self.spt = v[12] if v[12] in (9, 16, 18, 36) else 9
         self.tracks = v[17] if v[17] in (35, 40, 80) else 40
         self.sides = v[18] if v[18] in (1, 2) else 1
+        self.density = v[19] if v[19] in (1, 2) else 1        # 1 single, 2 double
         if len(image) == 92160:                  # an uninitialised or old image: 90K
-            self.spt, self.tracks, self.sides = 9, 40, 1
+            self.spt, self.tracks, self.sides, self.density = 9, 40, 1, 1
 
     def index(self, side, track, sector):
         """the sector's position in the image (in sectors)"""
@@ -37,6 +38,7 @@ class WD177x:
         self.direction = 1
         self.data = 0
         self.busy = self.head_load_requested = self.head_loaded = False
+        self.rnf = False                         # record not found: the last command asked for the wrong density
         self.read_buffer, self.write_buffer = [], []
 
     def geo(self):
@@ -67,6 +69,13 @@ class WD177x:
         self.command = c
         flags = c & 0x0F
         hi = c & 0xF0
+        self.rnf = False
+        want = getattr(self.fdc, 'density', None)    # a card that drives the density line (call it) gets a disk of the other density wrong
+        if want is not None and hi in (0x80, 0x90, 0xA0, 0xB0, 0xC0) and self.geo().density != want():
+            self.rnf = True
+            self.read_buffer, self.write_buffer = [], []
+            self.load_head()
+            return
         if hi == 0x00:                           # restore
             self.track = 0; self._head(flags); self.busy = True
         elif hi == 0x10:                         # seek
@@ -99,7 +108,7 @@ class WD177x:
 
     def status(self):
         track0 = self.track == 0 and ((self.command & 0x80) == 0 or (self.command & 0xF0) == 0xD0)
-        s = (0x20 if self.head_loaded else 0) | (0x04 if track0 else 0) | (0x01 if self.busy else 0)
+        s = (0x20 if self.head_loaded else 0) | (0x04 if track0 else 0) | (0x01 if self.busy else 0) | (0x10 if self.rnf else 0)
         self.busy = False
         return s
 

@@ -867,7 +867,8 @@ def _fileapi(label, geometry, make_card):
         r = call(m, cpu, 'FOPEN', {0: flags, 1: rl, 2: W})[0]; call(m, cpu, 'FCLOSE'); return r
     miss = [opn('DSK1.NOSUCH', f, rl) for f, rl in ((0x1400, 80), (0x0500, 32), (0x0400, 32), (0x1C00, 80))]
     wrong = opn('DSK1.ALPHA/TXT', 0x0500, 32)
-    chk(miss == [2, 2, 2, 2] and wrong == 2, 'opening a missing file answers 2 in every mode tried, and so does a file of the wrong kind (%s, %d): FEXIST cannot be built on opens' % (miss, wrong))
+    want_miss = 7 if 'Myarc' in label else 2        # the Myarc DSR answers 7 for a missing file; TI's and the CorComp's answer 2
+    chk(miss == [want_miss] * 4 and wrong == 2, 'opening a missing file answers %d in every mode tried (%s) and a file of the wrong kind 2 (%d): the cards differ, so FEXIST asks STATUS, which they all answer alike' % (want_miss, miss, wrong))
     # relative records: write records out of order, read them back by number
     put(m, W, lp('DSK1.RELFILE'))
     call(m, cpu, 'FSEL', {0: 0})
@@ -983,18 +984,19 @@ def fileapi():
         cards.append(('CorComp DSDD', 'dsdd', lambda img: __import__('ccfdc').CCFDC(image=img)))
     else:
         print('  (the CorComp card is skipped: its ROMs are not found; CCFDC_U3, CCFDC_U4)')
+    if __import__('myfdc').available():
+        cards.append(('Myarc DDCC-1 DSDD', 'dsdd', lambda img: __import__('myfdc').MYFDC(image=img)))
     for label, geometry, make_card in cards:
         _fileapi(label, geometry, make_card)
 
 
-def dsdd():
+def _dsdd(label, make_card):
     """A double-sided double-density disk through the CorComp card's real DSR ROM (tools/ccfdc.py, tools/fdc.py): a file
     that lies on the disk's second side (a filler of about 250K pushes it past sector 720) is read, a new file written
     there is on the disk record for record, and the free-sector count the catalog gives is the disk's, not a 90K disk's."""
-    import tempfile, asmharness, skdisk, tifdc, ccfdc
-    if not ccfdc.available():
-        print('  (skipped: the CorComp ROMs are not found)')
-        return
+    import tempfile, asmharness, skdisk, tifdc
+    def chk(cond, msg):
+        check(cond, '[%s] %s' % (label, msg))
     c = build('hello')
     syms = asmharness.symbols(os.path.join(ROOT, 'build', 'hello', 'kernel.equ'))
     d = tempfile.mkdtemp()
@@ -1003,9 +1005,9 @@ def dsdd():
     p = d + '/d.dsk'
     skdisk.make_disk(p, [d + '/filler.txt', d + '/target.txt'], None, 'DSDDSIDE1', 'dsdd')
     img = bytearray(open(p, 'rb').read())
-    check(len(img) == 368640, 'the image is 360K (%d bytes: 1,440 sectors)' % len(img))
+    chk(len(img) == 368640, 'the image is 360K (%d bytes: 1,440 sectors)' % len(img))
     m = sim9900.Machine(c)
-    card = ccfdc.CCFDC(image=img)
+    card = make_card(img)
     m.tifdc = card
     reads, writes = [], []
     rs, ws = card.wd.read_sector_in, card.wd.write_sector_out
@@ -1026,9 +1028,9 @@ def dsdd():
         n = m.rb(REC - 0)  # (the record's text is at REC; its length is not needed)
         got.append(bytes(m.rb(REC + i) for i in range(14)).decode('latin-1').rstrip())
     call('FCLOSE')
-    check(r == 0 and len(got) == 25 and got[0].startswith('target line 0') and got[24].startswith('target line 24'),
+    chk(r == 0 and len(got) == 25 and got[0].startswith('target line 0') and got[24].startswith('target line 24'),
           'a file on the second side is opened and its 25 records read (error %d, %d records)' % (r, len(got)))
-    check(any(sd == 1 for sd, tr, sc in reads), 'and the chip really read side 1 for it (sides read: %s)' % sorted(set(sd for sd, tr, sc in reads)))
+    chk(any(sd == 1 for sd, tr, sc in reads), 'and the chip really read side 1 for it (sides read: %s)' % sorted(set(sd for sd, tr, sc in reads)))
     put(W, 'DSK1.NEWFILE'); call('FSEL', {0: 0})
     r = call('FOPEN', {0: 0x0200 | 0x1000, 1: 80, 2: W})[0]
     recs = [('new record %d' % i).encode() for i in range(60)]
@@ -1036,7 +1038,7 @@ def dsdd():
         for i, b in enumerate(x): m.wb(REC + i, b)
         call('FWRITE', {1: REC, 2: len(x)})
     call('FCLOSE')
-    check(r == 0 and tifdc.read_file(img, 'NEWFILE') == recs and any(sd == 1 for sd, tr, sc in writes),
+    chk(r == 0 and tifdc.read_file(img, 'NEWFILE') == recs and any(sd == 1 for sd, tr, sc in writes),
           'a new file written to the second side is on the disk record for record (%d sectors written, sides %s)' % (len(writes), sorted(set(sd for sd, tr, sc in writes))))
     put(W, 'DSK1.'); call('FSEL', {0: 0})
     REC2 = 0x2300 + 5600
@@ -1044,7 +1046,22 @@ def dsdd():
     size = call('FCNUM', {1: REC2, 2: 1})[0]
     free = call('FCNUM', {1: REC2, 2: 2})[0]
     call('FCLOSE')
-    check(r == 0 and size in (1438, 1440) and 0 < free < 700, 'the catalog says %d sectors, %d free: a 360K disk has 1,440 (the DSR does not count the volume block and file index; the single-density 90K disk has 360)' % (size, free))
+    chk(r == 0 and size in (1438, 1440) and 0 < free < 700, 'the catalog says %d sectors, %d free: a 360K disk has 1,440 (the DSR does not count the volume block and file index; the single-density 90K disk has 360)' % (size, free))
+
+def dsdd():
+    """A double-sided double-density disk through the real DSR of each double-density card the simulator has: the CorComp
+    (tools/ccfdc.py) and the Myarc DDCC-1 (tools/myfdc.py), on the chip model of tools/fdc.py: a file that lies on the
+    disk's second side (a filler of about 250K pushes it past sector 720) is read, a new file written there is on the disk
+    record for record, and the catalog gives the disk's size."""
+    cards = []
+    if __import__('ccfdc').available():
+        cards.append(('CorComp', lambda img: __import__('ccfdc').CCFDC(image=img)))
+    if __import__('myfdc').available():
+        cards.append(('Myarc DDCC-1', lambda img: __import__('myfdc').MYFDC(image=img)))
+    if not cards:
+        print('  (skipped: the CorComp and Myarc ROMs are not found)')
+    for label, make_card in cards:
+        _dsdd(label, make_card)
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,

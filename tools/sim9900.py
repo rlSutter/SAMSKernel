@@ -1015,7 +1015,7 @@ class CPU:
                 self.pc = npc
                 return
             if kind == 1:          # B
-                self.pc = ea[1] if ea[0] == 'm' else self.reg(ea[1]); return
+                self.pc = ea[1] if ea[0] == 'm' else (self.wp + 2 * ea[1]) & 0xFFFF; return   # B R6: to the register's own address (code in the registers)
             if kind == 2:          # X: execute the word at the operand as an instruction (here, in place of the X)
                 self.pending_op = self.load(ea, False)
                 return
