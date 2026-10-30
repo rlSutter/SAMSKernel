@@ -19,6 +19,24 @@
 * (MODCALL).
 *======================================================================
 
+* TWO WAYS TO USE ANOTHER MODULE.  GOMOD means 'become that module': the
+* screen and the keys are handed over and the old module stops running (until
+* someone switches back).  MODCALL means 'borrow that module for one
+* subroutine call': the other module's code is mapped at >C000 for the length
+* of the call and the caller is mapped back afterwards, so the caller keeps
+* running.  The workbench shell uses MODCALL to run the assembler (a
+* subroutine that returns a result) and GOMOD to hand the screen to the
+* editor.
+*
+* How MODCALL works, step by step: remember which pages are in slot C now (on
+* the stack), map the other module's pages there (PAGEC), fetch the routine's
+* address from the module's entry table and call it with BL through a
+* register, keep what it returned in R0, map the caller back and return.  The
+* caller's own code is unmapped for the duration of the call, which is why a
+* called routine must never assume the caller's code or labels are there, and
+* why arguments go in registers or APPRAM and never as pointers into the
+* caller's code.  The pages are given as page NUMBERS: the build assigns them
+* and writes PG_<NAME> equates for each module into kernel.equ.
 * MODCALL - call entry R1 (the ADDRESS of a word in a module's entry
 * table: >C000 + 2 * the entry's number) of the module in pages R0/R0+1,
 * then map the calling module back.  R0 returns from the call; the other
@@ -42,6 +60,13 @@ MODCALL .enter
        .leave
        RT
 
+* WHY GOMOD DOES NOT SWITCH AT ONCE.  A routine that calls GOMOD is itself
+* running from slot C: if the mapping changed under it, the next instruction
+* it fetched would be from the new module.  So GOMOD only records the request
+* (NEXTPG, GOARG); the kernel's main loop performs the switch after the
+* module's TICK has returned, between frames, when nothing of the old module
+* is running.  The consequence to remember: code after a GOMOD call still
+* runs, and in the same module, until it returns.
 * GOMOD - switch to the module whose first page is R0, handing it R1 as
 * its argument.  Takes effect when the calling TICK returns to the main
 * loop (so the caller finishes its work first, and may still be running

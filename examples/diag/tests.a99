@@ -19,6 +19,14 @@
        COPY "kernel.equ"
        COPY "macros.a99"
 
+* MODRAM is a second, smaller area (>2200, 256 bytes) that belongs to the
+* module that is running and is not kept when another module is switched to;
+* APPRAM (from >2300) is shared by all modules and kept.  A module's scratch
+* data that need not survive a switch belongs in MODRAM, which is why the test
+* results are here and not in APPRAM.  The results are plain words in memory
+* (a count, then 1 or 0 per check) so that a program, here the Python test
+* harness that runs this module in the simulator, can read them without having
+* to read the screen.
 TSCNT  EQU  MODRAM+0           the number of checks run
 TSRES  EQU  MODRAM+2           one word each: 1 pass, 0 fail (up to 15)
 TSIDX  EQU  MODRAM+34          the check being run
@@ -193,6 +201,12 @@ CKHW   MOV  @NPAGES,R1
 CHW0   CLR  R0
        RT
 
+* THE STANDARD WAY TO TEST A MEMORY: write something different in each place,
+* then read every place back.  Writing page A's number into page A, page B's
+* into page B and then checking A still holds A's number proves the two are
+* really separate 4K stores and that the window mapping puts the right one at
+* the right address; a card that ignored a register bit (a 1M card used as
+* 16M, say) would show two pages aliasing each other here.
 * CKPAGE - two pages written through slot B hold their contents when
 * other pages have been in between; CURBE/CURBF follow; SETPB puts them back;
 * and on a card of more than 1M, pages above 255 are pages of their own.

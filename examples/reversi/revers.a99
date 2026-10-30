@@ -12,6 +12,22 @@
 * the new disc and one of yours; a player with no move passes; when neither
 * can move the game ends and the more discs win.
 *
+* DESIGN NOTES FOR A READER.  (1) THE PADDED BOARD: the 8 x 8 board is kept in
+* a 10 x 10 array of bytes whose outer ring holds a 3 (neither player's, not
+* empty).  To follow a line of discs from a square the code adds a step (-11,
+* -10, -9, -1, 1, 9, 10, 11 for the eight directions) and looks at the byte: a
+* 3 means the edge, so there is no need to test for the edge on every step.
+* This 'sentinel' trick is the standard way to avoid boundary tests.  (2) ONE
+* ROUTINE FOR RULES: FLIPN both counts what a move would flip and, with DOFLP
+* set, makes it; the legal-move test, the hint dots, the computer's choice and
+* the human's move all use it, so the rules exist once.  (3) The computer's
+* level 2 scores a move as the square's weight plus the discs flipped; level 1
+* picks uniformly among the legal moves by 'reservoir sampling' (the k-th
+* legal move replaces the choice with probability 1/k), which needs no list of
+* the moves.  (4) The screen is only attributes: a square is painted by giving
+* its cells a background role, a disc by painting the middle three cells
+* another, so drawing is a few FILLA calls and the colour scheme recolours the
+* board without redrawing.
 * What it shows of the kernel: a text screen with a colour per cell (the
 * board is painted with attributes, the discs with attribute pairs from the
 * colour roles, so the five colour schemes recolour it), the keyboard and

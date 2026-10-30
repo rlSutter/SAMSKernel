@@ -1,5 +1,14 @@
 # Changes
 
+## 1.7.1 (30 October 2026)
+
+The comment pass (assembled output unchanged except one message).
+
+- **Commented for learning:** every assembly source in `kernel/` and `examples/` now opens with a block that explains the idea behind it (the video chip's ports, the keyboard matrix, the loader and cartridge banks, SAMS windows and the pool, the main loop, a symbol table as a hash table, how a TMS9900 instruction is encoded, ...) and has notes on the routines where the reasoning is not obvious. Files that were already thorough (`files`, `modules`, `reversi`, `diag`) received concept blocks rather than line-by-line notes. Not part of this pass: the test programs under `tests/` (`tests/asm`, `tests/apps`) and the Python tools (they have docstrings).
+- **Checked:** the assembled output of every example, test application and workbench program is byte for byte what it was (52 of 54 build outputs; the other two are the workbench's `wb` module and its cartridge image, which differ only by the message below), and the commented sources still assemble on the simulated TI, identical to xas99.
+- **Stale comments corrected** in the assembler: names are 12 characters (the comments said 8) and the symbol table has 580 slots of 14 bytes (the comment said 800 of 10).
+- **Fixed:** the workbench's error message for a name over the limit said 'name over 8 characters'; the limit has been 12 since 1.3.
+
 ## 1.7.0 (30 October 2026)
 
 The editor is the guide's multi-page example, and the sources begin to be commented for learning.

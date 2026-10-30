@@ -16,6 +16,22 @@
 * VREG for the registers beyond VMODE's (tile layer 2, the bitmap layer).
 * docs/VIDEO-MODES.md explains each; the tests render every screen.
 *======================================================================
+* A TABLE OF ROUTINES IS A MENU.  The program has fifteen screens and does not
+* have fifteen 'if key = 1 then ...' tests: SCRTAB is a table of fifteen
+* addresses, one per screen, and REDRAW picks the entry for the current screen
+* number and calls it (MOV @SCRTAB(R1),R1 / BL *R1: BL through a register).
+* TICK turns a key into a screen number and calls REDRAW.  This 'array of
+* routines' is the usual way to write a menu, a state machine or an
+* interpreter on a CPU with no case statement, and it is how the assembler
+* (asm_stmt.a99) and the editor (ed.a99, KEYTAB) are written too.
+*
+* What each screen does is the real content: set a mode with VMODE (the base
+* mode in R0, option bits in R1: see docs/VIDEO-MODES.md), then draw.  The
+* kernel's text routines work in the three glyph modes; for the graphics modes
+* the program writes VRAM itself with VMBW / VFILL and sets the extra F18A
+* registers with VREG.  The modes the F18A adds (enhanced colour, tile layers,
+* the bitmap layer, 16x16 sprites) are all reached this way, so this file is
+* also a catalogue of examples of each.
        COPY "kernel.equ"
        COPY "macros.a99"
 
@@ -145,6 +161,12 @@ LDPAL  .enter
        .leave
        RT
 
+* In the enhanced colour modes a tile's colour comes from THREE pattern
+* planes, 2K apart in VRAM (PATTAB, PATTAB+>800, PATTAB+>1000): the three bits
+* of a pixel, one from each plane, choose one of eight palette entries within
+* the group the tile's attribute names.  TILE1 fills the three planes for
+* glyph 1 so that every pixel of the tile has the same three bits, a solid
+* tile of one colour out of the eight.
 * TILE1 - make glyph 1's three pattern planes: R1 = plane 0 byte, R2 = plane 1,
 * R3 = plane 2 (high bytes), each repeated for the tile's 8 rows.
 TILE1  .enter

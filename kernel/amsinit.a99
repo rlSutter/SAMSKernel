@@ -4,6 +4,14 @@
 * keeps pager.a99's mapping routines)
 *======================================================================
 
+* HOW THE LOADER FINDS OUT WHAT MEMORY CARD IT HAS.  Nothing announces a SAMS
+* card, so the loader asks it a question only a mapper can answer.  With the
+* card's registers switched into view (SBO 0 at its CRU base), a register is
+* just 16 bits of storage that the CPU can write and read back; with no card,
+* the address range holds nothing (or the console's own ROM) and a value
+* written does not come back.  AMSDET writes a probe value, reads it back,
+* restores the old contents and compares.  The same trick, in three
+* variations, sizes the card and tests every page.
 * AMSDET - detect a mapper.  Must be called in pass-through mode
 * (before AMSINI).  Returns R0 = 1 if present, 0 if not.
 * Uses R1-R3, R12.
@@ -22,6 +30,14 @@ AMSDET LI   R12,AMSCRU
        INC  R0
 AMSD1  RT
 
+* WHY THE FIRST THING IS AN IDENTITY MAP.  Before mapping is switched on, the
+* card passes the CPU's addresses straight through (pass-through mode).  When
+* mapping is switched on (SBO 1) each 4K window shows the page its register
+* names; if the registers are first set so that window n shows page n, nothing
+* visibly changes: the kernel keeps running at the same addresses, and only
+* afterwards does the loader start pointing windows at other pages.  Doing it
+* in that order is what makes it safe to switch on a machine that is running
+* from the very memory it is remapping.
 * AMSINI - identity-map all 16 windows and switch mapping mode on.
 * After this, page n is at address n<<12 for n = 0..15, which means
 * the kernel at >A000 is on pages >A->D and nothing moved.
@@ -67,6 +83,14 @@ PAGEA  .enter
        .leave
        RT
 
+* HOW TO COUNT PAGES WITHOUT ASKING.  A card with 256 pages decodes eight
+* page-number bits; a page number with more bits just wraps around, so page
+* >10 + 256 is the same page as >10.  AMSSIZ writes a marker into page >10,
+* then writes a different marker into the page 32 above it, and looks to see
+* whether page >10 still has its own marker.  If the marker survived, the card
+* has more than 32 pages, so it doubles the distance and tries again; the
+* first distance at which the write lands on page >10 is the number of pages
+* the card has (32, 64, 128 ... up to 4,096, a 16-megabyte card).
 * AMSSIZ - how many pages the card has: R0 = 32, 64, 128 ... up to 4096 (a
 * 16M card).  Writes a marker to page >10 and checks whether a write to page
 * >10+32, +64 ... +2048 lands on it (the card decodes only as many page bits

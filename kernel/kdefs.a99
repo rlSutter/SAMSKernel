@@ -12,6 +12,23 @@
 *
 * SAMS Kernel 1.0.  MIT License, (c) 2026 Rebecca Sutter.
 *======================================================================
+* HOW TO READ THIS FILE.  kdefs.a99 is the kernel's vocabulary and its memory
+* map in one place; every name a program uses that is not a routine is here.
+* Read it in the order it is written: hardware ports; the SAMS page numbers
+* the kernel fixes; the scratchpad (the fast 256 bytes at >8300, where the
+* CPU's registers live, so the kernel's own hot variables share it with the
+* console's); slot A (>2000-3FFF), which the kernel uses at its start and
+* gives the rest of to your application as APPRAM; the video memory map; the
+* key codes; the colour roles; the screen geometry; the file-service
+* constants.  Each EQU gives a name to a number and reserves nothing: where a
+* name stands for a variable, the comment says how big it is, and a program
+* must not use an address that is not its own.
+*
+* The golden rule of the map: your application's RAM is APPRAM (>2300-3EFF,
+* shared by all your modules) and MODRAM (>2200, per module); everything else
+* in slot A (>2000-21FF) and the scratchpad belongs to the kernel, and a
+* program that writes there corrupts the keyboard, the file service or the
+* page pool in ways that are very hard to find.
 
        COPY "appcfg.a99"
        COPY "macros.a99"

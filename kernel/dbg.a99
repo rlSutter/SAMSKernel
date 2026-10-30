@@ -11,6 +11,15 @@
 *     BL   @DBG                R0-R3 are shown; a key goes on
 *======================================================================
 
+* HOW TO USE IT, AND WHY IT IS BUILT THIS WAY.  The TI has no debugger, so the
+* way to see what a register holds is to print it.  Put BL @DBG where you want
+* to look: the routine saves every register it uses on the software stack (so
+* none of your registers, and no variable, is changed), writes R0 to R3 in
+* hexadecimal on the bottom row of the screen, waits for a key and restores
+* everything.  Because it keeps nothing in memory it can be called from
+* anywhere, even from inside another routine, as long as there is room on the
+* stack (a few words) and the screen is in a text mode.  It is a good
+* model of a well-behaved utility: change nothing, leave no trace.
 * DBG - show R0-R3, wait for a key.  Keeps every register.
 DBG    .enter
        .push R0

@@ -36,6 +36,25 @@
 * records (KIDLE) if the user must not be locked out.
 *======================================================================
 
+* WHAT A PAB IS.  The disk system (and any device a DSR card provides) is
+* operated through a PERIPHERAL ACCESS BLOCK, a small structure that lives in
+* VIDEO memory, not in CPU memory: the console's DSR code reads and writes it
+* there.  Its layout: byte 0 the operation (0 open, 1 close, 2 read, 3 write,
+* 7 delete), byte 1 the file's mode flags on the way in and the ERROR CODE in
+* its top three bits on the way out, bytes 2-3 the address in VRAM of the data
+* buffer, byte 4 the record length, byte 5 the count of characters (the length
+* actually read or to write), bytes 6-7 the record number, byte 9 the length
+* of the file name, and then the name itself ('DSK1.NOTES').  To do anything
+* the kernel builds a PAB in its VRAM area (>3700 and up, one per handle),
+* sets the scratchpad words the DSR convention asks for (>8354, >8356), and
+* calls the DSR; the DSR does the work and
+* leaves the answer in the flag byte.
+*
+* That is why FREAD and FWRITE copy records between VRAM and your buffer: the
+* DSR can only read and write the VRAM buffer, so the kernel moves the data in
+* and out and you never see the PAB.  The error numbers are the disk system's
+* own (the top three bits of the flag byte, values 0 to 7); the kernel returns
+* them unchanged, or >FF when no card answers to the device name.
 * FSEL - choose the file handle (0-2) the other file routines act on: R0 = the
 * handle.  R0 = 0, or >FF if there is no such handle (and the choice stays).
 * Each handle's file stays open while you use the others.  Leaf.  Uses R0.

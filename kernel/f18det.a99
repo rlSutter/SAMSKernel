@@ -3,6 +3,15 @@
 * only)
 *======================================================================
 
+* HOW A PROGRAM TELLS WHICH VIDEO CHIP IT HAS.  The standard TMS9918A has a
+* status register but no way to say what it is.  The F18A, once unlocked
+* (f18a.a99), answers a read of its status register 1 with an ID byte whose
+* top three bits are 111; a PICO9918 (a different, newer clone) answers with
+* the same top bits and sets bit 3 as well.  The routine selects the register
+* (writing 1 to VR15), reads the byte, selects register 0 again and puts VR7
+* (the backdrop colour) right, because on a real 9918A the same writes land on
+* other registers.  The loader refuses to start without an answer, so the rest
+* of the kernel can assume an F18A's modes, palette and registers are there.
 * F18DET - after F18UNL, select status register 1 and read the ID.
 * Bits 7-5 = 111 identify an F18A, or an F18A-compatible PICO9918, whose
 * ID is >E8 (bit 3, its emulation marker; bits 1-0 are live status, so

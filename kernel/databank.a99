@@ -13,10 +13,24 @@
 * An application may replace this file with its own (same layout) by
 * putting a databank.a99 in its directory: the build looks there first.
 *======================================================================
+* WHY THE FONT AND THE COLOURS LIVE IN A DATA BANK.  The glyph set (256
+* characters of 8 bytes) and the five colour schemes are read only
+* occasionally (when a mode is set, when the colour scheme changes), so they
+* are not worth keeping in the kernel's resident memory.  They are assembled
+* here as plain data at >E000, which is the address of window E, copied into
+* SAMS as the page pair PGDATA, and mapped into slot B only for the moment
+* they are needed (LDSCHM in video.a99 is the pattern: save what slot B holds,
+* map this, read, put it back).  A program that wants a different font or
+* colours puts its own databank.a99, with the same layout, in its directory
+* and the build uses that instead.
        AORG >E000
        COPY "font.a99"
 * bg bg text bold ital bolit scrpt dim error selbg selfg barbg barfg ruler mark
 * accnt
+* Each scheme is sixteen words, one per colour role in the order of the
+* comment above: a word is >0RGB, four bits each of red, green and blue (so
+* >0FFF is white, >0F00 red).  The first scheme is the default, light text on
+* blue; the next four follow the order of TI-Writer's Screen Color key.
 SCHEM0 DATA  >023A,>023A,>0DDE,>0FFF,>09CF,>0BEF,>0FC7,>089B
        DATA  >0F77,>0DDE,>023A,>0126,>0EEF,>09AD,>08BE,>0FD4
 SCHEM1 DATA  >03A4,>03A4,>0222,>0000,>0036,>0024,>0620,>0575
