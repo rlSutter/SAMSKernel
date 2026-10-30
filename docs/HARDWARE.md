@@ -178,6 +178,24 @@ non-zero, which is why programs written against a real console always worked, bu
 survives a DSR (which runs in that workspace). The kernel therefore sets it to 1 at start-up and again after
 every DSR call. If you write your own DSR calls, do the same.
 
+## Disk controllers in the simulator, and double-density disks
+
+The kernel reaches a disk through whatever DSR answers the device name, so it works with any controller; the simulator (`tools/`) can run the file service against
+the real DSR ROM of two cards, on a disk image in the V9T9 format (sectors in the order side 0 track 0 up to the last, then side 1 from the last track back down to 0;
+the geometry is read from the volume information block, `tools/fdc.py`):
+
+| Card | Disk | Model | ROM |
+| --- | --- | --- | --- |
+| TI disk controller | 90K, single density, one side (a 180K two-sided single-density disk also reads) | `tools/tifdc.py` (WD1771, inverted data bus) | TI's, **not** distributed: `TIFDC_ROM` |
+| CorComp disk controller (v89) | 360K, double density, two sides (18 sectors a track, 1,440 sectors) | `tools/ccfdc.py` (WD177x, plain data bus, 16K ROM in two banks by CRU bit 11, 128 bytes of RAM at `>4000` in bank 1) | `roms/ccdcc_v89.u3`, `.u4` |
+| Myarc DDCC-1 | double density | **not yet modelled** (registers at `>5F01-5F07`; CRU bits 0-6 and two inputs) | `roms/ddcc1.u3` |
+
+`python3 tools/skdisk.py out.dsk ... --geometry dsdd` writes a 360K disk (`sssd`, `dssd`, `ssdd`, `dsdd`). Tests: `fileapi` runs every routine on the TI card (90K) and the
+CorComp card (360K) alike, and `dsdd` reads a file that lies on the second side, writes a new one there and checks the catalog's size. What the CorComp card's CRU bits
+do (0 ROM, 1 motor strobe, 3 head load, 4-6 and 8 drive select, 7 side, 11 ROM bank; bit 9 reads 1 when the motor is stopped; bit 10 probably density, not used by the model)
+was worked out from its ROM and the ROM then ran correctly; the card's own documentation was not available. **Not tried:** a real CorComp or Myarc card.
+The simulated CPU gained the `X` instruction for this (the CorComp ROM uses it).
+
 ## TIPI and other DSR cards
 
 The kernel finds a device by name in the DSR header of every card (CRU `>1000` to `>1F00`), runs every card's power-up routine once (the VRAM buffers of a TI controller are made by its power-up, at the top of VRAM, below `>3FFF`), and calls the device's routine through the PAB as the console's DSRLNK would.

@@ -1,5 +1,17 @@
 # Changes
 
+## 1.10.0 (30 October 2026)
+
+Double-density disks, through the CorComp controller's real DSR.
+
+- **The CorComp disk controller (v89) in the simulator** (`tools/ccfdc.py`): its two ROMs, their bank switch (CRU bit 11), the 128 bytes of RAM in bank 1, the chip on a plain data bus, drive, side and head lines; worked out from the ROM, which then runs. A 360K double-sided double-density disk (1,440 sectors, 18 a track) opens, reads, writes and catalogues through it.
+- **`tools/fdc.py`**: the disk geometry (from the volume information block: sectors a track, tracks, sides; V9T9 sector order) and the WD177x chip model, split out of `tifdc.py` (which uses it; the TI card behaves as before) and extended to double density and two sides.
+- **The simulated CPU gained `X`** (execute), which the CorComp ROM uses; a controller declares its own CRU range (the CorComp card has 32 bits).
+- **`skdisk.py --geometry sssd|dssd|ssdd|dsdd`**: a 360K disk for a TI, a CorComp or js99er's generic controller.
+- **ROMs now in the distribution** (`roms/`): the CorComp card's `ccdcc_v89.u3` and `.u4` (used by the tests) and the Myarc DDCC-1's `ddcc1.u3` (no model yet), added at the project owner's request. Their licence is not the project's, and their authors and terms are unknown to me: see `roms/README.md`. The tests that use them skip themselves if they are removed.
+- Tests: `fileapi` now runs on both cards (the TI's 90K disk and the CorComp's 360K disk); new group `dsdd` (a file on the second side, a new file written there, the catalog's 1,440 sectors).
+- Not done: the Myarc card's model; the workbench disks as 360K disks; any of it on a real card.
+
 ## 1.9.0 (30 October 2026)
 
 - **`FSYNC`**: close and reopen the selected handle so everything written so far is safe on the disk, keeping the file open and its place: output and append files (reopened for append) and relative files (reopened for update); an input file does nothing; a sequential update file answers `FNOPL` (>FD) and stays open. Test (real controller ROM): after three `FWRITE`s the disk holds no record of the file until `FSYNC`, then all three; writing goes on at the end; five records in order after two syncs and the close; four relative records across two syncs.

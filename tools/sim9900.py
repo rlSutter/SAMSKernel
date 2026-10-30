@@ -390,8 +390,8 @@ class Machine:
             self.blanked = True
 
     def cru_write(self, bit, v):
-        if self.tifdc is not None and 0x880 <= bit < 0x888:
-            self.tifdc.cru_write(bit - 0x880, v)
+        if self.tifdc is not None and self.tifdc.cru_base <= bit < self.tifdc.cru_base + self.tifdc.cru_bits:
+            self.tifdc.cru_write(bit - self.tifdc.cru_base, v)
             return
         if bit == 0xF00:          # >1E00 / 2
             self.ams_regs_visible = bool(v)
@@ -683,8 +683,8 @@ class Machine:
     def cru_read(self, bit):
         if bit == 2 and self.console_rom is not None:      # 9901 input 2: the VDP interrupt line, low while it is asserted
             return 0 if (self.vstatus & 0x80) and (self.vregs[1] & 0x20) else 1
-        if self.tifdc is not None and 0x880 <= bit < 0x888:
-            return 1 if self.tifdc.cru_read(bit - 0x880) else 0
+        if self.tifdc is not None and self.tifdc.cru_base <= bit < self.tifdc.cru_base + self.tifdc.cru_bits:
+            return 1 if self.tifdc.cru_read(bit - self.tifdc.cru_base) else 0
         # keyboard rows on inputs 3-10; the column was written to outputs 18-20.
         # With output 21 low, input 7 reads ALPHA LOCK instead (0 = down), as js99er.
         if 3 <= bit <= 10:
@@ -704,6 +704,7 @@ class CPU:
         self.st = 0   # bits: 15 LGT,14 AGT,13 EQ,12 C,11 OV
         self.limi = 0 # interrupt mask
         self.trace = False
+        self.pending_op = None    # the instruction an X is to execute next
 
     def reg(self, n): return self.m.rw(self.wp + 2 * n)
     def setreg(self, n, v): self.m.ww(self.wp + 2 * n, v & 0xFFFF)
@@ -789,7 +790,10 @@ class CPU:
                 m.isr_count += 1
             else:
                 m.console_isr(self)
-        op = self.fetch()
+        if self.pending_op is not None:        # X: this instruction, its other words from the stream after the X
+            op, self.pending_op = self.pending_op, None
+        else:
+            op = self.fetch()
         pc0 = self.pc - 2
         if self.trace:
             print(f"{pc0:04X} {op:04X} R0={self.reg(0):04X} R1={self.reg(1):04X} R5={self.reg(5):04X}")
@@ -1012,8 +1016,9 @@ class CPU:
                 return
             if kind == 1:          # B
                 self.pc = ea[1] if ea[0] == 'm' else self.reg(ea[1]); return
-            if kind == 2:          # X
-                raise Halt("X unimplemented")
+            if kind == 2:          # X: execute the word at the operand as an instruction (here, in place of the X)
+                self.pending_op = self.load(ea, False)
+                return
             if kind == 3:          # CLR
                 self.store(ea, 0, False); return
             if kind == 4:          # NEG

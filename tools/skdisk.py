@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """skdisk.py - make a TI disk image holding sources for the SAMS Kernel workbench.
 
-    python3 tools/skdisk.py out.dsk --kernel-equ build/APP/kernel.equ FILE [FILE ...] [--volume NAME] [--dir DIR]
+    python3 tools/skdisk.py out.dsk --kernel-equ build/APP/kernel.equ FILE [FILE ...] [--volume NAME] [--geometry sssd|dssd|ssdd|dsdd] [--dir DIR]
 
 Each FILE is stored as a DIS/VAR 80 file named after the file (upper case, at most 10 characters:
 "hello.a99" is HELLO.A99).  --kernel-equ also stores KERNEL.EQU: the kernel's public symbols as
@@ -37,11 +37,11 @@ def equ_lines(path):
     return '\n'.join(out) + '\n'
 
 
-def make_disk(out, files, kernel_equ=None, volume='SKDISK'):
+def make_disk(out, files, kernel_equ=None, volume='SKDISK', geometry='sssd'):
     x = xdm()
     if os.path.exists(out):
         os.remove(out)
-    r = subprocess.run([sys.executable, x, '-X', 'sssd', out, '-n', volume], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, x, '-X', geometry, out, '-n', volume], capture_output=True, text=True)
     if r.returncode:
         sys.exit(r.stderr + r.stdout)
     tmp = tempfile.mkdtemp()
@@ -72,12 +72,13 @@ def main():
     out = a[0]
     equ = a[a.index('--kernel-equ') + 1] if '--kernel-equ' in a else None
     vol = a[a.index('--volume') + 1] if '--volume' in a else 'SKDISK'
+    geo = a[a.index('--geometry') + 1] if '--geometry' in a else 'sssd'
     skip = set()
-    for flag in ('--kernel-equ', '--volume', '--dir'):
+    for flag in ('--kernel-equ', '--volume', '--dir', '--geometry'):
         if flag in a:
             skip.update({a.index(flag), a.index(flag) + 1})
     files = [f for i, f in enumerate(a[1:], 1) if i not in skip]
-    make_disk(out, files, equ, vol)
+    make_disk(out, files, equ, vol, geo)
     print('wrote', out)
     if '--dir' in a:
         d = a[a.index('--dir') + 1]

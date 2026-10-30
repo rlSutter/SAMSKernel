@@ -15,6 +15,8 @@ mapped through an inverted data bus: read status, track, sector, data at
 >5FF0, >5FF2, >5FF4, >5FF6; write command, track, sector, data at >5FF8,
 >5FFA, >5FFC, >5FFE."""
 import os, re, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fdc import Geometry, WD177x
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROMFILE = os.environ.get('TIFDC_ROM', os.path.join(HERE, 'tifdc_dsr.bin'))
@@ -42,106 +44,12 @@ def blank_disk(name=b'SAMSKERNEL', sectors=360):
     return img
 
 
-class WD1771:
-    def __init__(self, fdc):
-        self.fdc = fdc
-        self.command = self.drive = self.side = self.track = self.sector = 0
-        self.direction = 1
-        self.data = 0
-        self.busy = self.head_load_requested = self.head_loaded = False
-        self.read_buffer, self.write_buffer = [], []
-
-    def set_drive(self, drive, enabled):
-        if enabled:
-            self.drive = drive
-        elif self.drive == drive:
-            self.drive = 0
-
-    def get_data(self):
-        b = self.data
-        if self.read_buffer:
-            self.read_byte()
-        return b
-
-    def set_data(self, b):
-        self.data = b
-        self.write_buffer.append(b)
-        if len(self.write_buffer) == 256:
-            self.write_sector_out()
-            self.write_buffer = []
-            if self.command == 0xB0:
-                self.sector += 1
-
-    def set_command(self, c):
-        self.command = c
-        flags = c & 0x0F
-        hi = c & 0xF0
-        if hi == 0x00:                           # restore
-            self.track = 0; self._head(flags); self.busy = True
-        elif hi == 0x10:                         # seek
-            self.track = self.data; self._head(flags); self.busy = True
-        elif hi in (0x20, 0x30):
-            self._step(bool(c & 0x10), flags)
-        elif hi in (0x40, 0x50):
-            self.direction = 1; self._step(bool(c & 0x10), flags)
-        elif hi in (0x60, 0x70):
-            self.direction = -1; self._step(bool(c & 0x10), flags)
-        elif hi in (0x80, 0x90):                 # read sector
-            self.read_sector_in(); self.read_byte(); self.load_head()
-        elif hi in (0xA0, 0xB0):                 # write sector
-            self.write_buffer = []
-        elif hi == 0xC0:                         # read ID
-            self.read_buffer += [self.track, self.side, self.sector, 1, 0, 0]
-            self.read_byte(); self.load_head(); self.busy = True
-        elif hi == 0xD0:                         # force interrupt
-            self.busy = False
-
-    def _head(self, flags):
-        if flags & 0x08:
-            self.load_head()
-
-    def _step(self, update, flags):
-        if update:
-            self.track = min(self.track + 1, 255) if self.direction > 0 else max(self.track - 1, 0)
-        self._head(flags)
-        self.busy = True
-
-    def status(self):
-        track0 = self.track == 0 and ((self.command & 0x80) == 0 or (self.command & 0xF0) == 0xD0)
-        s = (0x20 if self.head_loaded else 0) | (0x04 if track0 else 0) | (0x01 if self.busy else 0)
-        self.busy = False
-        return s
-
-    def load_head(self):
-        self.head_load_requested = self.head_loaded = True
-
-    def _index(self):
-        if self.side == 0:
-            return self.track * 9 + self.sector
-        return 180 + (40 - 1 - self.track) * 9 + self.sector
-
-    def read_sector_in(self):
-        img = self.fdc.image if self.drive == 1 else None
-        if img is not None:
-            i = self._index() * 256
-            self.read_buffer += list(img[i:i + 256])
-
-    def read_byte(self):
-        self.data = self.read_buffer.pop(0) if self.read_buffer else 0
-        if not self.read_buffer and (self.command & 0xF0) == 0x90:
-            self.sector += 1
-            self.read_sector_in()
-
-    def write_sector_out(self):
-        img = self.fdc.image if self.drive == 1 else None
-        if img is not None:
-            i = self._index() * 256
-            img[i:i + 256] = bytes(self.write_buffer)
-            self.fdc.writes += 1
+WD1771 = WD177x
 
 
 class TIFDC:
     CRU = 0x880                                 # >1100 / 2
+    cru_base, cru_bits = 0x880, 8               # the CRU bits the simulator routes to the card
 
     def __init__(self, image=None, rom=None):
         if rom is None:
