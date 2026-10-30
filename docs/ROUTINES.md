@@ -214,7 +214,7 @@ R1 = a column in the high byte (>0600 joystick 1, >0700 joystick 2), R5 = JOY1 o
 
 ### `JOYGET`
 
-joystick R0 (1 or 2): R1 = what is down now (JFIRE|JLEFT|JRIGHT|JDOWN| JUP), R2 = what went down since the last JOYGET (cleared by this call), so a program sees every press however brief.  Any other R0: R1 = R2 = 0.  The state is read once a frame, by KPOLL, so it follows the main loop (and KIDLE). Leaf. Uses R1, R2.
+joystick R0 (1 or 2): R1 = what is down now (JFIRE|JLEFT|JRIGHT|JDOWN| JUP), R2 = what went down since the last JOYGET (cleared by this call), so a program sees every press however brief.  Any other R0: R1 = R2 = 0.  The state is read once a frame, by KPOLL, so it follows the main loop (and KIDLE). The joysticks are read only after a program's first JOYGET (or when JOYKEY is set), so that call is the one that turns the reading on and its own answer is 0; a program that never asks never makes the kernel read keyboard columns 6 and 7. Leaf. Uses R1, R2.
 
 ### `KPUT`
 

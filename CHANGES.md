@@ -1,5 +1,10 @@
 # Changes
 
+## 1.7.3 (30 October 2026)
+
+- **Fixed: the arrow keys did nothing in js99er** (editor, and every application on the kernel, with js99er's option "Map arrow keys to Fctn+SDEX"). Since 1.5.0 `KPOLL` read the joystick columns (keyboard columns 6 and 7) every frame. js99er (`keyboard.js`, `isKeyDown`) takes any read of those columns to mean 'this program uses the joystick' and, for the next 250 reads, stops mapping the PC's arrow keys to FCTN+S/D/E/X; the arrows then act only as joystick 1, which a program that is not looking at the joystick ignores. Press, which reads no joystick, was not affected. Now the kernel reads the joysticks only for a program that uses them: the first `JOYGET` call (its own answer is 0) or a non-zero `JOYKEY` starts it (`JOYON`, `>20CE`). Tests (`joystick` group): `hello` never reads columns 6 or 7; the joystick example does.
+- A program that uses `JOYKEY` (Reversi) is unaffected: in js99er its arrows reach it through the joystick, typed back as arrow keys.
+
 ## 1.7.2 (30 October 2026)
 
 - **Fixed:** the workbench's file-name cursor was drawn one cell too far right, leaving a blank cell between the last character typed and the cursor (reported in js99er as offset to the right). It is now the cell right after the last character. Test: `workbench` (cursor at column 15 after 'DSK1.AB').

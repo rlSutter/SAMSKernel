@@ -186,8 +186,8 @@ What I rely on about a TIPI: it has the devices `PI` (`PI.dir.name` for files, `
 ## Joysticks
 
 The TI reads both joysticks through the keyboard matrix: with the column select (CRU outputs 18-20) at 6 the row lines (inputs 3-10) show joystick 1, at 7 joystick 2: row 0 fire, 1 left, 2 right, 3 down,
-4 up, a line low while the switch is closed. `KPOLL` reads both every frame with output 21 held high (as for the keyboard, so ALPHA LOCK stays off the row lines). The simulator models them (key script tokens `<J1-FIRE>`,
-`<J1-LEFT+UP>`, `<J2-DOWN>`). **Not tried on a real joystick**: the column and row assignment is from the console's keyboard scan as I know it, and js99er's joystick settings are another place to check it.
+4 up, a line low while the switch is closed. `KPOLL` reads both every frame, once a program has used them (`JOYGET` or `JOYKEY`), with output 21 held high (as for the keyboard, so ALPHA LOCK stays off the row lines). The simulator models them (key script tokens `<J1-FIRE>`,
+`<J1-LEFT+UP>`, `<J2-DOWN>`). **Not tried on a real joystick**: the column and row assignment is from the console's keyboard scan as I know it, and js99er's joystick settings are another place to check it. **js99er:** it treats a read of columns 6 and 7 as 'this program uses the joystick' (`keyboard.js`, `isKeyDown`) and then, for 250 further reads, does not map the PC's arrow keys to FCTN E S D X (option "Map arrow keys to Fctn+SDEX"): hence the kernel does not read the joysticks for a program that never asks (1.7.3).
 
 ## Sound
 

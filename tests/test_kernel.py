@@ -283,6 +283,24 @@ def joystick():
     check(m.rw(b + 6) == 0, 'JOYKEY 1 does not type for joystick 2 (%d keys)' % m.rw(b + 6))
     m, cpu, halt = sim9900.run(c, keys='<WAIT 5><ALPHA>ab<J1-FIRE><WAIT 10>', frames=150)
     check(m.rw(b + 6) == 2 and m.rw(b + 4) == 0x62 and m.rw(b) == 1, 'the keyboard works beside a joystick: two keys typed (last %02X) and a fire press counted' % m.rw(b + 4))
+    # a program that never uses the joysticks never makes the kernel read their columns (js99er treats a read of
+    # keyboard columns 6 and 7 as 'this program uses the joystick' and then stops mapping the PC's arrow keys to FCTN E S D X)
+    def spy(box):
+        def setup(m):
+            orig = m.cru_read
+            def rd(bit):
+                if 3 <= bit <= 10:
+                    box.add(m.keycol)
+                return orig(bit)
+            m.cru_read = rd
+        return setup
+    cols = set()
+    sim9900.run(build('hello'), keys='<WAIT 5>ab<WAIT 30>', frames=150, setup=spy(cols))
+    check(cols and max(cols) <= 5, 'hello (no joystick use): the kernel reads keyboard columns %s only, never 6 or 7' % sorted(cols))
+    cols = set()
+    sim9900.run(c, keys='<WAIT 5><WAIT 30>', frames=100, setup=spy(cols))
+    check(6 in cols and 7 in cols, 'the joystick example (it calls JOYGET) makes the kernel read columns 6 and 7: %s' % sorted(cols))
+
 
 def files2():
     """Three files open at once, each through its own handle (FSEL): one file copied to a second while a third is read

@@ -406,7 +406,7 @@ wait for a key in a moment that really is modal ("Press any key"), `KWAIT` runs 
 until one arrives; `KFLUSH` throws away what is buffered. Compare with high-byte
 constants: `CI R0,KQUIT*256`, `CI R0,>2000`, `CI R0,>9400` (CTRL T).
 
-**Joysticks.** Both joysticks are read every frame, with the keyboard (they are keyboard columns 6 and 7 on the TI). `JOYGET` takes R0 = 1 or 2 and returns R1 = what is down now and
+**Joysticks.** Both joysticks are read every frame, with the keyboard (they are keyboard columns 6 and 7 on the TI), but only for a program that uses them: reading starts at the first `JOYGET` call (whose own answer is 0) or when `JOYKEY` is set. A program that never asks never makes the kernel read those columns; this matters in js99er, which takes a read of columns 6 and 7 to mean the program uses the joystick and then stops mapping the PC's arrow keys to FCTN E S D X (its option "Map arrow keys to Fctn+SDEX"), so a keyboard-only program would lose its cursor keys. `JOYGET` takes R0 = 1 or 2 and returns R1 = what is down now and
 R2 = what went down since the last `JOYGET`, as bits `JFIRE JLEFT JRIGHT JDOWN JUP` (1 = active), so a program sees every press however brief:
 
 ```

@@ -38,7 +38,8 @@
 
 * KINIT - the keyboard as at power-up: no chord down, nothing buffered.
 * The kernel calls it once at boot.  Leaf.  Uses nothing.
-KINIT  CLR  @JOY1
+KINIT  CLR  @JOYON
+       CLR  @JOY1
        CLR  @JOY2
        CLR  @JOYN1
        CLR  @JOYN2
@@ -172,8 +173,19 @@ KDNONE SETO @KCURK             no key at all
 * send the key's first code.  Uses R0-R7, R12.
 KPOLL  .enter
        BL   @KSCAN
-       BL   @JOYPOLL           the joysticks, from the same matrix
-       BL   @KDECOD
+*                              The joysticks are read only for a program that
+*                              uses them (it has called JOYGET, or set JOYKEY):
+*                              an emulator that sees columns 6 and 7 read takes
+*                              the program for a joystick program and stops
+*                              mapping the PC's arrow keys to FCTN E S D X
+*                              (js99er does), and a keyboard-only program would
+*                              lose its cursor keys.
+       MOV  @JOYON,R0
+       JNE  KPJ
+       MOV  @JOYKEY,R0
+       JEQ  KPK
+KPJ    BL   @JOYPOLL           the joysticks, from the same matrix
+KPK    BL   @KDECOD
        MOV  @KCURK,R2
        JLT  KP0                no key down
        C    R2,@KLKEY
@@ -287,10 +299,15 @@ JOYRD  LI   R12,>0024          CRU outputs 18-20 select the column
 * (JFIRE|JLEFT|JRIGHT|JDOWN|
 * JUP), R2 = what went down since the last JOYGET (cleared by this call), so a
 * program sees every press however brief.  Any other R0: R1 = R2 = 0.  The state
-* is read once a frame, by KPOLL, so it follows the main loop (and KIDLE).
+* is read once a frame, by KPOLL, so it follows the main loop (and KIDLE). The
+* joysticks are read only after a program's first JOYGET (or when JOYKEY is
+* set), so that call is the one that turns the reading on and its own answer is
+* 0; a program that never asks never makes the kernel read keyboard columns 6
+* and 7.
 * Leaf.
 * Uses R1, R2.
-JOYGET CI   R0,1
+JOYGET SETO  @JOYON             from now on KPOLL reads the joysticks
+       CI   R0,1
        JEQ  JG1
        CI   R0,2
        JEQ  JG2

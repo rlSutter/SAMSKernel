@@ -209,6 +209,8 @@ DTYEAR EQU  >20C6            year, two digits (add 2000)
 DTHOUR EQU  >20C8            hour 0-23
 DTMIN  EQU  >20CA            minute
 DTSEC  EQU  >20CC            second (0 if the clock gives none)
+* non-zero once a program has used the joysticks (JOYGET): see JOYPOLL
+JOYON  EQU   >20CE
 
 * File service (files.a99): >2100->21FF
 FHOT   EQU  >2100            96 bytes: scratchpad >8320->837F while a DSR runs
