@@ -1,5 +1,11 @@
 # Changes
 
+## 1.16.1 (unreleased)
+
+- **The kernel no longer runs a TIPI's power-up routine** (`DSRPWR`). Found by reading the real TIPI DSR ROM (js99er's copy of it, 2025): at `>1000` and `>1200` its power-up does nothing but pulse CRU bit 1, the Pi's RESET line, and return; only at `>1100` (standing in for the disk controller) does it make buffers. The console has already done that at start-up, so running it again at the program's first file call gained nothing and made the Pi drop its session: js99er's TIPI emulation closes its websocket on a RESET and holds the CPU until it reconnects. A TIPI is recognised by its first device name (`TIPI`), and one at `>1100` is still powered. Since 1.6.0 the kernel had powered every card on the belief that a TIPI needed it; that rested on a model of a TIPI, not its ROM. The TI controller (and CorComp, Myarc, HFDC, CF7+) are powered as before. The kernel grows by 42 bytes (6,678).
+- The simulator's TIPI model now lists `TIPI` as its first device, as the real card does; the `tipi` test expects it not to be powered.
+- **Open:** the real TIPI DSR also claims the names `DSK0`-`DSK9` and `DSK`, ahead of a disk controller at a higher CRU address, and asks the Pi about them: with TIPI emulation on but no Pi (no websocket proxy) behind it, any `DSKn` access waits for a reply that never comes, in any program.
+
 ## 1.16.0 (31 October 2026)
 
 - **`app.json` `"pool_max_pages"`** (a multiple of 64 from 64 to 4096; default 4096): the most pages the program's pool will ever manage. The pool's bitmap, 512 bytes for a 16M card, is now pages/8 bytes **at the top of the kernel's pages** (`POOLBM`, `POOLMX`, `POOLWD` are written into `appcfg.a99` by the build; `POOLBM` is no longer in `kdefs.a99`), so a program that pools at most 256 pages (a 1M card) leaves the kernel and its resident code 480 bytes more room: the kernel may be 7,680 bytes by default, 8,160 with 256 pages, 8,064 with 1,024. `PINIT` cuts its range to the limit (no page from there up is handed out; `PRELS` ignores one) and clears only the smaller bitmap; the build refuses a value that is not a multiple of 64, is out of range, or is at or below the first free page (the pool would be empty). The cost is that default kernels grow by 10 bytes for the clamp (6,636 bytes). The kernel's size line and error now name the bitmap's real address.

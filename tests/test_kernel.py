@@ -529,7 +529,7 @@ DISK_SOURCES_PLACEHOLDER = None
 
 def tipi():
     """Support for a TIPI, as far as a simulator can show it (a MODEL of a TIPI on a second card at CRU >1000, not its
-    DSR): every card is powered up, not only the first device used; a file on the TIPI is copied to a TI controller's
+    DSR): the TI controller is powered up whichever device is used first and the TIPI is not (its power-up only resets the Pi); a file on the TIPI is copied to a TI controller's
     disk with the TIPI used first; the clock (CLKGET); and the workbench's includes in the main file's directory."""
     import tempfile, skdisk, tifdc, asmharness
     c = build('tests/apps/tipi')
@@ -542,8 +542,8 @@ def tipi():
             box['f'] = tifdc.TIFDC(image=img); m.tifdc = box['f']
             m.pi_card = True; m.pi_files = True; m.dvfiles['PI:IN.SRC'] = src; m.pi_clock = '3,10/29/26,14:05:09'
         m, cpu, halt = sim9900.run(c, frames=1500, setup=setup)
-        check(m.pi_powered and m.rw(b) == 0 and m.rw(b + 2) == 0 and m.rw(b + 4) == 12 and m.rw(b + 6) == 5 and m.rw(b + 8) == 0,
-              'two cards: the TIPI model was powered up, a file on it opened first, then the TI controller\'s: 12 records copied (%d), end of file (%d)' % (m.rw(b + 4), m.rw(b + 6)))
+        check(not m.pi_powered and m.rw(b) == 0 and m.rw(b + 2) == 0 and m.rw(b + 4) == 12 and m.rw(b + 6) == 5 and m.rw(b + 8) == 0,
+              'two cards: the TIPI model was NOT powered up (a real TIPI\'s power-up pulses the Pi\'s reset), a file on it opened first, then the TI controller\'s: 12 records copied (%d), end of file (%d)' % (m.rw(b + 4), m.rw(b + 6)))
         check(tifdc.read_file(box['f'].image, 'DST') == src, 'two cards: the copy on the TI controller\'s disk is the TIPI file, record for record')
         def setup2(m):
             f = tifdc.TIFDC(image=bytearray(open(p, 'rb').read())); orig = f.read; m.tifdc = f

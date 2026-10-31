@@ -169,7 +169,9 @@ class Machine:
         pirom = bytearray(0x2000)
         pirom[0:4] = b'\xAA\x01\x00\x00'
         pirom[4:6] = (0x4040).to_bytes(2, 'big'); pirom[8:10] = (0x4010).to_bytes(2, 'big')
-        pirom[0x10:0x12] = b'\x00\x00'; pirom[0x12:0x14] = (0x4050).to_bytes(2, 'big'); pirom[0x14:0x17] = b'\x02PI'
+        # the device list as the real card's begins: TIPI first (the kernel recognises a TIPI by that), then PI
+        pirom[0x10:0x12] = (0x4020).to_bytes(2, 'big'); pirom[0x12:0x14] = (0x4050).to_bytes(2, 'big'); pirom[0x14:0x19] = b'\x04TIPI'
+        pirom[0x20:0x22] = b'\x00\x00'; pirom[0x22:0x24] = (0x4050).to_bytes(2, 'big'); pirom[0x24:0x27] = b'\x02PI'
         pirom[0x40:0x42] = b'\x00\x00'; pirom[0x42:0x44] = (0x4060).to_bytes(2, 'big')
         for i, w in enumerate((0x0180, 0x1302, 0x05CB, 0x045B, 0x045B)):
             pirom[0x50 + 2 * i: 0x52 + 2 * i] = w.to_bytes(2, 'big')

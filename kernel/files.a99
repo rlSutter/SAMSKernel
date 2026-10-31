@@ -381,9 +381,14 @@ DLOUT  MOV  @FSR10,R10         our stack back
 * it starts (the kernel has reset VRAM since, so the controller's buffers at
 * the top of VRAM must be made again): VRAM's top is set to >3FFF, then each
 * card in CRU order (>1000 up) with a valid header has its power-up list run,
-* and the bottom the buffers reached is kept (FD70).  A TIPI at >1000 and a
-* TI controller at >1100 are both powered, whichever is used first.  Uses R0-R3,
-* R12.
+* and the bottom the buffers reached is kept (FD70).  A TI controller at >1100
+* is powered whichever device is used first.  A TIPI is NOT powered here: its
+* power-up routine (its DSR's own: >1000 and >1200 do nothing else) pulses the
+* Pi's RESET line and returns, which the console already did at start-up and
+* which only disturbs the Pi's session now (js99er's TIPI closes its websocket
+* and holds the CPU until it reconnects); only a TIPI at >1100, standing in for
+* the disk controller, has buffers to make, and that one is powered.  A TIPI is
+* recognised by its first device name, TIPI.  Uses R0-R3, R12.
 DSRPWR .enter
        MOV  @>8354,@FD54       what a power-up may change, kept
        MOV  @>8356,@FD56
@@ -403,7 +408,17 @@ PW2    AI   R12,>0100
        LI   R2,>4000
        CB   *R2,@HAA           a valid header?
        JNE  PW1
-       MOV  @>4004,R2          its power-up list
+       CI   R12,>1100          a card at >1100 (the disk's place): power it
+       JEQ  PW2B
+       MOV  @>4008,R3          a TIPI?  its first device is named TIPI
+       JEQ  PW2B
+       C    @4(R3),@TPIN
+       JNE  PW2B
+       C    @6(R3),@TPIN+2
+       JNE  PW2B
+       CB   @8(R3),@TPIN+4
+       JEQ  PW1                yes: its power-up only resets the Pi
+PW2B   MOV  @>4004,R2          its power-up list
 PW3    MOV  R2,R2
        JEQ  PW1                (the list's end: the next card)
        MOV  R2,@FDPW2
@@ -425,6 +440,8 @@ PWEND  MOV  @>8370,@FD70       the bottom of the controller's buffers
        MOV  @FDD2,@>83D2
        .leave
        RT
+* a device list entry's name: its length byte, then TIPI
+TPIN   DATA >0454,>4950,>4900
 
 * DLGPL - (entered after LWPI GPLWS, so R9 R12 R13 R15 here are the GPL
 * workspace's) call the DSR entry in FDENT as the console's GPL would:
