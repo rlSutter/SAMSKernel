@@ -1,0 +1,41 @@
+*======================================================================
+* mb.a99 - the second module: the same resident routines from a different
+* module (different table, different callback), then LINEIN.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "shared.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+TAB2   DATA 100,200,300
+
+INIT   .enter
+       LI   R0,TAB2
+       LI   R1,3
+       BL   @RSUM
+       MOV  R0,@RESB
+       LI   R1,CB2
+       LI   R2,4
+       BL   @RCALL
+       MOV  R0,@RESB+2
+       CLR  R0
+       MOVB R0,@NAMBUF
+       LI   R0,5*COLS+14
+       LI   R1,NAMBUF
+       LI   R2,ANORM
+       LI   R3,20
+       CLR  R4
+       BL   @LINEIN
+       MOV  R0,@RESB+4
+       .leave
+       RT
+
+TICK   RT
+
+* the callback: R0 times 3
+CB2    MOV  R0,R1
+       SLA  R1,1
+       A    R1,R0
+       RT

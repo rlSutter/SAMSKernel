@@ -1,0 +1,36 @@
+*======================================================================
+* ma.a99 - the first module of the resident-code test: uses the resident
+* routines on a table and a callback that are in THIS module, then switches
+* to mb.  The results are words in APPRAM, read by tests/test_kernel.py.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "shared.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+TAB    DATA 1,2,3,4,5,6,7,8,9,10
+
+INIT   .enter
+       LI   R0,TAB
+       LI   R1,10
+       BL   @RSUM
+       MOV  R0,@RESA
+       LI   R1,CB1
+       LI   R2,5
+       BL   @RCALL
+       MOV  R0,@RESA+2
+       LI   R0,PG_MB
+       CLR  R1
+       BL   @GOMOD
+       .leave
+       RT
+
+TICK   RT
+
+* the callback: R0 squared
+CB1    MOV  R0,R1
+       MPY  R0,R1
+       MOV  R2,R0
+       RT

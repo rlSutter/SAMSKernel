@@ -1,0 +1,10 @@
+{
+  "name": "RESIDENT TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "ma", "source": "ma.a99"},
+    {"name": "mb", "source": "mb.a99"}
+  ],
+  "boot": "ma",
+  "resident": {"source": "resident.a99", "exports": ["RSUM", "RCALL", "LINEIN"]}
+}

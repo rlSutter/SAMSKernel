@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -13,7 +13,7 @@ the disk browser against TI's own disk controller DSR (tools/tifdc.py, a WD1771 
 disk image): it needs the controller's 8K ROM, at tools/tifdc_dsr.bin or named by
 TIFDC_ROM (join the two 4K EPROM images, low half first); skipped without it.
 """
-import glob, os, subprocess, sys
+import glob, json, os, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import sim9900, keytab
@@ -1282,6 +1282,55 @@ def linein():
     check(before == after == (0x41, 0x42), 'slot B is as it was after history use: >E000 page >%02X, >F000 page >%02X' % after)
     check(r[10] == r10, 'the software stack is balanced (R10 >%04X before, >%04X after)' % (r10, r[10]))
 
+def resident():
+    """Resident code (docs/RESIDENT.md): app.json "resident" assembles a source INTO THE KERNEL's pages, so every module
+    can BL to its exported routines.  tests/apps/resident: module A and module B each call RSUM on a table in their own
+    code and RCALL with a callback in their own code (which MODCALL cannot do: the caller's module is unmapped), and module B
+    reads a line with LINEIN carried once in the resident code.  Also: the exports reach the modules and nothing else
+    does, and a build refuses an export that is not a label, a resident that does not fit, and a missing source."""
+    import asmharness, shutil, tempfile
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', 'resident')], capture_output=True, text=True)
+    check(r.returncode == 0 and 'of which resident code' in r.stdout, 'the application with resident code builds and says how much of the kernel it is: %s' % [l.strip() for l in r.stdout.split('\n') if 'resident' in l][:1])
+    c = open(glob.glob(os.path.join(ROOT, 'build', 'resident', '*8.bin'))[0], 'rb').read()
+    equ = asmharness.symbols(os.path.join(ROOT, 'build', 'resident', 'ma.equ'))
+    check(all(n in equ for n in ('rsum', 'rcall', 'linein')) and all(0xA000 <= equ[n] < 0xBE00 for n in ('rsum', 'rcall', 'linein')),
+          'the modules see the three exports, at addresses in the kernel pages: %s' % {n: hex(equ[n]) for n in ('rsum', 'rcall', 'linein') if n in equ})
+    check(not any(n in equ for n in ('rsu1', 'rcl1', 'lndraw', 'lnlen', 'kresb', 'krese')), 'and not the resident code\'s own labels or the kernel\'s')
+    m, cpu, halt = sim9900.run(c, frames=300)          # A has run and switched, B is waiting in LINEIN
+    for i, k in enumerate((ord('h'), ord('i'), 0x0D)):
+        m.wb(0x2040 + i, k)
+    m.ww(0x200E, 3); m.ww(0x2010, 0)                  # the keys, in the key buffer
+    target = m.insns + 40 * sim9900.VSYNC_INSNS
+    while m.insns < target:
+        cpu.step()
+    check(halt is None, 'the application runs both modules without a halt (%s)' % halt)
+    ra = [m.rw(0x2300 + i) for i in (0, 2)]
+    rb = [m.rw(0x2300 + 10 + i) for i in (0, 2, 4)]
+    check(ra == [55, 30], 'module A: RSUM of a table in its own code is 55, RCALL with a callback in its own code is 0+1+4+9+16 = 30 (%s)' % ra)
+    check(rb[:2] == [600, 18], 'module B: RSUM 100+200+300 = 600, RCALL with its own callback 0+3+6+9 = 18 (%s)' % rb[:2])
+    n = m.rb(0x2300 + 100)
+    got = bytes(m.rb(0x2300 + 101 + i) for i in range(n)).decode('latin-1')
+    check(rb[2] == 0x0D00 and got.upper() == 'HI', 'module B: the resident LINEIN read "hi" and ENTER (>%04X, %r)' % (rb[2], got))
+    # a build without resident code is unchanged
+    r0 = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello')], capture_output=True, text=True)
+    check('resident code' not in r0.stdout and 'kernel 6' in r0.stdout, 'an application without resident code builds as before (%s)' % [l for l in r0.stdout.split('\n') if l.startswith('kernel')][0][:60])
+    def variant(edit_json=None, edit_res=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'resident'), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_res:
+            open(d + '/app/resident.a99', 'a').write(edit_res)
+        return subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+    r1 = variant(lambda j: j['resident']['exports'].append('NOSUCH'))
+    check(r1.returncode != 0 and 'NOSUCH' in (r1.stdout + r1.stderr), 'an export that is not a label is refused, by name')
+    r2 = variant(edit_res='       BSS  2000\n')
+    check(r2.returncode != 0 and 'page-pool bitmap' in (r2.stdout + r2.stderr), 'a resident that does not fit is refused: it runs into the pool bitmap')
+    r3 = variant(lambda j: j['resident'].update(source='missing.a99'))
+    check(r3.returncode != 0 and 'missing.a99' in (r3.stdout + r3.stderr), 'a missing resident source is refused, by name')
+    r4 = variant(lambda j: j['resident'].update(exports=['bad name']))
+    check(r4.returncode != 0 and 'not a label' in (r4.stdout + r4.stderr), 'an export that is not even a name is refused')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1429,7 +1478,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

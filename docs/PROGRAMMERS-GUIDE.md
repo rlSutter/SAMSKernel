@@ -622,9 +622,25 @@ arguments and take extra results in **`R5`, `R6`, `R8`, `R9`** (they cross the c
 in slot A. Calls nest. The called
 routine runs with *its* module in slot C, so it may not touch your code or data in slot C.
 
+### Code every module can call: resident code
+
+`MODCALL` runs the routine with *its* module in slot C, so it cannot read your tables or call back into your code.
+Code that every module wants (a line editor, a lookup, a sort with a callback) can instead be **resident**: assembled into
+the kernel's own pages, which are always mapped, and reached with a plain `BL @NAME` from any module. In `app.json`:
+
+```json
+"resident": {"source": "resident.a99", "exports": ["RSUM", "LINEIN"]}
+```
+
+`resident.a99` is an ordinary source with no `AORG` and no `END`; it may `COPY "linein.a99"` to carry the line editor
+once for the whole program. The listed labels join `kernel.equ`; nothing else in it is visible to the modules. There is
+room for about 1,050 bytes (the kernel is 6,626 of the 7,680 it may be); the build says how much is resident and refuses
+a kernel that runs into the pool bitmap. **[PC] only.** The design, the options it was chosen over, how to write the
+routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/resident` is a worked two-module example.
+
 ### Rules
 
-- A module cannot call another's routines directly (they are not mapped): `MODCALL` or `GOMOD`.
+- A module cannot call another's routines directly (they are not mapped): `MODCALL`, `GOMOD`, or resident code.
 - Shared constants and addresses go in one `shared.a99` that each module `COPY`s
   (see `examples/browser/shared.a99`).
 - Labels in different modules are independent: two modules may both have a `LOOP1`. Only the
@@ -849,7 +865,8 @@ there is no exit hook.
     {"name": "other", "source": "other.a99", "page": "0x20"}
   ],
   "boot": "main",
-  "data": [ {"file": "words.bin", "page": "0x40"} ]
+  "data": [ {"file": "words.bin", "page": "0x40"} ],
+  "resident": {"source": "resident.a99", "exports": ["RSUM"]}
 }
 ```
 
@@ -862,6 +879,8 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`resident`** (optional) is code assembled into the kernel's pages so that every module can `BL` to it: part 8 and
+  `docs/RESIDENT.md`.
 - **`PGFREE`** (equate) is the first page the build leaves unassigned: where your pool starts.
 - The output `build/APPDIR/NAME8.bin` is the cartridge image: 8K banks, padded to a power of
   two, bank 0 the loader. A real FinalGROM 99 and js99er take it as is.

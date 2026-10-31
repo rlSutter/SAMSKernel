@@ -134,5 +134,6 @@ KXFF   DATA >FFFF
        COPY "pool.a99"
        COPY "files.a99"
        COPY "music.a99"
+       COPY "kresident.a99"
 KEND
        END

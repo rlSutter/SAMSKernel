@@ -1,0 +1,8 @@
+* shared.a99 - what both modules of the resident-code test agree on
+* module A's results: +0 RSUM, +2 RCALL
+RESA   EQU  APPRAM
+* module B's results: +0 RSUM, +2 RCALL, +4 the key that ended LINEIN
+RESB   EQU  APPRAM+10
+* the line LINEIN edits: a length byte and the characters
+NAMBUF EQU  APPRAM+100
+ANORM  EQU  (RTEXT*16+RBG)*256

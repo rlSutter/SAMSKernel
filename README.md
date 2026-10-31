@@ -53,6 +53,7 @@ The full comparison is in [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md)
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | how the kernel works inside; memory maps |
 | [docs/HARDWARE.md](docs/HARDWARE.md) | the machine's facts the kernel relies on; the key-code table |
 | [docs/GLYPHS.md](docs/GLYPHS.md) | the 256-glyph set |
+| [docs/RESIDENT.md](docs/RESIDENT.md) | code every module can call: resident code in the kernel's pages (`app.json` `"resident"`), the options it was chosen over, its budget |
 | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | the rules the code follows |
 | [docs/FROM-PRESS.md](docs/FROM-PRESS.md) | what came from Press, what did not, what rebasing Press would take |
 
@@ -91,7 +92,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.14.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.15.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

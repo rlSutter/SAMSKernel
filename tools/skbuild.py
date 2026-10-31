@@ -17,6 +17,10 @@ app.json:
       {"name": "more",  "source": "more.a99", "page": "0x20"}   (optional page)
     ],
     "boot":      "hello",              the module that starts (default: the first)
+    "resident": {                      optional: code every module can call (docs/RESIDENT.md)
+      "source": "resident.a99",        assembled INTO THE KERNEL's pages, after the kernel
+      "exports": ["RSUM", "LINEIN"]    the labels the modules may BL to (added to kernel.equ)
+    },
     "data": [                          optional: files copied into SAMS pages
       {"file": "words.bin", "page": "0x40"},     (> 8K: consecutive page pairs)
       {"file": "tune.skm", "from": "tune.mml", "loop": true}      music, compiled from a MIDI file or
@@ -30,15 +34,16 @@ kernel, which exports its symbols to kernel.equ; assembles the loader, the
 data bank and each module (which COPY "kernel.equ"); checks every bank
 fits in 8K; packs the image.
 
-Include path: the kernel and the loader see only the build directory, kernel/ and gen/ (an
-application's file of the same name as one of the kernel's cannot shadow it); the data bank and
+Include path: the kernel and the loader see only the build directory, kernel/, gen/ and lib/ (an
+application's file of the same name as one of the kernel's cannot shadow it; an application with
+resident code also lets it see the application's own directory, last of all); the data bank and
 every module see the application's directory first, so an application may replace databank.a99
 (the font and colour schemes) with its own.
 
 The assembler is xdt99's xas99.py: set XAS99, or put xdt99 beside this
 directory (./xdt99 or ../xdt99).
 """
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BANK = 0x2000
@@ -110,6 +115,16 @@ def load_app(appdir):
     if app['boot'] not in names:
         die('"boot" names no module')
     app.setdefault('data', [])
+    res = app.get('resident')
+    if res is not None:
+        if not isinstance(res, dict) or not res.get('source'):
+            die('"resident" needs a "source"')
+        if not os.path.exists(os.path.join(appdir, res['source'])):
+            die('resident source %s not found' % res['source'])
+        res.setdefault('exports', [])
+        for n in res['exports']:
+            if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', n):
+                die('resident export %r is not a label' % n)
     return app
 
 
@@ -210,7 +225,17 @@ def write_cfg(app, bdir, banks, pgfree):
     open(os.path.join(bdir, 'appmsg.a99'), 'w').write('\n'.join(msg) + '\n')
 
 
-def export_public(ksrc, bdir, equ):
+def equ_labels(equ):
+    """Every label the assembler wrote to the equate file: {lower-case name: value}."""
+    out, lines = {}, open(equ).read().split('\n')
+    for i in range(len(lines) - 1):
+        if lines[i].endswith(':') and 'equ' in lines[i + 1]:
+            m = re.search(r'>([0-9a-fA-F]+)', lines[i + 1])
+            out[lines[i][:-1].lower()] = int(m.group(1), 16)
+    return out
+
+
+def export_public(ksrc, bdir, equ, extra=()):
     """Rewrite kernel.equ so that it exports only what an application may use: the
     equates (kdefs.a99 and the generated appcfg.a99) and the routines in
     kernel/public.txt.  Every other kernel label stays private, so the kernel can
@@ -223,6 +248,7 @@ def export_public(ksrc, bdir, equ):
     for line in open(os.path.join(ksrc, 'public.txt')):
         if not line.startswith('#'):
             keep.update(n.lower() for n in line.split())
+    keep.update(n.lower() for n in extra)           # the application's resident routines
     lines = open(equ).read().split('\n')
     out, i, total = [], 0, 0
     while i + 1 < len(lines):
@@ -268,12 +294,26 @@ def main():
             nb += 1
     write_cfg(app, bdir, banks, pgfree)
     incs = [appdir, bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen'), os.path.join(ROOT, 'lib')]
-    kincs = [bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen')]    # the kernel never sees the application's files
+    kincs = [bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen'), os.path.join(ROOT, 'lib')]    # the kernel never sees the application's files...
     ksrc = os.path.join(ROOT, 'kernel')
+    res = app.get('resident')
+    if res:
+        kincs.append(appdir)               # ...except for resident code, and then last, so it cannot shadow the kernel's
+        shutil.copy(os.path.join(appdir, res['source']), os.path.join(bdir, 'resident.a99'))
+        text = ('* the application\'s resident code (app.json "resident"), assembled with the kernel\n'
+                'KRESB  EVEN\n       COPY "resident.a99"\n       EVEN\nKRESE\n')
+    else:
+        text = '* no resident code\nKRESB\nKRESE\n'
+    open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
                  os.path.join(bdir, 'kernel.lst'), equ)
-    export_public(ksrc, bdir, equ)
+    labels = equ_labels(equ)
+    rbytes = labels['krese'] - labels['kresb']
+    for n in (res or {}).get('exports', []):
+        if n.lower() not in labels:
+            die('resident export %s is not a label in %s' % (n, res['source']))
+    export_public(ksrc, bdir, equ, [n for n in (res or {}).get('exports', [])])
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
                  os.path.join(bdir, 'loader.lst'))
     ds = os.path.join(appdir, 'databank.a99')
@@ -292,11 +332,12 @@ def main():
         for c in range(d['_chunks']):
             images.append(raw[c * BANK:(c + 1) * BANK])
         sizes.append((d['file'], len(raw)))
+    if 0xA000 + len(kernel) > 0xBE00:
+        die('the kernel (%d bytes%s) runs into the page-pool bitmap at >BE00: it may be at most 7,680 bytes' %
+            (len(kernel), ', of which resident code %d' % rbytes if res else ''))
     for n, sz in sizes:
         if sz > BANK:
             die('%s is %d bytes: over its 8K bank' % (n, sz))
-    if len(kernel) > BANK:
-        die('the kernel is over 8K')
     n = 1
     while n < len(images):
         n *= 2
@@ -304,9 +345,9 @@ def main():
     image = b''.join(b.ljust(BANK, b'\0') for b in images).ljust(n * BANK, b'\0')
     out = os.path.join(bdir, app['name'].lower().replace(' ', '') + '8.bin')
     open(out, 'wb').write(image)
-    print('kernel %d bytes (ends >%04X, %d free)' % (len(kernel), 0xA000 + len(kernel), BANK - len(kernel)))
-    if 0xA000 + len(kernel) > 0xBE00:
-        die('the kernel (%d bytes) runs into the page-pool bitmap at >BE00: it may be at most 7,680 bytes' % len(kernel))
+    print('kernel %d bytes (ends >%04X, %d free below the page-pool bitmap at >BE00)' % (len(kernel), 0xA000 + len(kernel), 0xBE00 - 0xA000 - len(kernel)))
+    if res:
+        print('  of which resident code %d bytes (exports: %s)' % (rbytes, ' '.join(res['exports']) or 'none'))
     for (nme, sz) in sizes[3:]:
         print('  %-16s %5d bytes' % (nme, sz))
     print('wrote %s: %dK, %d banks, SAMS pages needed: %d (pool from >%02X)' %

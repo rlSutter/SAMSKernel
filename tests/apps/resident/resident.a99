@@ -1,0 +1,38 @@
+*======================================================================
+* resident.a99 - code assembled INTO THE KERNEL's pages, so every module can
+* BL to it directly (app.json "resident").  Two small routines to show what
+* that gives that MODCALL does not, and the line editor from lib/ so that it
+* is carried once for both modules.
+*======================================================================
+
+* RSUM - R0 = the address of a table of words, R1 = how many: R0 = their sum.
+* The table may be in the CALLER's code (slot C): the caller is mapped while
+* this runs.  Uses R1, R2.
+RSUM   CLR  R2
+RSU1   A    *R0+,R2
+       DEC  R1
+       JNE  RSU1
+       MOV  R2,R0
+       RT
+
+* RCALL - call the routine at R1 once for each R0 = 0 to R2-1 and add up what
+* it answers in R0: R0 = the sum.  The routine is in the caller's module, so
+* it can only be called because the caller's module is still mapped.  It may
+* change R0-R5.  Uses R6-R9.
+RCALL  .enter
+       MOV  R1,R9
+       MOV  R2,R8
+       CLR  R7
+       CLR  R6
+RCL1   C    R7,R8
+       JHE  RCL2
+       MOV  R7,R0
+       BL   *R9
+       A    R0,R6
+       INC  R7
+       JMP  RCL1
+RCL2   MOV  R6,R0
+       .leave
+       RT
+
+       COPY "linein.a99"
