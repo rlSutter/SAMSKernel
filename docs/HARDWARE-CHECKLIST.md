@@ -38,6 +38,10 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 | 15 | `COPY/A99` with `SRC` on `DSK1.` (TIPI) and, if you also have a TI disk controller, the copy going between them | `DST` appears; with both cards present nothing hangs, whichever device is used first | which direction fails |
 | 16 | `CLOCK/A99` from the workbench disk, ENTER | today's date and the time | "no clock" with a TIPI attached, or a wrong date |
 
+## js99er's TIPI emulation and a frozen machine
+
+js99er's TIPI setting has three values (read from its source, `tipi.ts`): **No TIPI emulation**; **Mouse** (a TIPI at CRU `>1200`, no network); **Full** (a TIPI at `>1000` whose Pi is a **websocket server**, by default `ws://localhost:9901/tipi`). In Full, js99er suspends the whole CPU whenever that websocket is closed or cannot be opened, and retries every two seconds: with nothing listening the machine freezes at start-up, before the console's menu, whatever cartridge is loaded (it was reported once for this kernel, on 31 October 2026, before the menu appeared, so it is not this software). The TIPI's own power-up pulses its reset line, which makes the proxy close the connection, so a freeze of a couple of seconds at each reset is also normal. If a machine freezes with Full emulation: set the setting to No TIPI emulation (it should run), check that the websocket server is reachable at the URI in js99er's options, and look in the browser's developer console for "TIPI websocket opened" or "closed". Mouse needs no server.
+
 ## What each unverified claim rests on
 
 | Claim | Rests on | Where it could be wrong |
