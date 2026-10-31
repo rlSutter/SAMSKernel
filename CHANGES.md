@@ -1,5 +1,12 @@
 # Changes
 
+## 1.13.0 (31 October 2026)
+
+- **The Myarc HFDC's floppy side in the simulator** (`tools/hfdc.py`), on its real 16K ROM: the card (four 4K ROM pages, 32K RAM in 1K pages, the CRU latch and its bit order, the chip's ports) from MAME's description, and an HDC9234 at sector level (a command stream with a register file and DMA into the card's RAM, density from the clock-divider bits) from Myarc's own DSR source, which you supplied. 360K double-density disks open, read, write and catalogue through it, including files on the second side. Hard disks and formatting are not modelled.
+- **Catalogs on the HFDC, and a fix for everyone**: the HFDC refuses an explicit record length of 38 for a catalog open and writes up to 146 bytes per record. `FCATOP`, `FEXCAT`, the disk browser and the workbench shell now open catalogs with length 0 (the DSR's own: 38 on the other cards), and the record buffers are big enough: `FCATOP`'s buffer is documented as 150 bytes or more, `FEXCAT`'s stack frame is 192 bytes, the browser's record buffer 160, and the workbench shell's catalog buffer moved to the assembler's idle line area (`APPRAM+256`; it would have overrun the editor's variables on an HFDC).
+- New test group `hfdccru` (LDCR bit order for the paging bits); `fileapi`, `dsdd` and `dsddworkbench` now run on the HFDC as well (the file API tests on four cards, the others on three); `TESTCARDS=HFDC` (or a comma list of words from the card names) runs a group on just those. The test harness allows 300 million instructions per call (the HFDC DSR is slow).
+- Both Myarc cards answer 7 for a missing file opened for input (TI's controller and the CorComp answer 2).
+
 ## 1.12.0 (31 October 2026)
 
 - **`images/workbench-360k.dsk`**: the workbench's disk as a 360K double-sided double-density disk: `KERNEL/EQU`, `SRC`, every program (the two 90K disks' contents together) and the sources of the workbench itself (`WB/A99`, `ED/A99`, `ASM/A99`) to read on the TI: 855 of 1,440 sectors used. For the CorComp and Myarc cards, a TIPI or CF7+, or js99er's generic disk controller; TI's own single-density controller cannot read it, so the 90K `workbench.dsk` and `examples.dsk` stay. New test group `dsddworkbench`: through each double-density card's real DSR, the catalog lists the disk's files and `HELLO/A99` assembles on the simulated TI, identical to xas99.

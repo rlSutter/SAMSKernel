@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -773,7 +773,7 @@ def _fileapi(label, geometry, make_card):
         while m.insns < 100 * sim9900.VSYNC_INSNS:
             cpu.step()
         return m, cpu
-    def call(m, cpu, name, regs=None, limit=30_000_000):
+    def call(m, cpu, name, regs=None, limit=300_000_000):   # a call that never returns is caught by this; the HFDC DSR needs tens of millions for a catalog scan
         return asmharness.call(m, cpu, syms[name.lower()], regs or {}, limit=limit)
     def put(m, addr, data):
         for i, b in enumerate(data):
@@ -986,6 +986,11 @@ def fileapi():
         print('  (the CorComp card is skipped: its ROMs are not found; CCFDC_U3, CCFDC_U4)')
     if __import__('myfdc').available():
         cards.append(('Myarc DDCC-1 DSDD', 'dsdd', lambda img: __import__('myfdc').MYFDC(image=img)))
+    if __import__('hfdc').available():
+        cards.append(('Myarc HFDC DSDD', 'dsdd', lambda img: __import__('hfdc').HFDC(image=img)))
+    only = os.environ.get('TESTCARDS')
+    if only:                                   # e.g. TESTCARDS=HFDC: just the cards whose label has one of these words
+        cards = [c for c in cards if any(w in c[0] for w in only.split(','))]
     for label, geometry, make_card in cards:
         _fileapi(label, geometry, make_card)
 
@@ -1010,9 +1015,12 @@ def _dsdd(label, make_card):
     card = make_card(img)
     m.tifdc = card
     reads, writes = [], []
-    rs, ws = card.wd.read_sector_in, card.wd.write_sector_out
-    card.wd.read_sector_in = lambda: (reads.append((card.wd.side, card.wd.track, card.wd.sector)), rs())[1]
-    card.wd.write_sector_out = lambda: (writes.append((card.wd.side, card.wd.track, card.wd.sector)), ws())[1]
+    if hasattr(card, 'wd'):
+        rs, ws = card.wd.read_sector_in, card.wd.write_sector_out
+        card.wd.read_sector_in = lambda: (reads.append((card.wd.side, card.wd.track, card.wd.sector)), rs())[1]
+        card.wd.write_sector_out = lambda: (writes.append((card.wd.side, card.wd.track, card.wd.sector)), ws())[1]
+    else:                                      # the HFDC logs its own (head, cylinder, sector)
+        reads, writes = card.sector_log['r'], card.sector_log['w']
     m.presses, m.toggles, end = sim9900.schedule([])
     cpu = sim9900.CPU(m); cpu.pc = m.rw(m.rw(0x6006) + 2)
     while m.insns < 100 * sim9900.VSYNC_INSNS:
@@ -1058,6 +1066,11 @@ def dsdd():
         cards.append(('CorComp', lambda img: __import__('ccfdc').CCFDC(image=img)))
     if __import__('myfdc').available():
         cards.append(('Myarc DDCC-1', lambda img: __import__('myfdc').MYFDC(image=img)))
+    if __import__('hfdc').available():
+        cards.append(('Myarc HFDC', lambda img: __import__('hfdc').HFDC(image=img)))
+    only = os.environ.get('TESTCARDS')
+    if only:
+        cards = [c for c in cards if any(w in c[0] for w in only.split(','))]
     if not cards:
         print('  (skipped: the CorComp and Myarc ROMs are not found)')
     for label, make_card in cards:
@@ -1088,6 +1101,11 @@ def dsddworkbench():
     cards = []
     if ccfdc.available(): cards.append(('CorComp', lambda img: ccfdc.CCFDC(image=img)))
     if myfdc.available(): cards.append(('Myarc DDCC-1', lambda img: myfdc.MYFDC(image=img)))
+    import hfdc
+    if hfdc.available(): cards.append(('Myarc HFDC', lambda img: hfdc.HFDC(image=img)))
+    only = os.environ.get('TESTCARDS')
+    if only:
+        cards = [c for c in cards if any(w in c[0] for w in only.split(','))]
     for label, make in cards:
         def hook(m, make=make):
             m.tifdc = make(bytearray(disk))
@@ -1098,6 +1116,37 @@ def dsddworkbench():
         m, img = asmharness.workbench_ui('<WAIT 10>nHELLO/A99<ENTER><WAIT 10>a<WAIT 2600>', 2900, [], setup2=hook)
         text = ' '.join(sim9900.screen(m).split('\n'))
         check('Assembled' in text and ('%d' % want.length) in text.replace(' ', ' '), '[%s] HELLO/A99 assembles on the TI from the 360K disk: %d bytes as xas99 makes it' % (label, want.length))
+
+def hfdccru():
+    """CRU bit order, as the HFDC card and its DSR use it: LDCR with fewer than 8 bits takes them from the high byte of the
+    register, LSB first, from the CRU bit the R12 address names.  A 5-bit RAM page number starts at CRU bit 9 (R12 = base + >12);
+    the ROM page is two bits, 3 (the MSB of the page) and 4 (the LSB), so SBZ 3 / SBO 4 equals LDCR R1,2 with R1 = >0200."""
+    import hfdc
+    if not hfdc.available():
+        print('  (skipped: the HFDC ROM is not found)')
+        return
+    c = build('hello')
+    m = sim9900.Machine(c)
+    card = hfdc.HFDC()
+    m.tifdc = card
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    def run(words, regs):
+        for r, v in regs.items(): cpu.setreg(r, v)
+        for i, w in enumerate(words): m.ww(0x8320 + 2 * i, w)
+        cpu.pc = 0x8320
+        for _ in words: cpu.step()
+    run([0x3041 | (5 << 6)], {12: 0x1112, 1: 0x1F00})                 # LDCR R1,5 at CRU bit 9
+    check(card.ram_page[1] == 0x1F, 'LDCR R1,5 with R1=>1F00 at CRU bit 9 sets the RAM page at >5400 to >1F (%X)' % card.ram_page[1])
+    run([0x3041 | (5 << 6)], {12: 0x1112 + 10, 1: 0x0500})            # bits 14-18: the page at >5800: 00101 LSB first
+    check(card.ram_page[2] == 0x05, 'the same for the page at >5800 (bit 14): >05 (%X)' % card.ram_page[2])
+    card.cru = [0] * 24; card.rom_page = 0
+    run([0x1E03, 0x1D04], {12: 0x1100})                                # SBZ 3 ; SBO 4
+    a = (card.cru[3], card.cru[4], card.rom_page)
+    card.cru = [0] * 24; card.rom_page = 0
+    run([0x3041 | (2 << 6)], {12: 0x1106, 1: 0x0200})                  # LDCR R1,2: bit 3 = 0, bit 4 = 1
+    b = (card.cru[3], card.cru[4], card.rom_page)
+    check(a == b == (0, 1, 1), 'SBZ 3 + SBO 4 and LDCR R1,2 (R1=>0200) at bit 3 are the same: CRU 3=0, 4=1, ROM page 1 (%s, %s)' % (a, b))
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -1246,7 +1295,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

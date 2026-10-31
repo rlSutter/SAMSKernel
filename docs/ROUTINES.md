@@ -402,7 +402,7 @@ write R2 bytes from the buffer at R1 as record number R3 of a RELATIVE file (see
 
 ### `FCATOP`
 
-open the catalog of the device named by R2 (a length-prefixed device alone: 'DSK1.') on the selected handle and read its first record, the disk's own (FCNUM 1 of it is the size in sectors, 2 the sectors free), into the 38-byte buffer at R1.  R0 = 0 or the error.  Then call FCATNX with the same buffer until it answers FCEND.  Uses R0-R9.
+open the catalog of the device named by R2 (a length-prefixed device alone: 'DSK1.') on the selected handle and read its first record, the disk's own (FCNUM 1 of it is the size in sectors, 2 the sectors free), into the buffer at R1 (at least 150 bytes: TI's controller fills 38, the Myarc HFDC up to 146).  R0 = 0 or the error.  Then call FCATNX with the same buffer until it answers FCEND.  Uses R0-R9.
 
 ### `FCATNX`
 

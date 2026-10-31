@@ -574,12 +574,15 @@ FRWRITE .enter
 * FCATOP - open the catalog of the device named by R2 (a length-prefixed
 * device alone: 'DSK1.') on the selected handle and read its first record, the
 * disk's own (FCNUM 1 of it is the size in sectors, 2 the sectors free), into
-* the 38-byte buffer at R1.  R0 = 0 or the error.  Then call FCATNX with the
+* the buffer at R1 (at least 150 bytes: TI's controller fills 38, the Myarc
+* HFDC up to 146).  R0 = 0 or the error.  Then call FCATNX with the
 * same buffer until it answers FCEND.  Uses R0-R9.
 FCATOP .enter
        MOV  R1,@FCRB
-       LI   R0,FIN+FINTL       INTERNAL, FIXED, input
-       LI   R1,38
+       LI   R0,FIN+FINTL       INTERNAL, input
+* record length 0: the DSR's own (38; the Myarc HFDC
+       CLR   R1
+*                              refuses an explicit 38 and takes 0)
        BL   @FOPEN
        MOV  R0,R0
        JNE  FCO9
@@ -764,14 +767,14 @@ FEXCAT .enter
        .push R0
        LI   R0,2
        BL   @FSEL
-* a frame on the stack: the catalog record (38 bytes
-       AI    R10,-72
-* from R10), the entry (R10+40), the device (R10+60)
+* a frame on the stack: the catalog record (160 bytes from R10: the HFDC
+       AI    R10,-192
+* writes up to 146), the entry (R10+160), the device (R10+180)
        MOV  @FEXN,R1           the device: the name up to and including the dot
        MOVB *R1+,R3
        SRL  R3,8
        MOV  R10,R4
-       AI   R4,61              (the length byte goes in first)
+       AI   R4,181             (the length byte goes in first)
        CLR  R5
 FE1    MOV  R3,R3
        JEQ  FEBAD              no dot: no such device
@@ -786,7 +789,7 @@ FE1    MOV  R3,R3
        MOV  R1,@FEXN           (the file's own name follows the dot)
        MOV  R3,@FRLEN          its length
        MOV  R10,R4
-       AI   R4,60
+       AI   R4,180
        SWPB R5
        MOVB R5,*R4             the device's length byte
        MOV  R10,R1             FCATOP: the record buffer ...
@@ -796,7 +799,7 @@ FE1    MOV  R3,R3
        JNE  FE9
 FE2    MOV  R10,R1
        MOV  R10,R2
-       AI   R2,40
+       AI   R2,160
        BL   @FCATNX
        MOV  R0,R0
        JEQ  FE3
@@ -805,7 +808,7 @@ FE2    MOV  R10,R1
        LI   R0,FENOFI          not in the catalog
        JMP  FE9
 FE3    MOV  R10,R1             the entry's name against the one asked for
-       AI   R1,40
+       AI   R1,160
        MOVB *R1+,R3
        SRL  R3,8
        C    R3,@FRLEN
@@ -822,7 +825,7 @@ FE4    MOV  R3,R3
 FE5    CLR  R0
        JMP  FE9
 FEBAD  LI   R0,>00FF
-FE9    AI   R10,72
+FE9    AI   R10,192
        .push R0
        BL   @FCLOSE            (it answers an error if the catalog ended)
        .pop R0

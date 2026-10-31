@@ -6,7 +6,7 @@
 | `ccdcc_v89.u3` | 8,192 bytes | `a38aea29ddfa54f667934a40f3ed4161af48a6484d3ecb8d3cf34be40abc87be` | the CorComp Disk Controller card, version 89: ROM u3, the DSR proper |
 | `ccdcc_v89.u4` | 8,192 bytes | `65275417e2aa2038627f91cd58c8f95b61c165a1b33027c880219b23e86ab9a1` | the same card's ROM u4: the low-level disk I/O layer |
 | `ddcc1.u3` | 8,192 bytes | `125f84a721c270c7c068a32e1d372070461df0a80e2336a886bd9bd0ae725613` | the Myarc DDCC-1 disk controller card's DSR ROM (two 4K banks): used by the tests |
-| `hfdc_dsr.u34` | 16,384 bytes | `140a8890f566bf5c555af5342ceef77ec3b57f48f276368bacd09e395d7dbc43` | the Myarc HFDC (hard and floppy disk controller) DSR, two 8K halves joined: **not used yet**, no model |
+| `hfdc_dsr.u34` | 16,384 bytes | `140a8890f566bf5c555af5342ceef77ec3b57f48f276368bacd09e395d7dbc43` | the Myarc HFDC (hard and floppy disk controller) DSR, two 8K halves joined: used by the tests (floppies only) |
 
 **What it is.** A peripheral card's DSR ROM, mapped at `>4000-5FFF` when the card's CRU bit is set (the CF7+ sits at CRU `>1100`, the
 same place as the TI disk controller). Its header (`>AA`, version 7) lists the power-up routine at `>4066` and the DSR list at `>406C`:
@@ -39,8 +39,7 @@ service against this ROM on a 360K disk (`tools/myfdc.py`). I first tried to mod
 that unstuck it is from MAME's source for the card (`myarcfdc.cpp`, Michael Zapf; LGPL-2.1+), which you supplied; the model here is written from that description, not copied from it.
 The DSR first tries single density, and the model answers 'record not found' when the density asked for is not the disk's, which is how the DSR finds a double-density disk.
 
-**Myarc HFDC (`hfdc_dsr.u34`).** A different card: a hard and floppy disk controller (devices `DSK` and `WDS`), header version `>0B`, 16K in two halves, with a controller chip
-that drives both kinds of disk. **Not modelled, and not modellable from the ROM alone in reasonable time**: the card's controller is not a WD177x, it has its own RAM and paging, and the ROM reaches it through computed registers and CRU values, so unlike the DDCC-1 (where MAME's description unblocked it) the model needs a hardware description (MAME's `myarcfdc.cpp` for the HFDC and the HDC9234 device would do). It does not supply anything the DDCC-1 lacked (that was my misreading of the DDCC-1's bank-switching, not a missing ROM).
+**Myarc HFDC (`hfdc_dsr.u34`).** A hard and floppy disk controller (devices `DSK` and `WDS`), header version `>0B`; the 16K is four 4K pages, one at a time at `>4000-4FBF` (CRU latch bits 3 and 4, 3 the more significant), with an HDC9234 controller chip at `>4FD0-4FDE`, 32K of RAM in 1K pages that the chip moves sectors to and from by DMA (the page at `>5000` fixed, three windows set by 5 CRU bits each from bit 9), and a clock chip at `>4FE0`. The floppy side is modelled (`tools/hfdc.py`) from MAME's description of the card (`hfdc.cpp`, Michael Zapf; LGPL-2.1+) and from Myarc's own DSR source, which you supplied as an archive (`HFDCV12`, TI Archiver format) and which gave the chip's commands and registers; the model is written from those descriptions, not copied. The hard disk side and formatting are not modelled. The source archive is Myarc's and is not in this distribution.
 
 **Where they came from, and what you may do with them.** You supplied them on 30 October 2026 as `ti99_ccdcc.zip`, `ti99_ddcc1.zip` and `ti99_hfdc.zip`; the
 archives say nothing about their authors or licence. They are the firmware of commercial cards (CorComp, Myarc) whose makers are no longer

@@ -29,8 +29,8 @@ ENTS   EQU  APPRAM+32          the files: MAXF entries of 16 bytes
 * +12 type (1 DIS/FIX 2 DIS/VAR 3 INT/FIX 4 INT/VAR 5 program)
 *                              +14 size in sectors
 MAXF   EQU  20
-RECBUF EQU  ENTS+(MAXF*16)     a catalog record (38 bytes)
-EEND   EQU  RECBUF+40
+RECBUF EQU  ENTS+(MAXF*16)     a catalog record (HFDC: up to 146 bytes)
+EEND   EQU  RECBUF+160
 * the viewer's variables, above the browser's
 * the file name: DSK1.NAME, length-prefixed (20 bytes)
 VNAME  EQU   EEND

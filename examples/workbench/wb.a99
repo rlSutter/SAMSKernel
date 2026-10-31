@@ -45,7 +45,8 @@ SEL    EQU  APPRAM+38          the catalog's selection
 NFILES EQU  APPRAM+40
 EPTR   EQU  APPRAM+42
 DEVLEN EQU  APPRAM+44
-CATBUF EQU  APPRAM+64          a catalog record: 40 bytes
+CATBUF EQU  APPRAM+256         a catalog record (HFDC: up to 146 bytes;
+*                              the assembler's LINE area, idle here)
 CATTAB EQU  APPRAM+5200         the names: 20 entries of 12 bytes (the
 *                              assembler overwrites them: the catalog is read
 *                              afresh each time)
@@ -433,7 +434,7 @@ CO4    MOV  R3,@DEVLEN
        MOVB R3,@CATNM
        LI   R2,CATNM
        LI   R0,FIN+FINTL
-       LI   R1,38
+       CLR  R1                 length 0: the DSR's own (HFDC refuses 38)
        BL   @FOPEN
        MOV  R0,R0
        JNE  CO9

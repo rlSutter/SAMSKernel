@@ -189,13 +189,15 @@ the geometry is read from the volume information block, `tools/fdc.py`):
 | TI disk controller | 90K, single density, one side (a 180K two-sided single-density disk also reads) | `tools/tifdc.py` (WD1771, inverted data bus) | TI's, **not** distributed: `TIFDC_ROM` |
 | CorComp disk controller (v89) | 360K, double density, two sides (18 sectors a track, 1,440 sectors) | `tools/ccfdc.py` (WD177x, plain data bus, 16K ROM in two banks by CRU bit 11, 128 bytes of RAM at `>4000` in bank 1) | `roms/ccdcc_v89.u3`, `.u4` |
 | Myarc DDCC-1 | 360K, double density, two sides | `tools/myfdc.py` (WD1770/72 at the odd addresses `>5F01-5F07`; two 4K ROM banks at `>4000`; 2K RAM at `>5000`; CRU latch and multiplexer; the chip answers 'record not found' for the wrong density, as the DSR's density search needs) | `roms/ddcc1.u3` |
-| Myarc HFDC | hard and floppy | **not modelled** | `roms/hfdc_dsr.u34` |
+| Myarc HFDC | 360K, double density, two sides (floppy side only; no hard disks, no formatting) | `tools/hfdc.py` (card: four 4K ROM pages, 32K RAM in 1K pages, CRU latch; chip: an HDC9234 at sector level, driven by a register file and DMA into the card's RAM; density from the clock-divider bits) | `roms/hfdc_dsr.u34` |
 
 `python3 tools/skdisk.py out.dsk ... --geometry dsdd` writes a 360K disk (`sssd`, `dssd`, `ssdd`, `dsdd`). Tests: `fileapi` runs every routine on the TI card (90K) and the
-CorComp card (360K) alike, and `dsdd` reads a file that lies on the second side, writes a new one there and checks the catalog's size, on both double-density cards. What the CorComp card's CRU bits
+CorComp card (360K) alike, and `dsdd` reads a file that lies on the second side, writes a new one there and checks the catalog's size, on the three double-density cards; `dsddworkbench` assembles on the TI from a 360K disk through each of them; `hfdccru` checks the CRU bit order the HFDC's paging uses. What the CorComp card's CRU bits
 do (0 ROM, 1 motor strobe, 3 head load, 4-6 and 8 drive select, 7 side, 11 ROM bank; bit 9 reads 1 when the motor is stopped; bit 10 probably density, not used by the model)
 was worked out from its ROM and the ROM then ran correctly; the card's own documentation was not available. **Not tried:** a real CorComp or Myarc card.
-The simulated CPU gained the `X` instruction for this (the CorComp ROM uses it).
+The simulated CPU gained the `X` instruction for this (the CorComp ROM uses it) and `B Rn` now branches to the register's own address (the Myarc DDCC-1's bank switch runs code in the registers).
+
+**Catalog records differ between controllers.** A catalog opened with an explicit record length of 38 is refused (error 2) by the Myarc HFDC, which wants 0, and the HFDC writes up to 146 bytes per record where TI's controller writes 38: `FCATOP`, the disk browser and the workbench open with length 0 and give it 150 bytes or more. A missing file opened for input answers 2 on TI's controller and the CorComp, 7 on both Myarc cards.
 
 ## TIPI and other DSR cards
 

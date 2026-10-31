@@ -51,8 +51,8 @@ BCAT   .enter
        CLR  R0
        MOVB R0,@DNAME
        LI   R2,SDSK            the device alone: the catalog
-       LI   R0,FIN+FINTL       INTERNAL, FIXED, input
-       LI   R1,38
+       LI   R0,FIN+FINTL       INTERNAL, input
+       CLR  R1                 length 0: the DSR's own (HFDC refuses 38)
        BL   @FOPEN
        MOV  R0,R0
        JEQ  BC0
