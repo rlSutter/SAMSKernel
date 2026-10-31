@@ -1,9 +1,10 @@
 # Changes
 
-## 1.16.1 (unreleased)
+## 1.16.1 (31 October 2026)
 
 - **The kernel no longer runs a TIPI's power-up routine** (`DSRPWR`). Found by reading the real TIPI DSR ROM (js99er's copy of it, 2025): at `>1000` and `>1200` its power-up does nothing but pulse CRU bit 1, the Pi's RESET line, and return; only at `>1100` (standing in for the disk controller) does it make buffers. The console has already done that at start-up, so running it again at the program's first file call gained nothing and made the Pi drop its session: js99er's TIPI emulation closes its websocket on a RESET and holds the CPU until it reconnects. A TIPI is recognised by its first device name (`TIPI`), and one at `>1100` is still powered. Since 1.6.0 the kernel had powered every card on the belief that a TIPI needed it; that rested on a model of a TIPI, not its ROM. The TI controller (and CorComp, Myarc, HFDC, CF7+) are powered as before. The kernel grows by 42 bytes (6,678).
 - The simulator's TIPI model now lists `TIPI` as its first device, as the real card does; the `tipi` test expects it not to be powered.
+- **Not shown to fix a freeze reported in js99er** (the workbench stays frozen after being chosen from the menu with TIPI emulation on): the workbench makes no file call and touches no card at start-up (checked in the simulator), so that freeze is probably elsewhere; js99er's TIPI setting (`Mouse` at `>1200` without a websocket, or `Full` at `>1000` with one) and whether `hello8.bin` freezes the same way are not known yet.
 - **Open:** the real TIPI DSR also claims the names `DSK0`-`DSK9` and `DSK`, ahead of a disk controller at a higher CRU address, and asks the Pi about them: with TIPI emulation on but no Pi (no websocket proxy) behind it, any `DSKn` access waits for a reply that never comes, in any program.
 
 ## 1.16.0 (31 October 2026)

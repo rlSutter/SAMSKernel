@@ -374,7 +374,7 @@ find the device named in the PAB and call its DSR (from The Lantern Coast).  >83
 
 ### `DSRPWR` *(internal)*
 
-run the power-up routines of every card, as the console does when it starts (the kernel has reset VRAM since, so the controller's buffers at the top of VRAM must be made again): VRAM's top is set to >3FFF, then each card in CRU order (>1000 up) with a valid header has its power-up list run, and the bottom the buffers reached is kept (FD70).  A TIPI at >1000 and a TI controller at >1100 are both powered, whichever is used first.  Uses R0-R3, R12.
+run the power-up routines of every card, as the console does when it starts (the kernel has reset VRAM since, so the controller's buffers at the top of VRAM must be made again): VRAM's top is set to >3FFF, then each card in CRU order (>1000 up) with a valid header has its power-up list run, and the bottom the buffers reached is kept (FD70).  A TI controller at >1100 is powered whichever device is used first.  A TIPI is NOT powered here: its power-up routine (its DSR's own: >1000 and >1200 do nothing else) pulses the Pi's RESET line and returns, which the console already did at start-up and which only disturbs the Pi's session now (js99er's TIPI closes its websocket and holds the CPU until it reconnects); only a TIPI at >1100, standing in for the disk controller, has buffers to make, and that one is powered.  A TIPI is recognised by its first device name, TIPI.  Uses R0-R3, R12.
 
 ### `DLGPL` *(internal)*
 
