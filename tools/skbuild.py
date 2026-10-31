@@ -267,7 +267,7 @@ def main():
             banks.append((nb, d['_page'] + 2 * c))
             nb += 1
     write_cfg(app, bdir, banks, pgfree)
-    incs = [appdir, bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen')]
+    incs = [appdir, bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen'), os.path.join(ROOT, 'lib')]
     kincs = [bdir, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen')]    # the kernel never sees the application's files
     ksrc = os.path.join(ROOT, 'kernel')
     equ = os.path.join(bdir, 'kernel.equ')

@@ -27,6 +27,7 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 | 10 | `images/workbench8.bin` with `images/workbench.dsk` in DSK1: N `DSK1.HELLO/A99` ENTER, A, then R | "Assembled: 194 bytes at >C000", then the hello program; **time the assembly with a watch and tell me** (the simulator ran 1.9 million instructions); then restart (hello has no way back) and `BEEP/A99`: A, R, keys 1-8 play a scale, FCTN 9 returns to the workbench | the time; any error list; a hang |
 | 11 | In the workbench: E on `HELLO/A99`, type a line, CTRL S, CTRL A | the edit saves and re-assembles; a mistyped mnemonic is reported with its line | an editor key that does the wrong thing |
 | 12 | Cards above 1M, if you have one: step 2 again, then 6 and 10 | the page count is right and everything else as before | the first thing that differs |
+| 12a | In the workbench: N `DSK1.ASK/A99` ENTER, A, R; type `ann` ENTER, `bob` ENTER, then FCTN E | `Hello, ANN`, `Hello, BOB`; FCTN E puts BOB back in the field; the arrows, FCTN 1, CTRL H and FCTN 2 edit; FCTN 9 returns | a key that does the wrong thing (name it), a field that does not redraw cleanly |
 
 **TIPI steps** (if you have one; each is **[TI]**):
 

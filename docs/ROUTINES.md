@@ -418,7 +418,7 @@ is the file named by R2 ('DSK1.NAME') on the device?  R0 = 0 if it is, FENOFI (7
 
 ### `FEXCAT`
 
-is the file named by R2 ('DSK1.NAME') on the disk, found by reading the catalog (FCATOP, FCATNX)? R0 = 0 if it is, FENOFI (7) if it is not, else the error (>FF: no such device or no dot in the name; or the catalog of that device cannot be read).  FEXIST uses it for a device that does not answer STATUS.  It uses file handle 2 for a moment (keep it free) and puts the selected handle back.  Uses R0-R9.
+is the file named by R2 ('DSK1.NAME') on the disk, found by reading the catalog (FCATOP, FCATNX)? R0 = 0 if it is, FENOFI (7) if it is not, else the error (>FF: no such device or no dot in the name; or the catalog of that device cannot be read).  FEXIST uses it for a device that does not answer STATUS.  It uses file handle 2 for a moment (keep it free) and puts the selected handle back.  Uses R0-R9.  It needs 220 bytes of the 256-byte stack (the Myarc HFDC writes 146 bytes per catalog record): called from code that has used more than 36 bytes of it, it answers >FF rather than overrun it.
 
 ## Music and sound (music.a99)
 
@@ -445,3 +445,57 @@ advance the song one frame.  The main loop calls it every frame; call it yoursel
 ### `SNDTONE`
 
 set a tone voice directly (sound effects, or music of your own). R0 = the voice 0-2, R1 = the divider 1-1023 (frequency = 111,861 / divider Hz), R2 = the attenuation 0-15 (0 loudest, 15 off).  While a song plays its voices would overwrite yours: use a voice the song does not.  Leaf. Uses R0-R4.
+
+## Optional include: line editing (lib/linein.a99; COPY it into your module)
+
+### `LINEIN`
+
+read a line of text at a screen position. R0 = the position of the field's first cell (row * columns + column) R1 = the buffer: a length-prefixed string, which holds the text to start with (length byte 0: an empty line) and the edited line at the end R2 = the attribute (high byte) of the text; the cursor is its swap R3 = the longest the line may be, 1 to 79 (more is taken as 79); the buffer must have room for a length byte and that many characters, and the field one cell more than that, on the screen's row R4 = a history page from the pool, or 0 for no history Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it is not put back as it was); only ENTER adds the line to the history. Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
+
+### `LNDRAW` *(internal)*
+
+draw the field: the text, blanks to the end of the field and one cell more, the text's attribute over all of that, then the cursor.
+
+### `LNBLK` *(internal)*
+
+R0 = the cell after the text, R2 = the cells from there to one past the end of the field.  Leaf (R0, R2, R3).
+
+### `LNLEN` *(internal)*
+
+R2 = the length of the text in the buffer.  Leaf.
+
+### `LNSETL` *(internal)*
+
+put the length R2 in the buffer's length byte.  Leaf (R5).
+
+### `LNHMAP` *(internal)*
+
+save slot B's pages in the frame and map the history page in >F000.
+
+### `LNHUNM` *(internal)*
+
+put slot B back as LNHMAP found it.
+
+### `LNHCNT` *(internal)*
+
+R4 = how many lines the page holds; a page that has not been set up is set up empty first.  Leaf.
+
+### `LNHADR` *(internal)*
+
+R6 -> the R5-th newest line (R5 = 1 is the newest).  Uses R6, R7.
+
+### `LNHSL` *(internal)*
+
+R6 = a slot number, 0-49: R6 -> that slot.  Uses R6, R7.
+
+### `LNHGET` *(internal)*
+
+copy the line at R6 into the buffer (cut to the field's length) and put the cursor at its end.  Uses R2, R3, R6, R7.
+
+### `LNPUT` *(internal)*
+
+copy the buffer (length byte and text) to the address in R7. Uses R3, R6, R7.  Leaf.
+
+### `LNHADD` *(internal)*
+
+add the buffer to the history unless it is the same as the newest line there.  The ring: slot NEXT is written, NEXT moves on (wrapping at 50), the count grows to 50 and stays there.

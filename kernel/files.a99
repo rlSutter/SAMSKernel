@@ -760,9 +760,18 @@ FX9    .pop R1
 * device
 * cannot be read).  FEXIST uses it for a device that does not answer STATUS.  It
 * uses file handle 2 for a moment (keep it free) and puts the selected handle
-* back.  Uses R0-R9.
+* back.  Uses R0-R9.  It needs 220 bytes of the 256-byte stack (the Myarc HFDC
+* writes 146 bytes per catalog record): called from code that has used more
+* than 36 bytes of it, it answers >FF rather than overrun it.
 FEXCAT .enter
-       MOV  R2,@FEXN
+* the frame below takes 192 bytes of the 256-byte stack and the calls under it
+* about 28 more: with less room than that, say 'cannot be read' (>FF)
+       CI   R10,APPTOP+220
+       JHE  FEX00
+       LI   R0,>00FF
+       .leave
+       RT
+FEX00  MOV  R2,@FEXN
        MOV  @FSELH,R0
        .push R0
        LI   R0,2

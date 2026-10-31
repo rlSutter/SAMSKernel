@@ -377,6 +377,43 @@ Text 40 and Graphics I; in Graphics II, Multicolor and the sprite and layer work
 (priority, flips, transparency, palette select), not a pair of colour roles; and **Graphics II uses the VRAM the file service needs**, so do not read or write files while it shows.
 `examples/modes` has a screen for every mode and VIDEO-MODES.md explains each, with pictures.
 
+### Reading a line: `LINEIN`
+
+**[PC or TI]** A prompt (a command line, a file name, a search string) is one call to `LINEIN`, a line editor that
+is an **optional include**, not part of the kernel (the kernel has about a kilobyte to spare, and most programs
+never ask for a line). Put `COPY "linein.a99"` after your module's code: **[PC]** the build finds it in `lib/`;
+**[TI]** put `LINEIN/A99` on the disk beside your program (the workbench disks carry it). It costs about 900
+bytes of that module's space, needs the `kernel.equ` and `macros.a99` your module already copies, and every label in it
+begins `LN`. A program of several modules includes it in each module that prompts, since a module cannot see another's
+labels. **[TI]** `programs/ask.a99` asks for a name and greets it, with a history: assemble it with `A` and run it with `R`.
+
+```
+       LI   R0,5*COLS+14      where the field starts (row * columns + column)
+       LI   R1,NAMBUF         the buffer: a length byte, then the characters
+       LI   R2,ABOLD          the text's attribute (high byte)
+       LI   R3,30             the longest the line may be (1-79)
+       MOV  @HPAGE,R4         a history page from the pool, or 0 for none
+       BL   @LINEIN           R0 = KENTER, KBACK or KQUIT
+```
+
+The buffer is edited **in place** and may hold a start text (length byte 0 for an empty line); the field on the screen is
+the longest length plus one cell, on one row. The user types characters in (or over what is there: FCTN 2, INS, switches
+between insert and overtype), moves with the left and right arrows, BEGIN and PROC'D (start and end), deletes with DEL
+(under the cursor) and CTRL H (before it), and empties the line with ERASE. ENTER, BACK (FCTN 9) and QUIT (FCTN =) end it:
+`R0` says which. With BACK or QUIT the buffer holds what had been typed so far; the program decides what that means.
+`LINEIN` waits for keys itself (`KWAIT`), so your `TICK` does not run during it: call it from `INIT`, or from a `TICK`
+that has just received the key that starts the prompt. The cursor is the cell drawn with the text's two colour roles
+swapped, so it shows in the modes that have an attribute table.
+
+**The history.** Ask the pool for one page (`PINIT`, `PALLOC`) and pass its number in `R4` on every call; keep the page
+between calls and give it back (`PRELS`) when you have finished. `LINEIN` stores each non-empty line that ENTER ends (not
+a repeat of the line before it) in a ring of 50 lines, and the up and down arrows bring older and newer ones back into the
+buffer; going down past the newest brings back the line as it was typed. A page that does not hold a history yet is set
+up on first use (nothing needs clearing); the page layout is in `lib/linein.a99`. `LINEIN` maps the page into window
+`>F000` for a moment each time it reads or writes it and puts slot B back as it found it. Under the workbench the pool
+is yours to set up as `paging.a99` shows. It uses about 60 bytes of the software stack, `R0-R8` and `R12`; `R9` comes back
+as it was.
+
 ### The cursor
 
 There is no hardware cursor: draw one by giving a cell the accent attribute
@@ -932,7 +969,7 @@ overwrite the workbench's own state (WORKBENCH.md part 5).
   (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite
   library, no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.
 - Sound: a music player and tone effects (MUSIC.md), but no envelopes, no effect mixer and no priorities; the console's sound lists are available, unmixed with the player.
-- No heap, no text-editing engine, no menus: those are applications (Press has an editor built on the
+- No heap, no menus and no full-screen text editor (an optional line editor, `lib/linein.a99`, comes with it): those are applications (Press has an editor built on the
   ancestor of this kernel; see FROM-PRESS.md).
 - At most three files open at once (the controller's three buffers); no relative-record files beyond what the PAB offers, no file-size query.
 - Joysticks are read, but only as direction-and-fire switches (no analog, no presence test, no calibration).

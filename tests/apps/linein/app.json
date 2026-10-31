@@ -1,0 +1,7 @@
+{
+  "name": "LINEIN TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "lin", "source": "lin.a99"}
+  ]
+}

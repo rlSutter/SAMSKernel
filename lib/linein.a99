@@ -1,0 +1,432 @@
+*======================================================================
+* linein.a99 - LINEIN: edit one line of text on the screen  (an OPTIONAL
+* INCLUDE: it is not part of the kernel)
+*
+* To use it, COPY it into the module that calls it, after that module's code
+* (it has no AORG and no END; it needs the kernel.equ and macros.a99 your
+* module already copies, and costs about 900 bytes of the module's space):
+*
+*       COPY "linein.a99"
+*
+* On the PC route the build finds it in lib/; on the TI, put LINEIN/A99 on
+* the same disk as the program.  Every label in it begins LN, so it will not
+* meet yours unless you name labels that way; a program of several modules
+* includes it in each module that calls it (a module cannot see another's
+* labels).
+*
+* The routine behind every prompt: a command line, a file name, a search
+* string.  The program says where the field is, what text is in it to begin
+* with and how long it may grow; the user types and edits with the TI's
+* function keys until ENTER (or BACK) ends it; the edited text is in the
+* program's buffer.  A page from the pool, given to it, makes it remember the
+* lines that were entered and bring them back with the up and down arrows.
+*======================================================================
+* HOW IT WORKS.  The buffer is edited IN PLACE: a length-prefixed string (a
+* length byte, then the characters), the same shape PUTS draws, so the
+* routine draws the field by handing the buffer to PUTS.  The state (where
+* the cursor is, which mode, how far back in the history) is kept in a frame
+* of words on the software stack, found by R9: the screen routines it calls
+* (PUTS, FILLN, FILLA, KWAIT) change R0-R8 and R12, so nothing that must last
+* is left in those registers.  Every key redraws the whole field: the text,
+* blanks over the rest of it, the text's attribute over all of it, and the
+* cursor cell in the attribute with its two colour roles swapped.
+*
+* THE HISTORY.  The caller gives a pool page (PALLOC) in R4 and keeps it
+* between calls; LINEIN maps it into window >F000 for a moment whenever it
+* reads or writes it (GETPB and SETPB put slot B back as it was), so the
+* program's own pages are never left changed.  The page is laid out:
+*       >F000  the word >A55A once the page has been set up (a page that does
+*              not begin with it is taken to be empty and is set up)
+*       >F002  how many lines it holds, 0-50
+*       >F004  the slot the next line goes in (0-49): the lines are a ring,
+*              the oldest overwritten by the 51st
+*       >F008  the line being typed, kept while the arrows show older ones
+*       >F060  the 50 slots, 80 bytes each: a length byte and up to 79
+*              characters (which is why the field is at most 79 long)
+* A line that is entered is added if it is not empty and not the same as the
+* one before it.  Up (FCTN E) steps back to an older line, down (FCTN X)
+* forward again, and past the newest the line as it was typed comes back.
+*
+* THE KEYS.  Printable characters are typed in at the cursor (INSERT mode: the
+* rest of the line moves right) or over what is there (OVERTYPE: FCTN 2, INS,
+* switches); left and right arrows (FCTN S, FCTN D) move the cursor; BEGIN
+* (FCTN 5) and PROC'D (FCTN 6) go to the start and the end; DEL (FCTN 1)
+* deletes the character under the cursor and CTRL H the one before it; ERASE
+* (FCTN 3) empties the line.  ENTER, BACK (FCTN 9) and QUIT (FCTN =) end it.
+* Any other key is ignored.
+*======================================================================
+
+* LINEIN - read a line of text at a screen position.
+*   R0 = the position of the field's first cell (row * columns + column)
+*   R1 = the buffer: a length-prefixed string, which holds the text to start
+*        with (length byte 0: an empty line) and the edited line at the end
+*   R2 = the attribute (high byte) of the text; the cursor is its swap
+*   R3 = the longest the line may be, 1 to 79 (more is taken as 79); the
+*        buffer must have room for a length byte and that many characters, and
+*        the field one cell more than that, on the screen's row
+*   R4 = a history page from the pool, or 0 for no history
+* Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high
+* byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it
+* is not put back as it was); only ENTER adds the line to the history.
+* Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
+LINEIN .enter
+       .push R9
+       AI   R10,-22            the frame: 11 words, R9 points at it
+       MOV  R10,R9
+       MOV  R0,*R9             +0  the position
+       MOV  R1,@2(R9)          +2  the buffer
+       MOV  R2,@4(R9)          +4  the attribute
+       CI   R3,79              at most 79: a history line is 80 bytes
+       JLE  LNI0
+       LI   R3,79
+LNI0    MOV  R3,@6(R9)          +6  the longest line
+       MOV  R4,@8(R9)          +8  the history page (0: none)
+       CLR  @12(R9)            +12 how far back in the history (0: as typed)
+       SETO @14(R9)            +14 insert mode (non-zero) or overtype (0)
+*                              +10 the cursor: 0 is before the first character
+*                              +16 the key that ended it, +18 and +20 slot B
+       BL   @LNLEN             a start text longer than the field is cut
+       C    R2,R3
+       JLE  LNI1
+       MOV  R3,R2
+       BL   @LNSETL
+LNI1    MOV  R2,@10(R9)         the cursor starts at the end of the text
+LNI2    BL   @LNDRAW
+       BL   @KWAIT
+       MOV  R0,@16(R9)
+       CI   R0,KENTER*256
+       JEQ  LNI9
+       CI   R0,KBACK*256
+       JEQ  LNI9
+       CI   R0,KQUIT*256
+       JEQ  LNI9
+       CI   R0,>2000           a printable character?
+       JL   LNI3
+       CI   R0,>7F00
+       JL   LNCH
+LNI3    LI   R1,LNTAB           a function key: the table of handlers
+LNI4    MOV  *R1+,R2
+       JEQ  LNI2                the end of the table: not a key we use
+       C    R2,R0
+       JEQ  LNI5
+       INCT R1
+       JMP  LNI4
+LNI5    MOV  *R1,R1
+       B    *R1
+* ENTER, BACK or QUIT: the line is done
+LNI9    CI   R0,KENTER*256
+       JNE  LNI10
+       MOV  @8(R9),R0          a history, and something typed: keep the line
+       JEQ  LNI10
+       BL   @LNLEN
+       MOV  R2,R2
+       JEQ  LNI10
+       BL   @LNHADD
+LNI10   MOV  @16(R9),R0
+       AI   R10,22
+       .pop R9
+       .leave
+       RT
+
+* The keys that act (a key's code in the high byte, the handler's address).
+LNTAB  DATA KLEFT*256,LNLFT
+       DATA KRIGHT*256,LNRGT
+       DATA KBEGIN*256,LNHOM
+       DATA KPROC*256,LNEND
+       DATA KDEL*256,LNDEL
+       DATA >8800,LNBS         CTRL H
+       DATA KERASE*256,LNERA
+       DATA KINS*256,LNTOG
+       DATA KUP*256,LNUP
+       DATA KDOWN*256,LNDWN
+       DATA 0
+
+* Move the cursor, switch the mode, empty the line.
+LNLFT  MOV  @10(R9),R1
+       JEQ  LNTA
+       DEC  R1
+       MOV  R1,@10(R9)
+       JMP  LNTA
+LNRGT  BL   @LNLEN
+       C    @10(R9),R2
+       JHE  LNTA                already at the end
+       INC  @10(R9)
+       JMP  LNTA
+LNHOM  CLR  @10(R9)
+       JMP  LNTA
+LNEND  BL   @LNLEN
+       MOV  R2,@10(R9)
+       JMP  LNTA
+LNTOG  INV  @14(R9)
+       JMP  LNTA
+LNERA  CLR  R2
+       BL   @LNSETL
+       CLR  @10(R9)
+       JMP  LNTA
+
+LNTA   B    @LNI2
+
+* Delete: CTRL H steps left and then deletes; DEL deletes the character under
+* the cursor, the rest of the line moving left over it.
+LNBS   MOV  @10(R9),R1
+       JEQ  LNTB
+       DEC  R1
+       MOV  R1,@10(R9)
+LNDEL  BL   @LNLEN             R2 = the length
+       MOV  @10(R9),R1         R1 = the cursor
+       C    R1,R2
+       JHE  LNTB                nothing under it
+       MOV  @2(R9),R3
+       A    R1,R3
+       INC  R3                 R3 -> the character under the cursor
+       MOV  R3,R4
+       INC  R4                 R4 -> the one after it
+       S    R1,R2
+       DEC  R2                 how many characters follow it
+       JEQ  LND2
+LND1   MOVB *R4+,*R3+
+       DEC  R2
+       JNE  LND1
+LND2   BL   @LNLEN
+       DEC  R2
+       BL   @LNSETL            one shorter
+       JMP  LNTB
+
+LNTB   B    @LNI2
+
+* A printable character (its code is in the high byte of the frame's +16):
+* typed over what is there in overtype mode, else in, the rest moving right.
+LNCH   BL   @LNLEN             R2 = the length
+       MOV  @10(R9),R1         R1 = the cursor
+       MOV  @14(R9),R3
+       JNE  LNC1               insert mode
+       C    R1,R2
+       JL   LNC3               overtype, and not past the end: replace
+LNC1   C    R2,@6(R9)
+       JHE  LNTC                no room: the key is ignored
+       MOV  @2(R9),R4
+       A    R2,R4              R4 -> the last character
+       MOV  R4,R5
+       INC  R5                 R5 -> the cell after it
+       MOV  R2,R6
+       S    R1,R6              how many characters move right
+       JEQ  LNC2
+LNC0   MOVB *R4,*R5
+       DEC  R4
+       DEC  R5
+       DEC  R6
+       JNE  LNC0
+LNC2   INC  R2
+       BL   @LNSETL            one longer
+LNC3   MOV  @2(R9),R4
+       A    R1,R4
+       MOVB @16(R9),@1(R4)     the character, at the cursor
+       INC  R1
+       MOV  R1,@10(R9)
+       JMP  LNTC
+
+LNTC   B    @LNI2
+
+* The history: up (FCTN E) to an older line, down (FCTN X) to a newer one.
+* Leaving the line as typed saves it in the page; coming back restores it.
+LNUP   MOV  @8(R9),R0
+       JEQ  LNTD                no history
+       BL   @LNHMAP
+       BL   @LNHCNT            R4 = how many lines the page holds
+       MOV  @12(R9),R5         R5 = how far back we are
+       C    R5,R4
+       JHE  LNU2               at the oldest already
+       MOV  R5,R5
+       JNE  LNU1
+       LI   R7,>F008           leaving the typed line: keep it
+       BL   @LNPUT
+LNU1   INC  R5
+       MOV  R5,@12(R9)
+       BL   @LNHADR            R6 -> the R5-th newest line
+       BL   @LNHGET
+LNU2   BL   @LNHUNM
+       JMP  LNTD
+LNDWN  MOV  @8(R9),R0
+       JEQ  LNTD
+       MOV  @12(R9),R5
+       JEQ  LNTD                already at the typed line
+       BL   @LNHMAP
+       DEC  R5
+       MOV  R5,@12(R9)
+       JNE  LND3
+       LI   R6,>F008           back to the line as typed
+       JMP  LND4
+LND3   BL   @LNHADR
+LND4   BL   @LNHGET
+       BL   @LNHUNM
+       JMP  LNTD
+
+LNTD   B    @LNI2
+
+* LNDRAW - draw the field: the text, blanks to the end of the field and one
+* cell more, the text's attribute over all of that, then the cursor.
+LNDRAW .enter
+       MOV  *R9,R0
+       MOV  @2(R9),R1
+       MOV  @4(R9),R2
+       BL   @PUTS              the text
+       BL   @LNBLK             R0 = the first cell after it, R2 = how many cells
+       LI   R1,>2000
+       BL   @FILLN             blanks
+       BL   @LNBLK
+       MOV  @4(R9),R1
+       BL   @FILLA             the attribute
+       MOV  @4(R9),R1          the cursor: the attribute with its roles swapped
+       MOV  R1,R3
+       MOV  R1,R4
+       SLA  R3,4
+       SRL  R4,4
+       SOC  R4,R3
+       MOV  R3,R1
+       MOV  *R9,R0
+       A    @10(R9),R0
+       LI   R2,1
+       BL   @FILLA
+       .leave
+       RT
+
+* LNBLK - R0 = the cell after the text, R2 = the cells from there to one past
+* the end of the field.  Leaf (R0, R2, R3).
+LNBLK  MOV  @2(R9),R2
+       MOVB *R2,R2
+       SRL  R2,8
+       MOV  *R9,R0
+       A    R2,R0
+       MOV  @6(R9),R3
+       S    R2,R3
+       INC  R3
+       MOV  R3,R2
+       RT
+
+* LNLEN - R2 = the length of the text in the buffer.  Leaf.
+LNLEN  MOV  @2(R9),R2
+       MOVB *R2,R2
+       SRL  R2,8
+       RT
+
+* LNSETL - put the length R2 in the buffer's length byte.  Leaf (R5).
+LNSETL MOV  @2(R9),R5
+       SWPB R2
+       MOVB R2,*R5
+       SWPB R2
+       RT
+
+* ---- the history page (every one of these has the page mapped at >F000) ----
+
+* LNHMAP - save slot B's pages in the frame and map the history page in >F000.
+LNHMAP .enter
+       BL   @GETPB
+       MOV  R0,@18(R9)
+       MOV  R1,@20(R9)
+       MOV  @8(R9),R0
+       BL   @MAPF
+       .leave
+       RT
+
+* LNHUNM - put slot B back as LNHMAP found it.
+LNHUNM .enter
+       MOV  @18(R9),R0
+       MOV  @20(R9),R1
+       BL   @SETPB
+       .leave
+       RT
+
+* LNHCNT - R4 = how many lines the page holds; a page that has not been set
+* up is set up empty first.  Leaf.
+LNHCNT MOV  @>F000,R4
+       CI   R4,>A55A
+       JEQ  LNK1
+       LI   R4,>A55A
+       MOV  R4,@>F000
+       CLR  @>F002
+       CLR  @>F004
+LNK1   MOV  @>F002,R4
+       RT
+
+* LNHADR - R6 -> the R5-th newest line (R5 = 1 is the newest).  Uses R6, R7.
+LNHADR MOV  @>F004,R6          the slot the next line goes in
+       S    R5,R6              the newest is the one before it
+       JLT  LNA1
+       B    @LNHSL
+LNA1   AI   R6,50              (the ring wraps)
+       B    @LNHSL
+
+* LNHSL - R6 = a slot number, 0-49: R6 -> that slot.  Uses R6, R7.
+LNHSL  MPY  @LNC80,R6          R6:R7 = the slot * 80
+       AI   R7,>F060
+       MOV  R7,R6
+       RT
+LNC80  DATA 80
+
+* LNHGET - copy the line at R6 into the buffer (cut to the field's length) and
+* put the cursor at its end.  Uses R2, R3, R6, R7.
+LNHGET MOVB *R6+,R2
+       SRL  R2,8
+       C    R2,@6(R9)
+       JLE  LNG1
+       MOV  @6(R9),R2          too long for this field: cut
+LNG1   MOV  @2(R9),R7
+       MOV  R2,R3
+       SWPB R3
+       MOVB R3,*R7+            the length byte
+       MOV  R2,R3
+       MOV  R2,@10(R9)         the cursor at the end
+       JEQ  LNG3
+LNG2   MOVB *R6+,*R7+
+       DEC  R3
+       JNE  LNG2
+LNG3   RT
+
+* LNPUT - copy the buffer (length byte and text) to the address in R7.
+* Uses R3, R6, R7.  Leaf.
+LNPUT  MOV  @2(R9),R6
+       MOVB *R6,R3
+       SRL  R3,8
+       INC  R3
+LNP1   MOVB *R6+,*R7+
+       DEC  R3
+       JNE  LNP1
+       RT
+
+* LNHADD - add the buffer to the history unless it is the same as the newest
+* line there.  The ring: slot NEXT is written, NEXT moves on (wrapping at 50),
+* the count grows to 50 and stays there.
+LNHADD .enter
+       BL   @LNHMAP
+       BL   @LNHCNT            R4 = the lines held
+       MOV  R4,R4
+       JEQ  LNL2               none: nothing to compare with
+       LI   R5,1
+       BL   @LNHADR            R6 -> the newest
+       MOV  @2(R9),R7
+       MOVB *R7,R3
+       SRL  R3,8
+       INC  R3
+LNL1   CB   *R6+,*R7+
+       JNE  LNL2
+       DEC  R3
+       JNE  LNL1
+       JMP  LNL9               the same: not added again
+LNL2   MOV  @>F004,R6
+       BL   @LNHSL             R6 -> the slot to write
+       MOV  R6,R7
+       BL   @LNPUT
+       MOV  @>F004,R6
+       INC  R6
+       CI   R6,50
+       JL   LNL3
+       CLR  R6
+LNL3   MOV  R6,@>F004
+       MOV  @>F002,R6
+       CI   R6,50
+       JHE  LNL9
+       INC  R6
+       MOV  R6,@>F002
+LNL9   BL   @LNHUNM
+       .leave
+       RT

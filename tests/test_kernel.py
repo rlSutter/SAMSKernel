@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -520,6 +520,10 @@ def tiprograms():
     check('10 29 2026' in lines(m)[4] and '14 5  9' in lines(m)[4], 'clock: assembled on the TI, it reads a TIPI model\'s clock: %r' % lines(m)[4].strip())
     m, img = go('JOY/A99', [os.path.join(ROOT, 'examples/joystick/joy.a99')], '<J1-FIRE><WAIT 8><J1-FIRE><WAIT 8>', 2800)
     check(m.rw(0x2300 + 5760) == 2, 'joystick: the program assembled on the TI counts two fire presses (%d)' % m.rw(0x2300 + 5760))
+    m, img = go('ASK/A99', [P + 'ask.a99', os.path.join(ROOT, 'lib', 'linein.a99')], 'ann<ENTER><WAIT 40>bob<ENTER><WAIT 40><F-E><WAIT 40>', 3300)
+    ln = lines(m)
+    check('Hello, BOB' in ln[8] and ln[5].strip().endswith('BOB'),
+          'ask: assembled on the TI with LINEIN/A99 included from its disk, LINEIN reads two names, greets them, and UP brings the last one back into the field: %r, %r' % (ln[8].strip(), ln[5].strip()))
 
 DISK_SOURCES_PLACEHOLDER = None
 
@@ -1148,6 +1152,136 @@ def hfdccru():
     b = (card.cru[3], card.cru[4], card.rom_page)
     check(a == b == (0, 1, 1), 'SBZ 3 + SBO 4 and LDCR R1,2 (R1=>0200) at bit 3 are the same: CRU 3=0, 4=1, ROM page 1 (%s, %s)' % (a, b))
 
+def linein():
+    """LINEIN, the line editor (lib/linein.a99, an optional include, carried by the module of tests/apps/linein): typing, the cursor and function keys, insert and overtype, the length
+    limit, the screen it draws (text, blanks, the cursor in swapped colours), ENTER and BACK, and the history in a pool page:
+    older and newer lines, the line as typed coming back, a repeated line stored once, the ring of 50, slot B and the
+    registers left as they were."""
+    import asmharness
+    c = build('tests/apps/linein')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'linein', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'linein', 'lin.equ')))      # the module's own: LINEIN and its helpers
+    check('linein' in syms and syms['linein'] >= 0xC000 and syms['linein'] < 0xD000, 'LINEIN is in the module, not the kernel (>%04X)' % syms.get('linein', 0))
+    NAMES = {'ENTER': 0x0D, 'BACK': 0xF9, 'LEFT': 0xD3, 'RIGHT': 0xC4, 'HOME': 0xF5, 'END': 0xF6, 'DEL': 0xF1, 'BS': 0x88,
+             'ERASE': 0xF3, 'INS': 0xF2, 'UP': 0xC5, 'DOWN': 0xD8, 'F1': 0xB1}
+    def codes(s):
+        out, i = [], 0
+        while i < len(s):
+            if s[i] == '{':
+                j = s.index('}', i)
+                out.append(NAMES[s[i + 1:j]]); i = j + 1
+            else:
+                out.append(ord(s[i])); i += 1
+        return out
+    m = sim9900.Machine(c)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    W = 0x2300 + 3000
+    def run(keys, start='', maxlen=20, hist=0, pos=5 * 80 + 10, attr=0x2100):
+        for i, b in enumerate(bytes([len(start)]) + start.encode()):
+            m.wb(W + i, b)
+        ks = codes(keys)
+        for i, k in enumerate(ks):
+            m.wb(0x2040 + i, k)
+        m.ww(0x200E, len(ks)); m.ww(0x2010, 0)
+        r = asmharness.call(m, cpu, syms['linein'], {0: pos, 1: W, 2: attr, 3: maxlen, 4: hist, 9: 0x1234}, limit=50_000_000)
+        n = m.rb(W)
+        return r, bytes(m.rb(W + 1 + i) for i in range(n)).decode('latin-1')
+    def ok(keys, want, **kw):
+        r, got = run(keys, **kw)
+        return got == want, got
+    r, got = run('hello{ENTER}')
+    check(got == 'hello' and r[0] == 0x0D00, 'typing "hello" and ENTER gives the line and KENTER (%r, >%04X)' % (got, r[0]))
+    check(r[9] == 0x1234, 'R9 comes back as it was (>%04X)' % r[9])
+    cases = [
+        ('abcd{LEFT}{LEFT}X{ENTER}', 'abXcd', 'insert in the middle moves the rest right'),
+        ('abcd{LEFT}{LEFT}X{DEL}{ENTER}', 'abXd', 'DEL deletes the character under the cursor'),
+        ('abcd{LEFT}{LEFT}X{DEL}{BS}{ENTER}', 'abd', 'CTRL H deletes the one before it'),
+        ('abcd{HOME}Z{ENTER}', 'Zabcd', 'BEGIN goes to the start'),
+        ('abcd{HOME}{END}e{ENTER}', 'abcde', 'PROC\'D goes to the end'),
+        ('abcd{HOME}{INS}XY{ENTER}', 'XYcd', 'INS switches to overtype'),
+        ('abcd{HOME}{INS}{INS}X{ENTER}', 'Xabcd', 'INS again goes back to insert'),
+        ('abc{INS}{HOME}{RIGHT}{RIGHT}{RIGHT}XY{ENTER}', 'abcXY', 'overtype past the end appends'),
+        ('abcd{ERASE}xy{ENTER}', 'xy', 'ERASE empties the line'),
+        ('{BS}{DEL}{LEFT}ab{ENTER}', 'ab', 'delete and left on an empty line do nothing'),
+        ('abc{BS}{BS}{BS}{BS}x{ENTER}', 'x', 'CTRL H past the start stops there'),
+        ('ab{F1}c{ENTER}', 'abc', 'a key the editor does not use is ignored'),
+    ]
+    for keys, want, what in cases:
+        good, got = ok(keys, want)
+        check(good, 'LINEIN: %s (%r)' % (what, got))
+    good, got = ok('abcdefgh{ENTER}', 'abcde', maxlen=5)
+    check(good, 'the line stops at the longest length, 5 (%r)' % got)
+    good, got = ok('{LEFT}X{ENTER}', 'abcde', start='abcde', maxlen=5)
+    check(good, 'an insert into a full line is ignored (%r)' % got)
+    good, got = ok('d{ENTER}', 'abcd', start='abc')
+    check(good, 'a start text is kept and the cursor begins at its end (%r)' % got)
+    good, got = ok('{ENTER}', 'abcde', start='abcdefghij', maxlen=5)
+    check(good, 'a start text longer than the field is cut (%r)' % got)
+    good, got = ok('{ENTER}', 'x' * 79, start='x' * 100, maxlen=200)
+    check(good, 'a longest length over 79 is taken as 79: a 100-character start text is cut to %d' % len(got))
+    r, got = run('xy{BACK}')
+    check(r[0] == 0xF900 and got == 'xy', 'BACK ends it with KBACK, the text typed so far kept (>%04X, %r)' % (r[0], got))
+    # the screen
+    r, got = run('hi{ENTER}', maxlen=6, pos=7 * 80 + 4, attr=0x2100)
+    pos = 7 * 80 + 4
+    namb = m.rw(syms['nambas'])
+    atrt = syms['atrtab']
+    text = bytes(m.vram[namb + pos: namb + pos + 8]).decode('latin-1')
+    attrs = list(m.vram[atrt + pos: atrt + pos + 7])
+    check(text == 'hi      ', 'the screen shows the text then blanks over the field and one cell more (%r)' % text)
+    check(attrs == [0x21, 0x21, 0x12, 0x21, 0x21, 0x21, 0x21], 'the text and the blanks (to one cell past the field, 6 + 1) have the attribute, the cursor cell its swap >12: %s' % [hex(a) for a in attrs])
+    # the history
+    cpu_r = asmharness.call(m, cpu, syms['pinit'], {0: 0x40, 1: 0x60})
+    page = asmharness.call(m, cpu, syms['palloc'])[0]
+    page2 = asmharness.call(m, cpu, syms['palloc'])[0]
+    check(page != 0 and page2 != 0 and page != page2, 'the pool gives two pages for the tests (>%02X, >%02X)' % (page, page2))
+    for ln in ('one', 'two', 'three'):
+        run(ln + '{ENTER}', hist=page)
+    good, got = ok('{UP}{BACK}', 'three', hist=page)
+    check(good, 'UP brings back the newest line (%r)' % got)
+    good, got = ok('{UP}{UP}{BACK}', 'two', hist=page)
+    check(good, 'UP twice the one before (%r)' % got)
+    good, got = ok('{UP}{UP}{UP}{UP}{UP}{BACK}', 'one', hist=page)
+    check(good, 'UP past the oldest stays on the oldest (%r)' % got)
+    good, got = ok('par{UP}{UP}{DOWN}{DOWN}{BACK}', 'par', hist=page)
+    check(good, 'DOWN past the newest brings back the line as it was typed (%r)' % got)
+    good, got = ok('{UP}{UP}{DOWN}{BACK}', 'three', hist=page)
+    check(good, 'DOWN steps forward again (%r)' % got)
+    good, got = ok('{DOWN}x{BACK}', 'x', hist=page)
+    check(good, 'DOWN with nothing newer does nothing (%r)' % got)
+    good, got = ok('{UP}{HOME}Z{ENTER}', 'Zthree', hist=page)
+    check(good, 'a recalled line can be edited (%r)' % got)
+    # that edit was entered: it is the newest now; a repeat of it is stored once
+    run('Zthree{ENTER}', hist=page)
+    good, got = ok('{UP}{UP}{BACK}', 'three', hist=page)
+    check(good, 'the same line entered twice in a row is stored once: UP twice reaches the line before it (%r)' % got)
+    run('{ENTER}', hist=page)
+    good2, got2 = ok('{UP}{BACK}', 'Zthree', hist=page)
+    check(good2, 'an empty line is not stored: the newest is still Zthree (%r)' % got2)
+    # a line from the history is cut to a shorter field
+    good, got = ok('{UP}{BACK}', 'Zthr', hist=page, maxlen=4)
+    check(good, 'a recalled line is cut to the field (%r)' % got)
+    # the ring: 55 lines, only the newest 50 stay
+    for i in range(1, 56):
+        run('L%d{ENTER}' % i, hist=page2)
+    good, got = ok('{UP}' * 60 + '{BACK}', 'L6', hist=page2)
+    check(good, 'the history keeps the newest 50 of 55 lines: UP as far as it goes reaches L6 (%r)' % got)
+    good, got = ok('{UP}{BACK}', 'L55', hist=page2)
+    check(good, 'and the newest is L55 (%r)' % got)
+    # slot B and the stack
+    asmharness.call(m, cpu, syms['mape'], {0: 0x41})
+    asmharness.call(m, cpu, syms['mapf'], {0: 0x42})
+    before = (m.rw(syms['curbe']), m.rw(syms['curbf']))
+    r10 = m.rw(0x8314)
+    r, got = run('{UP}{DOWN}{UP}{ENTER}', hist=page)
+    after = (m.rw(syms['curbe']), m.rw(syms['curbf']))
+    check(before == after == (0x41, 0x42), 'slot B is as it was after history use: >E000 page >%02X, >F000 page >%02X' % after)
+    check(r[10] == r10, 'the software stack is balanced (R10 >%04X before, >%04X after)' % (r10, r[10]))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1295,7 +1429,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """lint80.py - are the sources safe to edit on a TI?
 
-    python3 tools/lint80.py [--fix] [FILE ...]      (no files: kernel/*.a99 and examples/*/*.a99)
+    python3 tools/lint80.py [--fix] [FILE ...]      (no files: kernel/*.a99, lib/*.a99 and examples/*/*.a99)
 
 A TI text file (DIS/VAR 80) holds 80 columns of ASCII, and an editor on the TI cuts, splits or refuses a longer
 line: a trailing comment would be lost, but a string or a DATA list would be damaged.  So every source line must be
@@ -108,7 +108,7 @@ def problems(path):
 
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    files = args or sorted(glob.glob(os.path.join(ROOT, 'kernel', '*.a99')) + glob.glob(os.path.join(ROOT, 'examples', '*', '*.a99')))
+    files = args or sorted(glob.glob(os.path.join(ROOT, 'kernel', '*.a99')) + glob.glob(os.path.join(ROOT, 'lib', '*.a99')) + glob.glob(os.path.join(ROOT, 'examples', '*', '*.a99')))
     files = [g for f in files for g in (sorted(glob.glob(os.path.join(f, '*.a99'))) if os.path.isdir(f) else [f])]
     bad = 0
     for f in files:

@@ -1,0 +1,14 @@
+*======================================================================
+* lin.a99 - a module that does nothing but carry lib/linein.a99, so that the
+* tests (tests/test_kernel.py, group linein) can call LINEIN in the simulator.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   RT
+TICK   RT
+
+       COPY "linein.a99"

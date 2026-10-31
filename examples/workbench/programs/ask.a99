@@ -1,0 +1,128 @@
+*======================================================================
+* ask.a99 - a program for the workbench's disk: asks for a name with LINEIN
+* and greets it, again and again.  Type, use the arrows and DEL, press ENTER;
+* the up and down arrows (FCTN E, FCTN X) bring back the names entered
+* before.  FCTN 9 returns to the workbench, FCTN = quits.  Assemble it with
+* A, run it with R.
+*======================================================================
+* LINEIN is an optional include, lib/linein.a99: the program COPYs it (the last
+* line of this file) and calls it as a routine.  It is handed four things: where
+* the field is on the screen (R0), the buffer that holds the text (R1: a
+* length byte, then the characters, the shape PUTS draws), the colours (R2)
+* and the longest the line may be (R3, at most 79).  LINEIN edits the buffer
+* in place until ENTER, BACK or QUIT and says which in R0.
+*
+* The history is a page of the pool.  A program that wants LINEIN to remember
+* lines asks the pool for one page (PINIT says which pages the pool may give,
+* PALLOC takes one) and passes its number in R4 on every call; the page is
+* the program's to give back (PRELS) when it has finished.  With R4 = 0
+* there is no history and the arrow keys do nothing.  LINEIN maps the page
+* only while it reads or writes it and puts the program's own windows back as
+* it found them, so nothing the program has mapped is disturbed.
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+
+* The pool starts above the workbench's own pages (see paging.a99).
+POOLP  EQU  PGFREE+30
+HPAGE  EQU  APPRAM             the history page (0: none)
+NAMBUF EQU  APPRAM+2           the line: a length byte and up to 30 characters
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,2*COLS+2
+       LI   R1,SHELP1
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,3*COLS+2
+       LI   R1,SHELP2
+       LI   R2,ANORM
+       BL   @PUTS
+* One page of the pool for the history.  If the pool is empty PALLOC answers
+* 0, and LINEIN then simply has no history.
+       LI   R0,POOLP
+       MOV  @NPAGES,R1
+       BL   @PINIT
+       BL   @PALLOC
+       MOV  R0,@HPAGE
+* The loop: ask, then greet.  The buffer starts empty each time (its length
+* byte 0); LINEIN's R0 on return says how the line ended.
+AS1    LI   R0,5*COLS+2
+       LI   R1,SPRMPT
+       LI   R2,ANORM
+       BL   @PUTS
+       CLR  R0
+       MOVB R0,@NAMBUF
+       LI   R0,5*COLS+14
+       LI   R1,NAMBUF
+       LI   R2,ABOLD
+       LI   R3,30
+       MOV  @HPAGE,R4
+       BL   @LINEIN
+       CI   R0,KENTER*256
+       JEQ  AS2
+       BL   @GIVEUP            BACK or QUIT: give the history page back
+       CI   R0,KQUIT*256
+       JNE  AS3
+       SETO @QUITF
+       JMP  AS9
+AS3    LI   R0,PG_WB           BACK: return to the workbench
+       CLR  R1
+       BL   @GOMOD
+       JMP  AS9
+* ENTER: clear the greeting's row, write "Hello, " and the name after it.
+AS2    LI   R0,8*COLS+2
+       LI   R1,>2000
+       LI   R2,60
+       BL   @FILLN
+       LI   R0,8*COLS+2
+       LI   R1,SHELLO
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,8*COLS+9
+       LI   R1,NAMBUF          PUTS takes the buffer as it is: a string
+       LI   R2,ABOLD
+       BL   @PUTS
+       JMP  AS1
+AS9    .leave
+       RT
+
+* GIVEUP - the history page goes back to the pool.  Keeps R0.
+GIVEUP .enter
+       .push R0
+       MOV  @HPAGE,R0
+       JEQ  GU9
+       BL   @PRELS
+GU9    .pop R0
+       .leave
+       RT
+
+* The program is all in INIT (LINEIN waits for keys itself), so a frame's
+* tick has nothing to do.
+TICK   RT
+
+STITLE STRI 'ASK - LINEIN, the kernel line editor'
+SHELP1 STRI 'Type a name and press ENTER.  Arrows, DEL, CTRL H and INS edit.'
+SHELP2 STRI 'FCTN E and FCTN X bring back earlier names.  FCTN 9: back.'
+SPRMPT STRI 'Your name:'
+SHELLO STRI 'Hello, '
+
+* The line editor itself, included here: on the TI the disk must hold LINEIN/A99
+* beside this program.
+       COPY "linein.a99"
+       END
