@@ -1,8 +1,10 @@
 *======================================================================
 * pool.a99 - a page pool: hand out and take back SAMS pages
 *
-* The kernel keeps a bitmap of up to 4096 pages (a bit per page, 1 = free: 512
-* bytes at POOLBM, in the kernel's own pages).
+* The kernel keeps a bitmap of up to POOLMX pages (a bit per page, 1 = free:
+* 512 bytes for the 4096 of a 16M card, at POOLBM, in the kernel's own pages;
+* an application that never pools more pages than it says in app.json's
+* "pool_max_pages" has a smaller bitmap and the kernel more room).
 * PINIT says which pages the pool manages (normally everything from
 * PGFREE, the first page the build leaves free, up to NPAGES, or less if
 * the application keeps some pages for itself).  PALLOC gives out the
@@ -25,12 +27,17 @@
 * (POOLUP) and docs/WORKBENCH.md.
 
 * PINIT - the pool manages pages R0 up to (not including) R1; all free.
-* Pages outside the range are never handed out.  Uses R0-R6.  Leaf.
+* Pages outside the range are never handed out, and none from POOLMX up (the
+* bitmap has no bit for them: app.json's "pool_max_pages", 4096 by default).
+* Uses R0-R6.  Leaf.
 PINIT  MOV  R11,R6
-       MOV  R0,@POOLLO
+       CI   R1,POOLMX          no page the bitmap has no bit for
+       JLE  PI0
+       LI   R1,POOLMX
+PI0    MOV  R0,@POOLLO
        MOV  R1,@POOLHI
        LI   R2,POOLBM          clear the bitmap
-       LI   R3,256
+       LI   R3,POOLWD
 PI1    CLR  *R2+
        DEC  R3
        JNE  PI1

@@ -17,6 +17,9 @@ app.json:
       {"name": "more",  "source": "more.a99", "page": "0x20"}   (optional page)
     ],
     "boot":      "hello",              the module that starts (default: the first)
+    "pool_max_pages": 4096,             optional: the most pages the program's pool will ever manage (a multiple
+                                         of 64): the bitmap is pool_max_pages/8 bytes, the rest of the 512 is room
+                                         for the kernel and resident code (docs/RESIDENT.md)
     "resident": {                      optional: code every module can call (docs/RESIDENT.md)
       "source": "resident.a99",        assembled INTO THE KERNEL's pages, after the kernel
       "exports": ["RSUM", "LINEIN"]    the labels the modules may BL to (added to kernel.equ)
@@ -115,6 +118,10 @@ def load_app(appdir):
     if app['boot'] not in names:
         die('"boot" names no module')
     app.setdefault('data', [])
+    app.setdefault('pool_max_pages', 4096)
+    pm = app['pool_max_pages']
+    if not isinstance(pm, int) or pm % 64 or not 64 <= pm <= 4096:
+        die('"pool_max_pages" must be a multiple of 64 from 64 to 4096 (the pool\'s bitmap has a bit for each page)')
     res = app.get('resident')
     if res is not None:
         if not isinstance(res, dict) or not res.get('source'):
@@ -197,6 +204,10 @@ def write_cfg(app, bdir, banks, pgfree):
         L.append('%-6s EQU  >%02X' % ('PG_' + ident(m['name']), m['_page']))
     L.append('PGBOOT EQU  PG_' + ident(app['boot']))
     L.append('PGFREE EQU  >%02X' % pgfree + '            first SAMS page the build leaves unassigned')
+    pm = app['pool_max_pages']
+    L.append('POOLMX EQU  %d            pages the pool can manage: pool_max_pages' % pm)
+    L.append('POOLBM EQU  >%04X          the pool bitmap: at the top of the kernel\'s pages' % (0xC000 - pm // 8))
+    L.append('POOLWD EQU  %d             its size in words' % (pm // 16))
     for d in app['data']:
         L.append('%-6s EQU  >%02X' % ('PD_' + ident(os.path.splitext(d['file'])[0]), d['_page']))
     open(os.path.join(bdir, 'appcfg.a99'), 'w').write('\n'.join(L) + '\n')
@@ -280,6 +291,9 @@ def main():
     run(sys.executable, os.path.join(ROOT, 'tools', 'keytab.py'))
     prepare_data(app, bdir)
     pgfree = assign_pages(app)
+    if app['pool_max_pages'] <= pgfree:
+        die('"pool_max_pages" (%d) must be above the first free page (>%02X): the pool would be empty' % (app['pool_max_pages'], pgfree))
+    kmax = 0xC000 - app['pool_max_pages'] // 8 - 0xA000          # the kernel may be this long: the bitmap is above it
     # banks: 0 loader, 1 kernel, 2 data bank, then modules, then data files
     banks = [(2, PGDATA)]
     nb = 3
@@ -332,9 +346,10 @@ def main():
         for c in range(d['_chunks']):
             images.append(raw[c * BANK:(c + 1) * BANK])
         sizes.append((d['file'], len(raw)))
-    if 0xA000 + len(kernel) > 0xBE00:
-        die('the kernel (%d bytes%s) runs into the page-pool bitmap at >BE00: it may be at most 7,680 bytes' %
-            (len(kernel), ', of which resident code %d' % rbytes if res else ''))
+    if len(kernel) > kmax:
+        die('the kernel (%d bytes%s) runs into the page-pool bitmap at >%04X: it may be at most %s bytes%s' %
+            (len(kernel), ', of which resident code %d' % rbytes if res else '', 0xA000 + kmax, format(kmax, ','),
+             '' if app['pool_max_pages'] < 4096 else ' (a smaller "pool_max_pages" makes the bitmap, and so the room, smaller)'))
     for n, sz in sizes:
         if sz > BANK:
             die('%s is %d bytes: over its 8K bank' % (n, sz))
@@ -345,7 +360,7 @@ def main():
     image = b''.join(b.ljust(BANK, b'\0') for b in images).ljust(n * BANK, b'\0')
     out = os.path.join(bdir, app['name'].lower().replace(' ', '') + '8.bin')
     open(out, 'wb').write(image)
-    print('kernel %d bytes (ends >%04X, %d free below the page-pool bitmap at >BE00)' % (len(kernel), 0xA000 + len(kernel), 0xBE00 - 0xA000 - len(kernel)))
+    print('kernel %d bytes (ends >%04X, %d free below the page-pool bitmap at >%04X)' % (len(kernel), 0xA000 + len(kernel), kmax - len(kernel), 0xA000 + kmax))
     if res:
         print('  of which resident code %d bytes (exports: %s)' % (rbytes, ' '.join(res['exports']) or 'none'))
     for (nme, sz) in sizes[3:]:

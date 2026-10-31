@@ -549,7 +549,7 @@ itself remaps slot B (the rule applies to your own routines too).
 `PINIT` (R0 = first page, R1 = the page after the last) declares a pool and frees all its
 pages. `PALLOC` returns the lowest free page in R0 (0 when none is left); `PRELS` gives
 one back (twice is harmless; a page outside the pool is ignored). A page's contents are
-never touched. The pool is a bitmap (512 bytes at `>BE00`, in the kernel's pages) for up to 4,096 pages; `FREECT` is the
+never touched. The pool is a bitmap (512 bytes at `>BE00` by default, in the kernel's pages) for up to 4,096 pages (`"pool_max_pages"` in `app.json` makes it smaller: pages/8 bytes at the top of the kernel's pages, and `PINIT` hands out no page from that number up); `FREECT` is the
 free count. The viewer in `examples/browser` takes pages from `PGFREE`, fills them with
 lines of a file, and draws from them:
 
@@ -866,6 +866,7 @@ there is no exit hook.
   ],
   "boot": "main",
   "data": [ {"file": "words.bin", "page": "0x40"} ],
+  "pool_max_pages": 256,
   "resident": {"source": "resident.a99", "exports": ["RSUM"]}
 }
 ```
@@ -879,6 +880,10 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`pool_max_pages`** (optional, a multiple of 64 from 64 to 4096; default 4096) is the most pages your program's pool will ever
+  manage. The pool's bitmap has a bit for each: pages/8 bytes (512 for the default), kept at the top of the kernel's pages, so a
+  smaller number gives the kernel (and resident code) the difference as room, up to 480 bytes. `PINIT` is cut to it: no page from
+  that number up is handed out. It must be above `PGFREE`.
 - **`resident`** (optional) is code assembled into the kernel's pages so that every module can `BL` to it: part 8 and
   `docs/RESIDENT.md`.
 - **`PGFREE`** (equate) is the first page the build leaves unassigned: where your pool starts.
@@ -901,7 +906,7 @@ The build runs `tools/font.py` and `tools/keytab.py` first (they write `gen/font
 python3 tools/sim9900.py build/myapp/myapp8.bin --keys "<ALPHA>hello<ENTER>" --frames 300
 ```
 
-prints the screen as text. In Python (see `tests/test_kernel.py`):
+prints the screen as text. **A test application that quits** (`QUITF`) **restarts the machine** when the quit is taken, and the start-up clears slot A, so a result written to `APPRAM` is gone by the time `run()` returns: read results from an application that stays up (the resident-code test's modules do), or stop the run before the quit. In Python (see `tests/test_kernel.py`):
 
 ```python
 import sim9900

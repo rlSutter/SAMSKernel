@@ -312,7 +312,7 @@ switch to the module whose first page is R0, handing it R1 as its argument.  Tak
 
 ### `PINIT`
 
-the pool manages pages R0 up to (not including) R1; all free. Pages outside the range are never handed out.  Uses R0-R6.  Leaf.
+the pool manages pages R0 up to (not including) R1; all free. Pages outside the range are never handed out, and none from POOLMX up (the bitmap has no bit for them: app.json's "pool_max_pages", 4096 by default). Uses R0-R6.  Leaf.
 
 ### `PSET` *(internal)*
 

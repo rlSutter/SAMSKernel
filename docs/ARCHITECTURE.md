@@ -78,7 +78,7 @@ and hides them again: the even byte is the page's low 8 bits and the odd byte bi
 `CURA2 CURA3` (slot A), `CURBE CURBF` (slot B) and `CURCC CURCD` (slot C), at `>21E0-21EB`; `PAGEA`, `PAGEB`, `PAGEC`, `MAPE`, `MAPF` and `SETPB` keep them in step. Two different pages in
 slot B are allowed (`MAPE` and `MAPF` each set one window); `PAGEB` sets a consecutive pair; `GETPB` returns the two pages slot B holds (R0, R1) and `SETPB` puts two pages back (R0, R1), independently
 (the Press ancestor restored by remapping a consecutive pair from the first page, which is wrong when the halves differ). **The page pool's bitmap** is 512 bytes at `>BE00` in the kernel's own pages (a bit for each of
-4,096 pages); the build refuses a kernel that grows into it (at most 7,680 bytes; it is about 5,000).
+4,096 pages); with `"pool_max_pages"` in `app.json` it is pages/8 bytes at the top of those pages (`POOLBM`, `POOLMX`, `POOLWD` in `appcfg.a99`). The build refuses a kernel that grows into it (at most 7,680 bytes by default; it is 6,636).
 
 ## 6. Memory maps
 

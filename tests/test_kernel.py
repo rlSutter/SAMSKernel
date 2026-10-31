@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1296,13 +1296,7 @@ def resident():
     check(all(n in equ for n in ('rsum', 'rcall', 'linein')) and all(0xA000 <= equ[n] < 0xBE00 for n in ('rsum', 'rcall', 'linein')),
           'the modules see the three exports, at addresses in the kernel pages: %s' % {n: hex(equ[n]) for n in ('rsum', 'rcall', 'linein') if n in equ})
     check(not any(n in equ for n in ('rsu1', 'rcl1', 'lndraw', 'lnlen', 'kresb', 'krese')), 'and not the resident code\'s own labels or the kernel\'s')
-    m, cpu, halt = sim9900.run(c, frames=300)          # A has run and switched, B is waiting in LINEIN
-    for i, k in enumerate((ord('h'), ord('i'), 0x0D)):
-        m.wb(0x2040 + i, k)
-    m.ww(0x200E, 3); m.ww(0x2010, 0)                  # the keys, in the key buffer
-    target = m.insns + 40 * sim9900.VSYNC_INSNS
-    while m.insns < target:
-        cpu.step()
+    m, cpu, halt = sim9900.run(c, frames=700, keys='<WAIT 10>hi<ENTER>')       # real key presses, to the LINEIN in module B
     check(halt is None, 'the application runs both modules without a halt (%s)' % halt)
     ra = [m.rw(0x2300 + i) for i in (0, 2)]
     rb = [m.rw(0x2300 + 10 + i) for i in (0, 2, 4)]
@@ -1330,6 +1324,63 @@ def resident():
     check(r3.returncode != 0 and 'missing.a99' in (r3.stdout + r3.stderr), 'a missing resident source is refused, by name')
     r4 = variant(lambda j: j['resident'].update(exports=['bad name']))
     check(r4.returncode != 0 and 'not a label' in (r4.stdout + r4.stderr), 'an export that is not even a name is refused')
+
+def poolmax():
+    """app.json "pool_max_pages": the pool's bitmap has a bit per page up to that number only, so it is smaller (pages/8 bytes,
+    at the top of the kernel's pages) and the kernel may be longer.  A build with it makes room for resident code that the default
+    does not, PINIT hands out no page from the limit up and never writes outside the smaller bitmap, PRELS ignores such a
+    page, and bad values are refused."""
+    import asmharness, shutil, tempfile
+    def build_variant(edit_json=None, edit_res=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'resident'), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_res:
+            open(d + '/app/resident.a99', 'a').write(edit_res)
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        return r, d + '/out'
+    big = '       BSS  500\n'
+    r, out = build_variant(edit_res=big)
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) a kernel that carries 500 more resident bytes does not fit')
+    r, out = build_variant(lambda j: j.update(pool_max_pages=256), big)
+    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) the same kernel fits: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
+    syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
+    check(syms['poolbm'] == 0xBFE0 and syms['poolmx'] == 256 and syms['poolwd'] == 16, 'kernel.equ says: POOLBM >%04X, POOLMX %d, POOLWD %d' % (syms['poolbm'], syms['poolmx'], syms['poolwd']))
+    c = open(glob.glob(out + '/*8.bin')[0], 'rb').read()
+    m = sim9900.Machine(c)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    call = lambda n, regs=None: asmharness.call(m, cpu, syms[n], regs or {}, limit=20_000_000)
+    for i in range(32):                                  # the bytes just below the bitmap: PINIT must leave them alone
+        m.wb(0xBFC0 + i, 0xAA)
+    call('pinit', {0: 0x20, 1: 4096})
+    check(m.rw(syms['poolhi']) == 256 and m.rw(syms['freect']) == 256 - 0x20, 'PINIT with 4096 as its end is cut to 256: POOLHI %d, %d pages free (%d)' % (m.rw(syms['poolhi']), m.rw(syms['freect']), 256 - 0x20))
+    check(all(m.rb(0xBFC0 + i) == 0xAA for i in range(32)), 'and it did not write below the bitmap (the 32 bytes under it are as they were)')
+    pages = []
+    while True:
+        p = call('palloc')[0]
+        if p == 0:
+            break
+        pages.append(p)
+    check(len(pages) == 224 and min(pages) == 0x20 and max(pages) == 255 and len(set(pages)) == 224, 'PALLOC hands out 224 distinct pages, >20 to 255, and then says 0 (%d pages, %s-%s)' % (len(pages), hex(min(pages)), hex(max(pages))))
+    call('prels', {0: 300})
+    call('prels', {0: 4000})
+    check(m.rw(syms['freect']) == 0, 'PRELS of a page the bitmap has no bit for (300, 4000) is ignored: still %d free' % m.rw(syms['freect']))
+    call('prels', {0: 100})
+    check(m.rw(syms['freect']) == 1 and call('palloc')[0] == 100, 'PRELS of a pool page works: page 100 comes back')
+    # the default bitmap is unchanged
+    r0 = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', tempfile.mkdtemp()], capture_output=True, text=True)
+    check('at >BE00' in r0.stdout, 'an application without the field still has the 512-byte bitmap at >BE00')
+    # bad values
+    for val, why in ((100, 'not a multiple of 64'), (8192, 'more than 4096'), (0, 'none'), ('lots', 'not a number')):
+        r, _ = build_variant(lambda j, v=val: j.update(pool_max_pages=v))
+        check(r.returncode != 0 and 'pool_max_pages' in (r.stdout + r.stderr), 'pool_max_pages %r (%s) is refused' % (val, why))
+    r, _ = build_variant(lambda j: (j.update(pool_max_pages=64), j['modules'][1].update(page='0x60')))
+    check(r.returncode != 0 and 'pool would be empty' in (r.stdout + r.stderr), 'a limit at or below the first free page is refused: the pool would be empty')
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -1478,7 +1529,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

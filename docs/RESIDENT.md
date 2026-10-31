@@ -66,19 +66,29 @@ An application without `"resident"` builds exactly as before.
 
 ## The budget, and what to do when it runs out
 
-The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,626 bytes:
-**about 1,050 bytes for resident code**, shared with every other thing you put there. `skbuild` refuses a kernel that runs
-into the bitmap and says how much of it is resident. The levers, in the order I would pull them (none is built):
+The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,636 bytes:
+**about 1,040 bytes for resident code**, shared with every other thing you put there, and up to 480 more with a smaller pool
+bitmap (below). `skbuild` refuses a kernel that runs
+into the bitmap and says how much of it is resident. The levers, in the order I would pull them (the first is built; the others are not):
 
-1. **A smaller bitmap.** It has one bit per page for all 4,096 pages of a 16M card: 512 bytes. A program that declares the
-   most pages it will ever pool (`"pool_max_pages": 256` for a 1M card) needs 32 bytes and the other 480 are resident code's.
-   This changes `POOLBM` from a constant to a build-time value and `PINIT` would clamp to it.
+1. **A smaller bitmap** (built: `"pool_max_pages"` in `app.json`, 1.16.0). The bitmap has one bit per page for all 4,096
+   pages of a 16M card: 512 bytes. A program that declares the most pages it will ever pool (`"pool_max_pages": 256` for a 1M
+   card, a multiple of 64 from 64 to 4096) gets a bitmap of pages/8 bytes (32 here) at the top of the kernel's pages, and the
+   kernel may be the difference longer: **7,680 bytes by default, 8,160 with 256 pages, 8,064 with 1,024, 8,184 with 64**.
+   `POOLBM`, `POOLMX` and `POOLWD` are written into `appcfg.a99` by the build; `PINIT` cuts its range to `POOLMX` (no page from
+   there up is handed out, and `PRELS` ignores one); a limit at or below the first free page is refused (the pool would be
+   empty). The cost: the pool cannot use the pages above the limit, so declare what the program really needs.
 2. **A common page.** Give every module 4K at `>C000` and a shared 4K at `>D000` that is the same page for all of them:
    4K of shared code, but modules of at most 4K (the workbench's assembler, 5,542 bytes, would not fit; Reversi, 3,392,
    would). An all-or-nothing choice per application.
 3. **Trim the kernel** of what the program does not use (the music engine, the F18A modes): a per-application kernel build.
 
 ## Testing
+
+`python3 tests/test_kernel.py poolmax` builds the test application with `"pool_max_pages": 256` and 500 more resident bytes (which do not fit
+with the default bitmap), checks `POOLBM`/`POOLMX`/`POOLWD`, that `PINIT` is cut to 256 pages and writes nothing below the
+smaller bitmap, that `PALLOC` hands out exactly the 224 pages from `>20` to 255, that `PRELS` ignores pages the bitmap has no bit
+for, and that bad values are refused.
 
 `python3 tests/test_kernel.py resident` builds `tests/apps/resident` (two modules, `ma` and `mb`; the resident code has
 `RSUM`, `RCALL` and `LINEIN`) and checks that each module gets the right answers from tables and callbacks in *its own*

@@ -156,9 +156,11 @@ TXCELLS EQU >20F0            columns x rows
 TXATTR EQU   >20F2
 * the name table's VRAM address (NAMTAB, or NAMGM2 in Graphics II)
 NAMBAS EQU   >20F4
-* 512 bytes: the page-pool bitmap, a bit per page of 4096 (1 = free), in the
-* kernel's own pages (the build refuses a kernel that grows into it)
-POOLBM EQU   >BE00
+* The page-pool bitmap (a bit per page, 1 = free) is in the kernel's own pages,
+* at the top of them.  POOLBM (its address), POOLMX (how many pages it covers:
+* 4096 unless app.json says "pool_max_pages") and POOLWD (its size in words)
+* are written by the build into appcfg.a99, which this file copies; the build
+* refuses a kernel that grows into it.
 POOLLO EQU  >20E0            pool: the first page it manages
 POOLHI EQU  >20E2            pool: the page after its last
 FREECT EQU  >20E4            pool: free pages
