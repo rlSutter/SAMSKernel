@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1234,6 +1234,29 @@ def linein():
     attrs = list(m.vram[atrt + pos: atrt + pos + 7])
     check(text == 'hi      ', 'the screen shows the text then blanks over the field and one cell more (%r)' % text)
     check(attrs == [0x21, 0x21, 0x12, 0x21, 0x21, 0x21, 0x21], 'the text and the blanks (to one cell past the field, 6 + 1) have the attribute, the cursor cell its swap >12: %s' % [hex(a) for a in attrs])
+    # a scrolling field: width 10 (the high byte of R3), a line of up to 40
+    def cells(pos, n):
+        return bytes(m.vram[namb + pos + i] for i in range(n)).decode('latin-1')
+    def attrs_of(pos, n):
+        return [m.vram[atrt + pos + i] for i in range(n)]
+    pos = 3 * 80 + 6
+    typed = 'abcdefghijklmnopqrstuvwxy'
+    r, got = run(typed + '{ENTER}', maxlen=10 * 256 + 40, pos=pos)
+    check(got == typed and r[0] == 0x0D00, 'scrolling field: a 25-character line in a field of 10 is all in the buffer (%r)' % got)
+    check(cells(pos, 10) == 'qrstuvwxy ', 'the field shows the last nine characters and the cursor cell: %r' % cells(pos, 10))
+    check(attrs_of(pos, 11) == [0x21] * 9 + [0x12, 0x21], 'the cursor is the tenth cell, and the field is exactly ten cells wide: %s' % [hex(a) for a in attrs_of(pos, 11)])
+    run(typed + '{HOME}{ENTER}', maxlen=10 * 256 + 40, pos=pos)
+    check(cells(pos, 10) == 'abcdefghij' and attrs_of(pos, 2) == [0x12, 0x21], 'HOME scrolls back to the start: %r, the cursor in the first cell' % cells(pos, 10))
+    run(typed + '{LEFT}' * 12 + '{ENTER}', maxlen=10 * 256 + 40, pos=pos)
+    check(cells(pos, 10) == 'nopqrstuvw' and attrs_of(pos, 1) == [0x12], '12 steps left from the end scroll the window to start at the cursor: %r' % cells(pos, 10))
+    r, got = run(typed + '{HOME}Z{ENTER}', maxlen=10 * 256 + 40, pos=pos)
+    check(got == 'Z' + typed, 'typing at the start of a long line inserts there (%r)' % got)
+    r, got = run(typed + '{HOME}{END}!{ENTER}', maxlen=10 * 256 + 40, pos=pos)
+    check(got == typed + '!' and cells(pos, 10) == 'rstuvwxy! ', 'END scrolls to the end and typing goes on there (%r, %r)' % (got, cells(pos, 10)))
+    run('abcde{ENTER}', maxlen=30 * 256 + 5, pos=pos)
+    check(cells(pos, 6) == 'abcde ' and attrs_of(pos, 7)[5] == 0x12, 'a width larger than the longest line + 1 is the old field: 6 cells (%r)' % cells(pos, 7))
+    run('abc{ENTER}', maxlen=1 * 256 + 5, pos=pos)
+    check(cells(pos, 4) == 'abc ' and attrs_of(pos, 7)[3] == 0x12, 'a width of 1 is no scrolling either (%r)' % cells(pos, 4))
     # the history
     cpu_r = asmharness.call(m, cpu, syms['pinit'], {0: 0x40, 1: 0x60})
     page = asmharness.call(m, cpu, syms['palloc'])[0]
@@ -1340,11 +1363,11 @@ def poolmax():
             open(d + '/app/resident.a99', 'a').write(edit_res)
         r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
         return r, d + '/out'
-    big = '       BSS  500\n'
-    r, out = build_variant(edit_res=big)
-    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) a kernel that carries 500 more resident bytes does not fit')
+    big = '       BSS  300\n'
+    r, out = build_variant(lambda j: j.pop('pool_max_pages', None))
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) the test application\'s resident code (LINEIN, with its scrolling field, is about 1,050 bytes) does not fit: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:90])
     r, out = build_variant(lambda j: j.update(pool_max_pages=256), big)
-    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) the same kernel fits: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
+    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 300 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
     syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
     check(syms['poolbm'] == 0xBFE0 and syms['poolmx'] == 256 and syms['poolwd'] == 16, 'kernel.equ says: POOLBM >%04X, POOLMX %d, POOLWD %d' % (syms['poolbm'], syms['poolmx'], syms['poolwd']))
     c = open(glob.glob(out + '/*8.bin')[0], 'rb').read()
@@ -1381,6 +1404,69 @@ def poolmax():
         check(r.returncode != 0 and 'pool_max_pages' in (r.stdout + r.stderr), 'pool_max_pages %r (%s) is refused' % (val, why))
     r, _ = build_variant(lambda j: (j.update(pool_max_pages=64), j['modules'][1].update(page='0x60')))
     check(r.returncode != 0 and 'pool would be empty' in (r.stdout + r.stderr), 'a limit at or below the first free page is refused: the pool would be empty')
+
+def editorapp():
+    """examples/editor: the workbench's editor module as a program of its own, behind a small front module that asks for a file
+    name with LINEIN: a missing name is refused, a name opens an empty buffer, typing and CTRL S write the file to the disk,
+    CTRL X comes back to the prompt with the name kept, and the history page is not a pool page."""
+    import tempfile, skdisk, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    c = build('editor')
+    d = tempfile.mkdtemp(); p = d + '/d.dsk'
+    skdisk.make_disk(p, [])
+    img = bytearray(open(p, 'rb').read())
+    box = {}
+    def setup(m):
+        box['f'] = tifdc.TIFDC(image=img); m.tifdc = box['f']
+    m, cpu, halt = sim9900.run(c, frames=900, keys='<WAIT 30>T1<ENTER><WAIT 40>hello<C-s><WAIT 80><C-x><WAIT 60>', setup=setup)
+    ln = [l.strip() for l in sim9900.screen(m).split('\n')]
+    check(halt is None, 'the editor application runs (%s)' % halt)
+    check(tifdc.read_file(box['f'].image, 'T1') == [b'HELLO'], 'a name typed at the prompt opens an empty buffer; typing and CTRL S write DSK1.T1 on the disk: %s' % tifdc.read_file(box['f'].image, 'T1'))
+    check(any(l.startswith('File:') and l.endswith('DSK1.T1') for l in ln), 'CTRL X comes back to the prompt with the name kept: %r' % [l for l in ln if l.startswith('File:')])
+    m, cpu, halt = sim9900.run(c, frames=400, keys='<WAIT 30><ENTER><WAIT 40>', setup=setup)
+    ln = [l.strip() for l in sim9900.screen(m).split('\n')]
+    check(any('needs more after the dot' in l for l in ln) and any(l.startswith('File:') for l in ln), 'ENTER on the bare device is refused with a message, and the prompt stays: %r' % [l for l in ln if 'needs more' in l or l.startswith('File:')])
+
+def sourcesdisk():
+    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the four long names
+    are shortened with the COPY lines that name them changed to match (and the repository's files are not touched), every file a
+    source COPYs is on the disk except the three the build writes for each application, and the disk reads back."""
+    import re, tempfile, subprocess, mksources, tifdc
+    d = tempfile.mkdtemp(); out = d + '/s.dsk'
+    names = mksources.build(out)
+    check(all(len(n) <= 10 for n in names), 'every file name fits a TI disk (%d files, longest %d characters)' % (len(names), max(len(n) for n in names)))
+    k = names['KERNEL/A99']
+    check('COPY "module.a99"' in k and 'COPY "modules.a99"' not in k and 'COPY "kres.a99"' in k, 'in the disk copy of kernel.a99 the COPY lines name the shortened files')
+    check('modules.a99' in open(os.path.join(ROOT, 'kernel', 'kernel.a99')).read(), 'and the repository\'s kernel.a99 is as it was')
+    have = {n.split('/')[0].lower() for n in names}
+    missing = set()
+    for n, text in names.items():
+        for m in re.finditer(r'^\s+COPY\s+"([^"]+)\.a99"', text, re.M):
+            if m.group(1).lower() not in have:
+                missing.add(m.group(1).lower())
+    check(missing == {'appcfg', 'appname', 'appmsg'}, 'every COPY target is on the disk except the three the build writes for each application: %s' % sorted(missing))
+    info = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.environ['XAS99']), 'xdm99.py'), out], capture_output=True, text=True).stdout.split('\n')[0]
+    used = int(re.search(r':\s+(\d+) used\s+(\d+) free', info).group(1))
+    check('SOURCES' in info and '2S/2D' in info and used < 1300, 'a double-density disk named SOURCES with room to spare: %s' % info.strip())
+    back = tifdc.read_file(bytearray(open(out, 'rb').read()), 'SRCNOTES')
+    check(b'\n'.join(back).decode('latin-1').rstrip() == mksources.NOTES.rstrip(), 'SRCNOTES reads back from the image record for record')
+
+def jumpcheck():
+    """tools/jumpcheck.py: the jumps close to the edge of their range, from an assembler listing."""
+    import tempfile, jumpcheck as jc
+    build('hello')
+    rows = jc.scan(os.path.join(ROOT, 'build', 'hello', 'kernel.lst'))
+    check(len(rows) > 200 and rows[0][0] >= 0, 'the kernel listing has %d jumps, the tightest with %d words to spare' % (len(rows), rows[0][0]))
+    d = tempfile.mkdtemp(); p = d + '/t.lst'
+    open(p, 'w').write('0001 A000 137F  14        JEQ  FAR                 forward, the longest reach\n'
+                       '0002 A002 1080  14        JMP  BACK                back, the longest reach\n'
+                       '0003 A004 1301  14        JEQ  NEAR                two words on\n'
+                       '0004 A006 0201  14        LI   R1,>1234            not a jump\n'
+                       '0005 A008 1D00  14        SBO  0                   not a jump either\n')
+    got = jc.scan(p)
+    check([(s, dsp) for s, _, dsp in got] == [(0, 127), (0, -128), (126, 1)], 'a synthetic listing: the two longest reaches have 0 words to spare, the near one 126, and non-jumps are ignored: %s' % [(s, dsp) for s, _, dsp in got])
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -1529,7 +1615,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

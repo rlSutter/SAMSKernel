@@ -61,9 +61,14 @@
 *   R1 = the buffer: a length-prefixed string, which holds the text to start
 *        with (length byte 0: an empty line) and the edited line at the end
 *   R2 = the attribute (high byte) of the text; the cursor is its swap
-*   R3 = the longest the line may be, 1 to 79 (more is taken as 79); the
-*        buffer must have room for a length byte and that many characters, and
-*        the field one cell more than that, on the screen's row
+*   R3 = the longest the line may be, 1 to 79 (more is taken as 79), in the
+*        low byte; the buffer must have room for a length byte and that many
+*        characters.  The high byte, if not 0, is the field's WIDTH in cells
+*        (2 or more): a longer line scrolls sideways in it, keeping the cursor
+*        in view (LI R3,20*256+60: a line of up to 60 in a field of 20).  With
+*        0 there, or a width of the longest line + 1 or more, the field is the
+*        longest line and one cell more (for the cursor) and does not scroll.
+*        Either way the field must fit on the screen's row.
 *   R4 = a history page from the pool, or 0 for no history
 * Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high
 * byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it
@@ -71,15 +76,27 @@
 * Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
 LINEIN .enter
        .push R9
-       AI   R10,-22            the frame: 11 words, R9 points at it
+       AI   R10,-26            the frame: 13 words, R9 points at it
        MOV  R10,R9
        MOV  R0,*R9             +0  the position
        MOV  R1,@2(R9)          +2  the buffer
        MOV  R2,@4(R9)          +4  the attribute
+       MOV  R3,R5
+       SRL  R5,8               the width asked for (0: all of the line)
+       ANDI R3,>00FF
        CI   R3,79              at most 79: a history line is 80 bytes
        JLE  LNI0
        LI   R3,79
-LNI0    MOV  R3,@6(R9)          +6  the longest line
+LNI0   MOV  R3,@6(R9)          +6  the longest line
+       MOV  R3,R6
+       INC  R6                 the line and a cell for the cursor
+       CI   R5,2
+       JL   LNIW
+       C    R5,R6
+       JL   LNIX               narrower than that: the field scrolls
+LNIW   MOV  R6,R5
+LNIX   MOV  R5,@24(R9)         +24 the field's width in cells
+       CLR  @22(R9)            +22 the first character shown
        MOV  R4,@8(R9)          +8  the history page (0: none)
        CLR  @12(R9)            +12 how far back in the history (0: as typed)
        SETO @14(R9)            +14 insert mode (non-zero) or overtype (0)
@@ -90,8 +107,8 @@ LNI0    MOV  R3,@6(R9)          +6  the longest line
        JLE  LNI1
        MOV  R3,R2
        BL   @LNSETL
-LNI1    MOV  R2,@10(R9)         the cursor starts at the end of the text
-LNI2    BL   @LNDRAW
+LNI1   MOV  R2,@10(R9)         the cursor starts at the end of the text
+LNI2   BL   @LNDRAW
        BL   @KWAIT
        MOV  R0,@16(R9)
        CI   R0,KENTER*256
@@ -123,7 +140,7 @@ LNI9    CI   R0,KENTER*256
        JEQ  LNI10
        BL   @LNHADD
 LNI10   MOV  @16(R9),R0
-       AI   R10,22
+       AI   R10,26
        .pop R9
        .leave
        RT
@@ -263,20 +280,31 @@ LND4   BL   @LNHGET
 
 LNTD   B    @LNI2
 
-* LNDRAW - draw the field: the text, blanks to the end of the field and one
-* cell more, the text's attribute over all of that, then the cursor.
+* LNDRAW - draw the field: blanks over all of it, the text's attribute over all
+* of it, the part of the line that is in view, then the cursor.
 LNDRAW .enter
+       BL   @LNSCRL            the first character shown, so the cursor shows
        MOV  *R9,R0
-       MOV  @2(R9),R1
-       MOV  @4(R9),R2
-       BL   @PUTS              the text
-       BL   @LNBLK             R0 = the first cell after it, R2 = how many cells
        LI   R1,>2000
+       MOV  @24(R9),R2
        BL   @FILLN             blanks
-       BL   @LNBLK
+       MOV  *R9,R0
        MOV  @4(R9),R1
+       MOV  @24(R9),R2
        BL   @FILLA             the attribute
-       MOV  @4(R9),R1          the cursor: the attribute with its roles swapped
+       BL   @LNLEN
+       S    @22(R9),R2         the characters from the first one shown
+       JEQ  LND8
+       C    R2,@24(R9)
+       JLE  LND7
+       MOV  @24(R9),R2         no more than the field holds
+LND7   MOV  *R9,R0
+       A    @NAMBAS,R0
+       MOV  @2(R9),R1
+       INC  R1
+       A    @22(R9),R1
+       BL   @VMBW              the glyphs
+LND8   MOV  @4(R9),R1          the cursor: the attribute with its roles swapped
        MOV  R1,R3
        MOV  R1,R4
        SLA  R3,4
@@ -285,22 +313,29 @@ LNDRAW .enter
        MOV  R3,R1
        MOV  *R9,R0
        A    @10(R9),R0
+       S    @22(R9),R0
        LI   R2,1
        BL   @FILLA
        .leave
        RT
 
-* LNBLK - R0 = the cell after the text, R2 = the cells from there to one past
-* the end of the field.  Leaf (R0, R2, R3).
-LNBLK  MOV  @2(R9),R2
-       MOVB *R2,R2
-       SRL  R2,8
-       MOV  *R9,R0
-       A    R2,R0
-       MOV  @6(R9),R3
-       S    R2,R3
-       INC  R3
-       MOV  R3,R2
+* LNSCRL - move the first character shown so that the cursor is inside the
+* field: left to the cursor if it is before it, else just far enough right.
+* Leaf (R1-R3).
+LNSCRL MOV  @10(R9),R1
+       MOV  @22(R9),R2
+       C    R1,R2
+       JHE  LNS1
+       MOV  R1,R2
+       JMP  LNS2
+LNS1   MOV  R1,R3
+       S    R2,R3              the cursor's cell in the field
+       C    R3,@24(R9)
+       JL   LNS2
+       MOV  R1,R2
+       S    @24(R9),R2
+       INC  R2
+LNS2   MOV  R2,@22(R9)
        RT
 
 * LNLEN - R2 = the length of the text in the buffer.  Leaf.

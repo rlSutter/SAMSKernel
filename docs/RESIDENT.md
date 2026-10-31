@@ -14,7 +14,7 @@ mapped at a time, in slot C (`>C000-DFFF`). Until now there were two ways round 
 | --- | --- | --- |
 | `COPY` the source into every module that needs it | its size, once per module (LINEIN is about 930 bytes) | nothing: but the copies are separate, and a fix has to rebuild them all (the build does) |
 | a **library module** and `MODCALL` | a call that maps two pages and back (the mapping changes `R0-R4`, `R7`; arguments go in `R5 R6 R8 R9` or slot A) | the routine runs with *its* module in slot C, so it cannot read the caller's tables or strings or call back into the caller's code |
-| **resident code**, assembled into the kernel's pages | kernel space, shared by the whole program (about 1,050 bytes: 7,680 allowed, 6,626 used by the kernel alone) | exceed that space; and it is `[PC]` only |
+| **resident code**, assembled into the kernel's pages | kernel space, shared by the whole program (about 1,000 bytes: 7,680 allowed, 6,678 used by the kernel alone) | exceed that space; and it is `[PC]` only |
 
 Resident code is plain code in the pages that are always mapped (`>A000-BDFF`, with the kernel). A module reaches
 it with an ordinary `BL @NAME` from any module, with any registers, and the routine runs while the caller's module is
@@ -40,8 +40,8 @@ share) and anything else on the kernel's include path. Every label that is liste
 own labels (`RSU1`, the helper routines) cannot collide with a module's. The build reports the size:
 
 ```
-kernel 7588 bytes (ends >BDA4, 92 free below the page-pool bitmap at >BE00)
-  of which resident code 962 bytes (exports: RSUM RCALL LINEIN)
+kernel 7726 bytes (ends >BE2E, 338 free below the page-pool bitmap at >BF80)
+  of which resident code 1048 bytes (exports: RSUM RCALL LINEIN)
 ```
 
 An application without `"resident"` builds exactly as before.
@@ -66,9 +66,12 @@ An application without `"resident"` builds exactly as before.
 
 ## The budget, and what to do when it runs out
 
-The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,636 bytes:
-**about 1,040 bytes for resident code**, shared with every other thing you put there, and up to 480 more with a smaller pool
-bitmap (below). `skbuild` refuses a kernel that runs
+The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,678 bytes:
+**about 1,000 bytes for resident code**, shared with every other thing you put there, and up to 480 more with a smaller pool
+bitmap (below). **`LINEIN` (about 1,050 bytes as resident code since it gained its scrolling field, with `RSUM` and `RCALL` in the test
+application) no longer fits the default room**: the test application declares `"pool_max_pages": 1024` (a 128-byte bitmap, room for a kernel
+of 8,064 bytes). A program that wants the line editor in the kernel's pages and has no use for a pool of more than 2,048 pages can do the same;
+the alternative is to `COPY` it into each module that prompts. `skbuild` refuses a kernel that runs
 into the bitmap and says how much of it is resident. The levers, in the order I would pull them (the first is built; the others are not):
 
 1. **A smaller bitmap** (built: `"pool_max_pages"` in `app.json`, 1.16.0). The bitmap has one bit per page for all 4,096

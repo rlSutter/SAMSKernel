@@ -450,15 +450,15 @@ set a tone voice directly (sound effects, or music of your own). R0 = the voice 
 
 ### `LINEIN`
 
-read a line of text at a screen position. R0 = the position of the field's first cell (row * columns + column) R1 = the buffer: a length-prefixed string, which holds the text to start with (length byte 0: an empty line) and the edited line at the end R2 = the attribute (high byte) of the text; the cursor is its swap R3 = the longest the line may be, 1 to 79 (more is taken as 79); the buffer must have room for a length byte and that many characters, and the field one cell more than that, on the screen's row R4 = a history page from the pool, or 0 for no history Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it is not put back as it was); only ENTER adds the line to the history. Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
+read a line of text at a screen position. R0 = the position of the field's first cell (row * columns + column) R1 = the buffer: a length-prefixed string, which holds the text to start with (length byte 0: an empty line) and the edited line at the end R2 = the attribute (high byte) of the text; the cursor is its swap R3 = the longest the line may be, 1 to 79 (more is taken as 79), in the low byte; the buffer must have room for a length byte and that many characters.  The high byte, if not 0, is the field's WIDTH in cells (2 or more): a longer line scrolls sideways in it, keeping the cursor in view (LI R3,20*256+60: a line of up to 60 in a field of 20).  With 0 there, or a width of the longest line + 1 or more, the field is the longest line and one cell more (for the cursor) and does not scroll. Either way the field must fit on the screen's row. R4 = a history page from the pool, or 0 for no history Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it is not put back as it was); only ENTER adds the line to the history. Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
 
 ### `LNDRAW` *(internal)*
 
-draw the field: the text, blanks to the end of the field and one cell more, the text's attribute over all of that, then the cursor.
+draw the field: blanks over all of it, the text's attribute over all of it, the part of the line that is in view, then the cursor.
 
-### `LNBLK` *(internal)*
+### `LNSCRL` *(internal)*
 
-R0 = the cell after the text, R2 = the cells from there to one past the end of the field.  Leaf (R0, R2, R3).
+move the first character shown so that the cursor is inside the field: left to the cursor if it is before it, else just far enough right. Leaf (R1-R3).
 
 ### `LNLEN` *(internal)*
 

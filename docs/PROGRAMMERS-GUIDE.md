@@ -397,7 +397,9 @@ labels. **[TI]** `programs/ask.a99` asks for a name and greets it, with a histor
 ```
 
 The buffer is edited **in place** and may hold a start text (length byte 0 for an empty line); the field on the screen is
-the longest length plus one cell, on one row. The user types characters in (or over what is there: FCTN 2, INS, switches
+the longest length plus one cell, on one row, **or a width of your choosing**: put it in the high byte of `R3` (`LI R3,20*256+60`: a
+line of up to 60 in a field 20 cells wide) and a longer line scrolls sideways, the field always showing the cursor. A width
+of 0, 1, or the longest length plus one or more is the plain field. The user types characters in (or over what is there: FCTN 2, INS, switches
 between insert and overtype), moves with the left and right arrows, BEGIN and PROC'D (start and end), deletes with DEL
 (under the cursor) and CTRL H (before it), and empties the line with ERASE. ENTER, BACK (FCTN 9) and QUIT (FCTN =) end it:
 `R0` says which. With BACK or QUIT the buffer holds what had been typed so far; the program decides what that means.
@@ -634,7 +636,7 @@ the kernel's own pages, which are always mapped, and reached with a plain `BL @N
 
 `resident.a99` is an ordinary source with no `AORG` and no `END`; it may `COPY "linein.a99"` to carry the line editor
 once for the whole program. The listed labels join `kernel.equ`; nothing else in it is visible to the modules. There is
-room for about 1,050 bytes (the kernel is 6,626 of the 7,680 it may be); the build says how much is resident and refuses
+room for about 1,000 bytes (the kernel is 6,678 of the 7,680 it may be; the line editor, about 1,050, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
 a kernel that runs into the pool bitmap. **[PC] only.** The design, the options it was chosen over, how to write the
 routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/resident` is a worked two-module example.
 
@@ -890,6 +892,10 @@ there is no exit hook.
 - The output `build/APPDIR/NAME8.bin` is the cartridge image: 8K banks, padded to a power of
   two, bank 0 the loader. A real FinalGROM 99 and js99er take it as is.
 - **Listings** (`.lst`) of every bank are kept beside it; `kernel.equ` is the symbol table.
+- **Jumps that stop reaching.** A TMS9900 jump (`JMP`, `JEQ`, `JNE` ...) reaches 128 words back and 127 forward, and code added between
+  a jump and its target can push it out: the assembler's `Out of range: LABEL` appears in whichever file holds the jump, far from the
+  change. `python3 tools/jumpcheck.py build/APP/MODULE.lst` lists the jumps with few words to spare (`--margin N`), tightest first, so
+  the next to break is known beforehand; the kernel's tightest has 6.
 - **Your own font and colour schemes:** put a `databank.a99` in your application's directory
   (copy `kernel/databank.a99` and edit): the build looks there first. Keep its layout: 256 glyphs
   at `>E000`, five schemes of 16 words at `>E800`.

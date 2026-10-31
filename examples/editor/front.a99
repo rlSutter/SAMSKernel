@@ -1,0 +1,134 @@
+*======================================================================
+* front.a99 - a text editor as a program of its own: this module asks for a
+* file name (with LINEIN, and a history of the names you have typed) and
+* hands over to the workbench's editor module, examples/workbench/ed.a99,
+* which is used here exactly as it is.  Build it with
+*
+*       python3 tools/skbuild.py examples/editor
+*
+* and put build/editor/editor8.bin on the cartridge.  Type a file name, ENTER;
+* edit; CTRL S saves, CTRL X goes back here (twice if there are unsaved
+* changes); FCTN = quits.
+*======================================================================
+* HOW IT FITS TOGETHER.  The editor module (ed.a99) was written to be reached
+* from the workbench's shell: it reads the file's name from SRCNAME (the first
+* bytes of APPRAM: a length byte and up to 31 characters), and when it is done
+* it does GOMOD to a module whose name is "wb", with the argument 1 if the
+* user pressed CTRL A (save and assemble) or 0 for CTRL X.  So this program
+* does what the shell does and nothing more: its first module is NAMED "wb"
+* (see app.json: the build makes the equate PG_WB from the module's name, and
+* that is what ed.a99 switches to), asks for the name, puts it in SRCNAME and
+* does GOMOD PG_ED.  Everything the editor needs (the page pool, the buffer in
+* SAMS pages, loading and saving) it does for itself.  What this module adds
+* is only the prompt: a small program built from a big one by writing the
+* front door.  Part 8 of the guide explains GOMOD and the module names; part
+* 5 explains LINEIN.
+*
+* The prompt's history lives in the page PGFREE, the first page the build
+* leaves free.  It must not come from the pool, because the editor sets the
+* pool up for itself (PINIT, from PGFREE+4) and a pool page would be handed
+* out again to hold text: the four pages from PGFREE are never in the editor's
+* pool.  SRCNAME is also the buffer LINEIN edits, so when you come back from
+* the editor the name you had is there to be edited or accepted: ENTER
+* reopens the same file, and the editor, seeing the same name, keeps the
+* buffer you left (even with unsaved changes).
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+ANORM  EQU  (RTEXT*16+RBG)*256
+ABAR   EQU  (RBARFG*16+RBARBG)*256
+ABOLD  EQU  (RBOLD*16+RBG)*256
+AERR   EQU  (RERROR*16+RBG)*256
+
+* the file name (the editor's too): a length byte and up to 31 characters
+SRCNAME EQU APPRAM
+* what the editor said when it came back: 1 = CTRL A was pressed
+INARG  EQU  APPRAM+64
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+* INIT - the first screen, and every return from the editor.
+INIT   .enter
+       MOV  R1,@INARG
+       LI   R1,ANORM
+       BL   @CLS
+       CLR  R0
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,3*COLS+2
+       LI   R1,SHELP1
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,4*COLS+2
+       LI   R1,SHELP2
+       LI   R2,ANORM
+       BL   @PUTS
+       MOV  @INARG,R0
+       CI   R0,1
+       JNE  PR0
+       LI   R0,8*COLS+2        it saved for an assembler this lacks
+       LI   R1,SSAVED
+       LI   R2,ANORM
+       BL   @PUTS
+PR0    MOVB @SRCNAME,R0        the first time: the device to start from
+       JNE  PR1
+       LI   R1,SDSK
+       LI   R2,SRCNAME
+       LI   R3,6
+PR0A   MOVB *R1+,*R2+
+       DEC  R3
+       JNE  PR0A
+PR1    LI   R0,6*COLS+2
+       LI   R1,SFILE
+       LI   R2,ANORM
+       BL   @PUTS
+       LI   R0,6*COLS+8        LINEIN: the field's place, buffer, colours,
+       LI   R1,SRCNAME         (R3 the longest name, R4 the history page)
+       LI   R2,ABOLD
+       LI   R3,31
+       LI   R4,PGFREE
+       BL   @LINEIN
+       CI   R0,KENTER*256
+       JEQ  PR2
+       SETO @QUITF             BACK or QUIT: leave the program
+       JMP  PR9
+* a file name needs something after the device's dot
+PR2    CLR  R0
+       MOVB @SRCNAME,R0
+       SRL  R0,8
+       CI   R0,6
+       JL   PR3
+       LI   R1,SRCNAME
+       A    R0,R1
+       MOVB *R1,R2             the last character
+       CI   R2,>2E00           '.'
+       JNE  PR4
+PR3    LI   R0,8*COLS+2
+       LI   R1,SBAD
+       LI   R2,AERR
+       BL   @PUTS
+       JMP  PR1
+PR4    LI   R0,PG_ED
+       CLR  R1
+       BL   @GOMOD
+PR9    .leave
+       RT
+
+TICK   RT
+
+STITLE STRI 'EDITOR - a text editor, built from the workbench editor'
+SHELP1 STRI 'Type the name of a file, such as DSK1.NOTES, and press ENTER.'
+SHELP2 STRI 'In the editor: CTRL S saves, CTRL X comes back, FCTN = quits.'
+SFILE  STRI 'File:'
+SDSK   STRI 'DSK1.'
+SSAVED STRI 'Saved.  (No assembler here: CTRL A is CTRL S, CTRL X.)'
+SBAD   STRI 'A file name needs more after the dot: DSK1.NOTES                '
+
+* the line editor, included here
+       COPY "linein.a99"

@@ -1,0 +1,9 @@
+{
+  "name": "EDITOR",
+  "min_pages": 128,
+  "modules": [
+    {"name": "wb", "source": "front.a99"},
+    {"name": "ed", "source": "../workbench/ed.a99"}
+  ],
+  "boot": "wb"
+}
