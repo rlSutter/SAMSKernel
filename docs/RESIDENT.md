@@ -90,8 +90,13 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
    `CLKGET`: 1,962 bytes), the **page pool** (172 bytes, and, since there is then no bitmap, the 512 bytes it needed: the kernel may be
    8,192 bytes instead of 7,680; it is an error to ask for `"omit": ["pool"]` and `"pool_max_pages"` together). All three together: a kernel
    of 4,038 bytes instead of 6,678, with 4,154 bytes free in its 8K, four times the default room. A module (or the resident code, or a
-   file it `COPY`s) that uses a routine that was left out is refused by name, with the word that removes it. The F18A modes are not on
-   the list: the boot screen is set by `VMODE`, which carries all five, so there is nothing to cut without rewriting it.
+   file it `COPY`s) that uses a routine that was left out is refused by name, with the word that removes it. Two more words (1.19.0)
+   cut inside `VMODE`, which sets the boot screen and so cannot go whole: **`"graphics"`** leaves out Graphics I, Graphics II and
+   Multicolor (308 bytes: their tables, branches and the VMGM1, VMGM2, VMMC names) and **`"enhanced"`** leaves out enhanced colour and
+   sprites (164 bytes: VR49-VR51's bits, the extra pattern planes, the palette trick; the VOTE1-3, VOSE1-3, VOSPR, VOS16, VOSMG names).
+   Both: 472 bytes, a kernel that sets Text 80 and Text 40, 24 or 30 rows, with or without position attributes, and no more. All five
+   words: a 3,566-byte kernel with 4,626 bytes free in its 8K. A program that chooses its mode number at run time cannot be checked at
+   build time: asking a trimmed kernel for a mode it lacks is undefined.
 
 ## Testing
 

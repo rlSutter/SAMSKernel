@@ -1,7 +1,10 @@
 *======================================================================
 * video.a99 - the F18A's display modes: VMODE sets any of them (Text 80,
 * Text 40, Graphics I, Graphics II, Multicolor; 24 or 30 rows; enhanced
-* colour for tiles and sprites), T80INI is the boot mode (Text 80, 30 rows,
+* colour for tiles and sprites; an application may leave the graphics modes
+* (app.json "omit": "graphics") and the enhanced colour and sprites ("enhanced")
+* out of its kernel: the build defines NOGRAPHICS and NOENHANCED and the
+* code for them is skipped), T80INI is the boot mode (Text 80, 30 rows,
 * attribute per position), the colour schemes (LDSCHM, SETSCH), register
 * access (VREG) and the DMA row mover (VSHIFT).  The kernel includes it;
 * the loader does not.  docs/VIDEO-MODES.md is the guide.
@@ -49,6 +52,7 @@ LDSCHM .enter
        CLR  R0
        LI   R2,16
        BL   @F18PAL
+       .ifndef NOENHANCED
        MOV  @VMOPT,R0          enhanced colour for tiles?
        ANDI R0,>000C
        JEQ  LDS1
@@ -58,6 +62,7 @@ LDSCHM .enter
        LI   R0,1
        LI   R2,1
        BL   @F18PAL
+       .endif
 LDS1   .pop R1                 slot B back, as it was
        .pop R0
        BL   @SETPB
@@ -102,6 +107,7 @@ VMODE  .enter
        BL   @F18UNL            (nothing if unlocked already)
        LI   R0,>81A0           VR1: display off while we work
        BL   @VDPWR
+       .ifndef NOGRAPHICS
        MOV  @VMNUM,R0          options a mode cannot use are dropped
        CI   R0,VMGM2
        JL   VM1
@@ -113,6 +119,7 @@ VMODE  .enter
        MOV  @VMOPT,R1          Graphics II: no 30 rows
        ANDI R1,>FFFE
        MOV  R1,@VMOPT
+       .endif
 VM1    MOV  @VMNUM,R2          VR0-VR7 from MODTAB: 8 words a mode
        SLA  R2,4
        AI   R2,MODTAB
@@ -121,6 +128,7 @@ VM2    MOV  *R2+,R0
        BL   @VDPWR
        DEC  R3
        JNE  VM2
+       .ifndef NOGRAPHICS
        MOV  @VMNUM,R0          Graphics I with enhanced colour: its colour
        CI   R0,VMGM1           table is the attribute table
        JNE  VM3
@@ -129,11 +137,26 @@ VM2    MOV  *R2+,R0
        JEQ  VM3
        LI   R0,>8328           VR3 = ATRTAB / 64
        BL   @VDPWR
+       .endif
 VM3    LI   R2,VMCONS          the registers that do not depend on the mode
 VM3A   MOV  *R2+,R0
        JEQ  VM4
        BL   @VDPWR
        JMP  VM3A
+       .ifdef NOENHANCED
+VM4    MOV  @VMOPT,R2          VR49: 30 rows (no enhanced colour built in)
+       ANDI R2,>0001
+       SLA  R2,6
+       ORI  R2,>B100
+       MOV  R2,R0
+       BL   @VDPWR
+       MOV  @VMOPT,R0          VR50: attribute per position
+       ANDI R0,>0002
+       ORI  R0,>B200
+       BL   @VDPWR
+       LI   R0,>B300           VR51: no sprites (none built in)
+VM5    BL   @VDPWR
+       .else
 VM4    MOV  @VMOPT,R1          VR49: 30 rows, tile ECM, sprite ECM
        MOV  R1,R2
        ANDI R2,>0001
@@ -159,6 +182,7 @@ VM4    MOV  @VMOPT,R1          VR49: 30 rows, tile ECM, sprite ECM
        JEQ  VM5
        LI   R0,>B320
 VM5    BL   @VDPWR
+       .endif
        MOV  @VMNUM,R1          the geometry the text routines use
        SLA  R1,1
        MOV  @COLTAB(R1),@TXCOLS
@@ -172,30 +196,37 @@ VM6    MOV  R0,@TXROWS
        MPY  R0,R2              R2:R3 = columns * rows
        MOV  R3,@TXCELLS
        LI   R0,NAMTAB
+       .ifndef NOGRAPHICS
        MOV  @VMNUM,R1
        CI   R1,VMGM2
        JNE  VM7
        LI   R0,NAMGM2
-VM7    MOV  R0,@NAMBAS
+VM7    .endif
+       MOV  R0,@NAMBAS
        CLR  R2                 TXATTR: an attribute table in use?
        MOV  @VMNUM,R0
        MOV  @VMOPT,R1
+       .ifndef NOGRAPHICS
        CI   R0,VMT40
        JH   VM7A
+       .endif
        ANDI R1,>000E           Text 80 / 40: a position attribute or ECM
        JEQ  VM7B
        SETO R2
+       .ifndef NOGRAPHICS
        JMP  VM7B
 VM7A   CI   R0,VMGM1           Graphics I: ECM only
        JNE  VM7B
        ANDI R1,>000C
        JEQ  VM7B
        SETO R2
+       .endif
 VM7B   MOV  R2,@TXATTR
        BL   @VMTAB             the tables, the glyphs, the palette
        MOV  @VMNUM,R1          last: display on, with the sprite size bits
        SLA  R1,1
        MOV  @VR1TAB(R1),R2
+       .ifndef NOENHANCED
        MOV  @VMOPT,R1
        ANDI R1,>0080           16 x 16 sprites: VR1 bit 1
        JEQ  VM8
@@ -204,6 +235,7 @@ VM8    MOV  @VMOPT,R1
        ANDI R1,>0100           magnified: bit 0
        JEQ  VM9
        ORI  R2,>0001
+       .endif
 VM9    MOV  R2,R0
        ORI  R0,>8100
        BL   @VDPWR
@@ -217,11 +249,13 @@ VM9    MOV  R2,R0
 * the font, the sprite attribute table cleared, the GPU program, the palette.
 * Uses R0-R9.
 VMTAB  .enter
+       .ifndef NOGRAPHICS
        MOV  @VMNUM,R0
        CI   R0,VMGM2
        JEQ  VT2                Graphics II
        CI   R0,VMMC
        JEQ  VT3                Multicolor
+       .endif
 * text-like: Text 80, Text 40, Graphics I
        MOV  @NAMBAS,R0         the name table: spaces
        LI   R1,>2000
@@ -230,13 +264,18 @@ VMTAB  .enter
        MOV  @TXATTR,@TXATTR
        JEQ  VT1A
        LI   R1,(RTEXT*16+RBG)*256   the attributes: text on the page,
+       .ifndef NOENHANCED
        MOV  @VMOPT,R0               or 0 (palette pair 0) in ECM
        ANDI R0,>000C
        JEQ  VT1
        CLR  R1
+       .endif
 VT1    LI   R0,ATRTAB
        MOV  @TXCELLS,R2
        BL   @VFILL
+       .ifdef NOGRAPHICS
+VT1A
+       .else
 VT1A   MOV  @VMNUM,R0          Graphics I's own colour table: text on the page
        CI   R0,VMGM1
        JNE  VT1B
@@ -244,6 +283,7 @@ VT1A   MOV  @VMNUM,R0          Graphics I's own colour table: text on the page
        LI   R1,(RTEXT*16+RBG)*256
        LI   R2,32
        BL   @VFILL
+       .endif
 VT1B   MOV  @CURBE,R0          the glyphs, from the data bank
        .push R0
        MOV  @CURBF,R0
@@ -257,6 +297,7 @@ VT1B   MOV  @CURBE,R0          the glyphs, from the data bank
        .pop R1
        .pop R0
        BL   @SETPB
+       .ifndef NOENHANCED
        MOV  @VMOPT,R0          planes 1 and 2 of the pattern table, blank
        ANDI R0,>000C           for the enhanced colour modes that use them
        CI   R0,>0008
@@ -273,6 +314,8 @@ VT1B   MOV  @CURBE,R0          the glyphs, from the data bank
        CLR  R1
        LI   R2,2048
        BL   @VFILL
+       .endif
+       .ifndef NOGRAPHICS
        JMP  VT4
 VT2    LI   R0,GM2PT           Graphics II: patterns blank ...
        CLR  R1
@@ -299,12 +342,15 @@ VT3    MOV  @NAMBAS,R0         Multicolor: names and the colour blocks blank
        CLR  R1
        LI   R2,2048
        BL   @VFILL
+       .endif
 VT4    LI   R0,SATAB           no sprites: the attribute table clear
+       .ifndef NOGRAPHICS
        MOV  @VMNUM,R1
        CI   R1,VMGM2
        JNE  VT5
        LI   R0,GM2SAT
-VT5    CLR  R1
+VT5    .endif
+       CLR  R1
        LI   R2,256
        BL   @VFILL
        LI   R0,GPUAD           the GPU's program
@@ -319,11 +365,19 @@ VT5    CLR  R1
 * display is off here, on at the end of VMODE (VR1TAB)
 MODTAB DATA >8004,>81B0,>8200,>8328,>8403,>8528,>8606,>8721      Text 80
        DATA >8000,>81B0,>8200,>8328,>8403,>8528,>8606,>8721      Text 40
+       .ifndef NOGRAPHICS
        DATA >8000,>81A0,>8200,>8327,>8403,>8528,>8606,>8721      Graphics I
        DATA >8002,>81A0,>8206,>83FF,>8403,>8538,>8607,>8721      Graphics II
        DATA >8000,>81A8,>8200,>8300,>8403,>8528,>8606,>8721      Multicolor
-VR1TAB DATA >00F0,>00F0,>00E0,>00E0,>00E8
-COLTAB DATA 80,40,32,32,32
+       .endif
+VR1TAB DATA >00F0,>00F0
+       .ifndef NOGRAPHICS
+       DATA >00E0,>00E0,>00E8
+       .endif
+COLTAB DATA 80,40
+       .ifndef NOGRAPHICS
+       DATA 32,32,32
+       .endif
 * VR10, VR11, VR19, VR24-VR31 and VR47-VR48 to their power-up values; tile layer
 * 2 and the bitmap layer off, no scroll, the plane offsets VOTE and VOSE use
 * (tiles >800 apart, sprites >200 apart), VR15 on status register 0

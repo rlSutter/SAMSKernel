@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim textonly editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1521,6 +1521,66 @@ def trim():
     r, size, img = variant('tests/apps/resident', lambda j: (j.pop('pool_max_pages', None), j.update(omit=['pool'])), big)
     check(r.returncode == 0 and size is not None and size > 7680, 'with the pool left out the same kernel fits: %s bytes, more than the 7,680 the bitmap allows' % size)
 
+def textonly():
+    """app.json "omit": "graphics" (Graphics I, Graphics II, Multicolor) and "enhanced" (enhanced colour and sprites) leave the
+    code for them out of VMODE.  Each makes the kernel smaller and the application still boots in Text 80 and echoes keys; VMODE still
+    sets Text 80 and Text 40, 24 and 30 rows, position attributes; what is not left out still works (enhanced colour text without
+    "graphics", the graphics modes without "enhanced"); a module that names a mode or option that was left out is refused by name."""
+    import asmharness, shutil, tempfile
+    def variant(words, edit_file=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'examples', 'hello'), d + '/app')
+        j = json.load(open(d + '/app/app.json')); j['omit'] = words; json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_file:
+            edit_file(d + '/app')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        size = next((int(l.split()[1]) for l in r.stdout.split('\n') if l.startswith('kernel ')), None)
+        img = glob.glob(d + '/out/*8.bin')
+        return r, size, (open(img[0], 'rb').read() if img else None), d + '/out'
+    r, base, img, out = variant([])
+    check(base is not None, 'the unchanged kernel is %s bytes' % base)
+    for words, least in ((['graphics'], 290), (['enhanced'], 150), (['graphics', 'enhanced'], 450), (['music', 'files', 'pool', 'graphics', 'enhanced'], 3000)):
+        r, size, img, out = variant(words)
+        syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)      # with the real console ROM the machine may be inside its interrupt routine when the
+        try:                                                # run ends, and the calls below (which set up their own registers) need it between frames
+            m, cpu, halt = sim9900.run(img, frames=300, keys='hi')
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+        ok = halt is None and any(l.strip() == 'HI' for l in sim9900.screen(m).split('\n')) and m.rw(syms['txcols']) == 80 and m.rw(syms['txrows']) == 30
+        check(r.returncode == 0 and size is not None and base - size >= least and ok,
+              'omit %s: the kernel is %s bytes, %s smaller (at least %d); it boots in Text 80, 30 rows, and echoes keys' % (words, size, base - size if size else '?', least))
+        call = lambda mode, opt, m=m, cpu=cpu, syms=syms: asmharness.call(m, cpu, syms['vmode'], {0: mode, 1: opt}, limit=5_000_000)
+        T80, T40 = syms['vmgm1'] - 2, syms['vmgm1'] - 1
+        call(T40, 0)
+        got40 = (m.rw(syms['txcols']), m.rw(syms['txrows']), m.rw(syms['txattr']))
+        call(T80, 0)
+        got24 = (m.rw(syms['txcols']), m.rw(syms['txrows']), m.rw(syms['txattr']))
+        call(T80, 3)
+        got30 = (m.rw(syms['txcols']), m.rw(syms['txrows']), m.rw(syms['txattr']))
+        check(got40 == (40, 24, 0) and got24 == (80, 24, 0) and got30 == (80, 30, 0xFFFF),
+              '   VMODE sets Text 40 %s, Text 80 24 rows %s, Text 80 30 rows with position attributes %s' % (got40, got24, got30))
+        if 'graphics' not in words:
+            call(syms['vmgm2'], 0)
+            gm = (m.rw(syms['txcols']), m.rw(syms['txrows']))
+            check(gm == (32, 24), '   Graphics II still works with graphics kept: %s columns by %s rows' % gm)
+        if 'enhanced' not in words:
+            call(T80, syms['vote1'] + 3)
+            check(m.rw(syms['txattr']) == 0xFFFF, '   enhanced colour text still works with enhanced kept (TXATTR %04X)' % m.rw(syms['txattr']))
+    def names(*ws):
+        def f(d):
+            s = open(d + '/hello.a99').read()
+            s = s.replace('INIT   .enter', 'INIT   .enter\n' + ''.join('       LI   R1,%s\n' % w for w in ws), 1)
+            open(d + '/hello.a99', 'w').write(s)
+        return f
+    for word, name in (('graphics', 'VMGM2'), ('graphics', 'VMMC'), ('enhanced', 'VOSPR'), ('enhanced', 'VOTE2')):
+        r, size, img, out = variant([word], names(name))
+        check(r.returncode != 0 and name in (r.stdout + r.stderr) and ('"%s"' % word) in (r.stdout + r.stderr),
+              'a module that uses %s, with "%s" left out, is refused by name: %s' % (name, word, (r.stdout + r.stderr).strip().split('\n')[-1][:100]))
+    r, size, img, out = variant(['graphics'], names('VOSPR', 'VOTE1'))
+    check(r.returncode == 0, 'and the options that were not left out are fine (VOSPR, VOTE1 with only graphics omitted)')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1668,7 +1728,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

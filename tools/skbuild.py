@@ -18,7 +18,9 @@ app.json:
     ],
     "boot":      "hello",              the module that starts (default: the first)
     "omit": ["music"],                  optional: parts of the kernel the program does not use and leaves out, from
-                                         "music", "files", "pool": the room goes to resident code (docs/RESIDENT.md)
+                                         "music", "files", "pool", "graphics" (Graphics I, Graphics II, Multicolor)
+                                         and "enhanced" (enhanced colour, sprites): the room goes to resident code
+                                         (docs/RESIDENT.md)
     "pool_max_pages": 4096,             optional: the most pages the program's pool will ever manage (a multiple
                                          of 64): the bitmap is pool_max_pages/8 bytes, the rest of the 512 is room
                                          for the kernel and resident code (docs/RESIDENT.md)
@@ -79,7 +81,13 @@ def run(*cmd):
         sys.exit('skbuild: failed: ' + ' '.join(cmd))
 
 
-OMITTABLE = {'music': ('NOMUSIC', 'music'), 'files': ('NOFILES', 'files'), 'pool': ('NOPOOL', 'pool')}
+# what an application may leave out of its kernel: the symbol the build defines for the assembler (-D), and the kernel file that
+# is skipped (None: part of video.a99, skipped inside it) ...
+OMITTABLE = {'music': ('NOMUSIC', 'music'), 'files': ('NOFILES', 'files'), 'pool': ('NOPOOL', 'pool'),
+             'graphics': ('NOGRAPHICS', None), 'enhanced': ('NOENHANCED', None)}
+# ... and the names (equates, for the parts inside video.a99) that a module must then not use
+OMITTED_EQUATES = {'graphics': ['VMGM1', 'VMGM2', 'VMMC'],
+                   'enhanced': ['VOTE1', 'VOTE2', 'VOTE3', 'VOSE1', 'VOSE2', 'VOSE3', 'VOSPR', 'VOS16', 'VOSMG']}
 
 
 def asm(src, out, incs, lst=None, equ=None, defs=()):
@@ -102,6 +110,10 @@ def omitted_routines(app, ksrc):
     pub = set(open(os.path.join(ksrc, 'public.txt')).read().split())
     out = {}
     for key in app['omit']:
+        for n in OMITTED_EQUATES.get(key, []):
+            out[n] = key
+        if OMITTABLE[key][1] is None:
+            continue
         for line in open(os.path.join(ksrc, OMITTABLE[key][1] + '.a99'), encoding='latin-1'):
             m = re.match(r'^([A-Z][A-Z0-9_]*)\b', line)
             if m and m.group(1) in pub and m.group(1) != 'MUTICK':
