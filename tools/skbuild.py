@@ -17,6 +17,8 @@ app.json:
       {"name": "more",  "source": "more.a99", "page": "0x20"}   (optional page)
     ],
     "boot":      "hello",              the module that starts (default: the first)
+    "omit": ["music"],                  optional: parts of the kernel the program does not use and leaves out, from
+                                         "music", "files", "pool": the room goes to resident code (docs/RESIDENT.md)
     "pool_max_pages": 4096,             optional: the most pages the program's pool will ever manage (a multiple
                                          of 64): the bitmap is pool_max_pages/8 bytes, the rest of the 512 is room
                                          for the kernel and resident code (docs/RESIDENT.md)
@@ -77,7 +79,10 @@ def run(*cmd):
         sys.exit('skbuild: failed: ' + ' '.join(cmd))
 
 
-def asm(src, out, incs, lst=None, equ=None):
+OMITTABLE = {'music': ('NOMUSIC', 'music'), 'files': ('NOFILES', 'files'), 'pool': ('NOPOOL', 'pool')}
+
+
+def asm(src, out, incs, lst=None, equ=None, defs=()):
     cmd = [sys.executable, XAS, '-R', '-b', '-q']
     if equ:
         cmd += ['-E', equ]
@@ -85,8 +90,50 @@ def asm(src, out, incs, lst=None, equ=None):
     if lst:
         cmd += ['-L', lst]
     cmd += ['-o', out, src]
+    if defs:
+        cmd += ['-D'] + list(defs)          # (after the source: -D takes every word that follows it)
     run(*cmd)
     return open(out, 'rb').read()
+
+
+def omitted_routines(app, ksrc):
+    """{routine name: the "omit" word that removes it}: the kernel's public routines defined in the files that are left out
+    (MUTICK stays: without the music code it is a bare return)."""
+    pub = set(open(os.path.join(ksrc, 'public.txt')).read().split())
+    out = {}
+    for key in app['omit']:
+        for line in open(os.path.join(ksrc, OMITTABLE[key][1] + '.a99'), encoding='latin-1'):
+            m = re.match(r'^([A-Z][A-Z0-9_]*)\b', line)
+            if m and m.group(1) in pub and m.group(1) != 'MUTICK':
+                out[m.group(1)] = key
+    return out
+
+
+def source_words(path, incs, seen=None):
+    """Every name used as an operand in the source at PATH and in the files it COPYs (not the kernel's own)."""
+    seen = seen if seen is not None else set()
+    words = set()
+    if path in seen or not os.path.exists(path):
+        return words
+    seen.add(path)
+    for line in open(path, encoding='latin-1'):
+        if line.startswith('*') or not line.strip():
+            continue
+        f = line.split()
+        if line[0] not in ' \t':
+            f = f[1:]                                   # a label
+        if len(f) < 2:
+            continue
+        if f[0].upper() == 'COPY':
+            name = f[1].strip('"\'')
+            if name.lower() not in ('kernel.equ', 'macros.a99'):
+                for d in incs:
+                    if os.path.exists(os.path.join(d, name)):
+                        words |= source_words(os.path.join(d, name), incs, seen)
+                        break
+            continue
+        words |= set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', f[1]))
+    return {w.upper() for w in words}
 
 
 def num(v):
@@ -118,6 +165,11 @@ def load_app(appdir):
     if app['boot'] not in names:
         die('"boot" names no module')
     app.setdefault('data', [])
+    omit = app.setdefault('omit', [])
+    if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
+        die('"omit" lists some of: %s' % ', '.join(sorted(OMITTABLE)))
+    if 'pool' in omit and 'pool_max_pages' in app:
+        die('"omit": ["pool"] leaves out the page pool, and "pool_max_pages" sets the size of its bitmap: use one')
     app.setdefault('pool_max_pages', 4096)
     pm = app['pool_max_pages']
     if not isinstance(pm, int) or pm % 64 or not 64 <= pm <= 4096:
@@ -204,7 +256,7 @@ def write_cfg(app, bdir, banks, pgfree):
         L.append('%-6s EQU  >%02X' % ('PG_' + ident(m['name']), m['_page']))
     L.append('PGBOOT EQU  PG_' + ident(app['boot']))
     L.append('PGFREE EQU  >%02X' % pgfree + '            first SAMS page the build leaves unassigned')
-    pm = app['pool_max_pages']
+    pm = 0 if 'pool' in app['omit'] else app['pool_max_pages']       # (no pool: no bitmap)
     L.append('POOLMX EQU  %d            pages the pool can manage: pool_max_pages' % pm)
     L.append('POOLBM EQU  >%04X          the pool bitmap: at the top of the kernel\'s pages' % (0xC000 - pm // 8))
     L.append('POOLWD EQU  %d             its size in words' % (pm // 16))
@@ -291,9 +343,10 @@ def main():
     run(sys.executable, os.path.join(ROOT, 'tools', 'keytab.py'))
     prepare_data(app, bdir)
     pgfree = assign_pages(app)
-    if app['pool_max_pages'] <= pgfree:
+    nopool = 'pool' in app['omit']
+    if not nopool and app['pool_max_pages'] <= pgfree:
         die('"pool_max_pages" (%d) must be above the first free page (>%02X): the pool would be empty' % (app['pool_max_pages'], pgfree))
-    kmax = 0xC000 - app['pool_max_pages'] // 8 - 0xA000          # the kernel may be this long: the bitmap is above it
+    kmax = 0x2000 if nopool else 0xC000 - app['pool_max_pages'] // 8 - 0xA000     # the kernel may be this long: the pool bitmap, if any, is above it
     # banks: 0 loader, 1 kernel, 2 data bank, then modules, then data files
     banks = [(2, PGDATA)]
     nb = 3
@@ -319,9 +372,18 @@ def main():
     else:
         text = '* no resident code\nKRESB\nKRESE\n'
     open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
+    if app['omit']:
+        gone = omitted_routines(app, ksrc)
+        users = [(m['name'], os.path.join(appdir, m['source'])) for m in app['modules']]
+        if res:
+            users.append(('the resident code', os.path.join(appdir, res['source'])))
+        for who, path in users:
+            hit = sorted(gone.keys() & source_words(path, incs))
+            if hit:
+                die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ)
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']])
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']
     for n in (res or {}).get('exports', []):
@@ -347,9 +409,10 @@ def main():
             images.append(raw[c * BANK:(c + 1) * BANK])
         sizes.append((d['file'], len(raw)))
     if len(kernel) > kmax:
-        die('the kernel (%d bytes%s) runs into the page-pool bitmap at >%04X: it may be at most %s bytes%s' %
-            (len(kernel), ', of which resident code %d' % rbytes if res else '', 0xA000 + kmax, format(kmax, ','),
-             '' if app['pool_max_pages'] < 4096 else ' (a smaller "pool_max_pages" makes the bitmap, and so the room, smaller)'))
+        die('the kernel (%d bytes%s) %s: it may be at most %s bytes%s' %
+            (len(kernel), ', of which resident code %d' % rbytes if res else '',
+             'does not fit its 8K' if nopool else 'runs into the page-pool bitmap at >%04X' % (0xA000 + kmax), format(kmax, ','),
+             '' if nopool or app['pool_max_pages'] < 4096 else ' (a smaller "pool_max_pages" makes the bitmap, and so the room, smaller; so does leaving out the pool)'))
     for n, sz in sizes:
         if sz > BANK:
             die('%s is %d bytes: over its 8K bank' % (n, sz))
@@ -360,13 +423,16 @@ def main():
     image = b''.join(b.ljust(BANK, b'\0') for b in images).ljust(n * BANK, b'\0')
     out = os.path.join(bdir, app['name'].lower().replace(' ', '') + '8.bin')
     open(out, 'wb').write(image)
-    print('kernel %d bytes (ends >%04X, %d free below the page-pool bitmap at >%04X)' % (len(kernel), 0xA000 + len(kernel), kmax - len(kernel), 0xA000 + kmax))
+    print('kernel %d bytes (ends >%04X, %d free %s)' % (len(kernel), 0xA000 + len(kernel), kmax - len(kernel),
+          'in its 8K: no pool, no bitmap' if nopool else 'below the page-pool bitmap at >%04X' % (0xA000 + kmax)))
+    if app['omit']:
+        print('  left out of the kernel (app.json "omit"): %s' % ', '.join(app['omit']))
     if res:
         print('  of which resident code %d bytes (exports: %s)' % (rbytes, ' '.join(res['exports']) or 'none'))
     for (nme, sz) in sizes[3:]:
         print('  %-16s %5d bytes' % (nme, sz))
-    print('wrote %s: %dK, %d banks, SAMS pages needed: %d (pool from >%02X)' %
-          (out, len(image) // 1024, n, app['min_pages'], pgfree))
+    print('wrote %s: %dK, %d banks, SAMS pages needed: %d (%s)' %
+          (out, len(image) // 1024, n, app['min_pages'], 'no pool' if nopool else 'pool from >%02X' % pgfree))
 
 
 if __name__ == '__main__':

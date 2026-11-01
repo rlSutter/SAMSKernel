@@ -131,9 +131,21 @@ KXFF   DATA >FFFF
        COPY "text.a99"
        COPY "video.a99"
        COPY "modules.a99"
+* The parts an application may leave out (app.json "omit": the build defines
+* NOPOOL, NOFILES, NOMUSIC with the assembler's -D).  Nothing else in the
+* kernel calls into pool.a99 or files.a99; the song is stepped from three
+* places, which call MUTICK, so without the music code it is a bare RT.
+       .ifndef NOPOOL
        COPY "pool.a99"
+       .endif
+       .ifndef NOFILES
        COPY "files.a99"
+       .endif
+       .ifdef NOMUSIC
+MUTICK RT
+       .else
        COPY "music.a99"
+       .endif
        COPY "kresident.a99"
 KEND
        END

@@ -882,6 +882,10 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
+  bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192
+  bytes; not together with `pool_max_pages`). The room goes to resident code; a module that uses a routine that is left out is refused by
+  name. All three: a 4,038-byte kernel, 4,154 bytes free. See `docs/RESIDENT.md`.
 - **`pool_max_pages`** (optional, a multiple of 64 from 64 to 4096; default 4096) is the most pages your program's pool will ever
   manage. The pool's bitmap has a bit for each: pages/8 bytes (512 for the default), kept at the top of the kernel's pages, so a
   smaller number gives the kernel (and resident code) the difference as room, up to 480 bytes. `PINIT` is cut to it: no page from

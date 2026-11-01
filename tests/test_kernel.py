@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1468,6 +1468,59 @@ def jumpcheck():
     got = jc.scan(p)
     check([(s, dsp) for s, _, dsp in got] == [(0, 127), (0, -128), (126, 1)], 'a synthetic listing: the two longest reaches have 0 words to spare, the near one 126, and non-jumps are ignored: %s' % [(s, dsp) for s, _, dsp in got])
 
+def trim():
+    """app.json "omit": parts of the kernel an application leaves out (music, files, pool).  Each makes the kernel smaller and the
+    application still runs; leaving out the pool also frees its bitmap's 512 bytes, so a kernel may then be 8,192 bytes; a module that
+    uses a routine that was left out is refused by name; bad lists are refused."""
+    import shutil, tempfile
+    def variant(src_dir, edit_json=None, edit_file=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, src_dir), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_file:
+            edit_file(d + '/app')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        size = None
+        for l in r.stdout.split('\n'):
+            if l.startswith('kernel '):
+                size = int(l.split()[1])
+        img = glob.glob(d + '/out/*8.bin')
+        return r, size, (open(img[0], 'rb').read() if img else None)
+    def echoes(img):
+        m, cpu, halt = sim9900.run(img, frames=300, keys='hi')
+        return halt is None and any(l.strip() == 'HI' for l in sim9900.screen(m).split('\n'))
+    r, base, img = variant('examples/hello')
+    check(base is not None and echoes(img), 'the unchanged application: a kernel of %s bytes, and it runs and echoes keys' % base)
+    for words, least in ((['music'], 480), (['files'], 1900), (['pool'], 150), (['music', 'files', 'pool'], 2600)):
+        r, size, img = variant('examples/hello', lambda j, w=words: j.update(omit=w))
+        check(r.returncode == 0 and size is not None and base - size >= least and echoes(img),
+              'omit %s: the kernel is %s bytes, %s smaller (at least %d), and the application still runs' % (words, size, base - size if size else '?', least))
+    r, size, img = variant('examples/hello', lambda j: j.update(omit=['music', 'files', 'pool']))
+    check('in its 8K: no pool, no bitmap' in r.stdout and 'left out of the kernel (app.json "omit"): music, files, pool' in r.stdout, 'the build says what was left out and that there is no bitmap: %s' % [l.strip() for l in r.stdout.split('\n') if 'left out' in l or 'in its 8K' in l])
+    def uses(routine):
+        def f(d):
+            s = open(d + '/hello.a99').read()
+            s = s.replace('INIT   .enter', 'INIT   .enter\n       BL   @%s' % routine, 1) if 'INIT   .enter' in s else s + '\n       BL   @%s\n' % routine
+            open(d + '/hello.a99', 'w').write(s)
+        return f
+    for routine, word in (('FOPEN', 'files'), ('PINIT', 'pool'), ('MUPLAY', 'music')):
+        r, size, img = variant('examples/hello', lambda j, w=word: j.update(omit=[w]), uses(routine))
+        check(r.returncode != 0 and routine in (r.stdout + r.stderr) and ('"%s"' % word) in (r.stdout + r.stderr), 'a module that BLs %s, with "%s" left out, is refused by name: %s' % (routine, word, (r.stdout + r.stderr).strip().split('\n')[-1][:100]))
+    r, size, img = variant('examples/hello', lambda j: j.update(omit=['music']), uses('FOPEN'))
+    check(r.returncode == 0, 'and using a routine that is NOT left out is fine (FOPEN with only music omitted)')
+    r, size, img = variant('examples/hello', lambda j: j.update(omit=['sound']))
+    check(r.returncode != 0 and 'omit' in (r.stdout + r.stderr), 'an unknown part is refused')
+    r, size, img = variant('examples/hello', lambda j: j.update(omit=['pool'], pool_max_pages=256))
+    check(r.returncode != 0 and 'pool_max_pages' in (r.stdout + r.stderr), '"omit": ["pool"] with "pool_max_pages" is refused: one or the other')
+    # room for resident code: the resident test application (LINEIN: about 1,050 bytes) with 500 more bytes does not fit with a pool and
+    # fits without one
+    big = lambda d: open(d + '/resident.a99', 'a').write('       BSS  500\n')
+    r, size, img = variant('tests/apps/resident', lambda j: j.pop('pool_max_pages', None), big)
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'resident code with 500 more bytes does not fit beside a full-size pool bitmap')
+    r, size, img = variant('tests/apps/resident', lambda j: (j.pop('pool_max_pages', None), j.update(omit=['pool'])), big)
+    check(r.returncode == 0 and size is not None and size > 7680, 'with the pool left out the same kernel fits: %s bytes, more than the 7,680 the bitmap allows' % size)
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1615,7 +1668,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

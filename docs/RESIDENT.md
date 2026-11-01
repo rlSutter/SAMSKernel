@@ -72,7 +72,7 @@ bitmap (below). **`LINEIN` (about 1,050 bytes as resident code since it gained i
 application) no longer fits the default room**: the test application declares `"pool_max_pages": 1024` (a 128-byte bitmap, room for a kernel
 of 8,064 bytes). A program that wants the line editor in the kernel's pages and has no use for a pool of more than 2,048 pages can do the same;
 the alternative is to `COPY` it into each module that prompts. `skbuild` refuses a kernel that runs
-into the bitmap and says how much of it is resident. The levers, in the order I would pull them (the first is built; the others are not):
+into the bitmap and says how much of it is resident. The levers, in the order I would pull them (the first and the third are built; the second is not):
 
 1. **A smaller bitmap** (built: `"pool_max_pages"` in `app.json`, 1.16.0). The bitmap has one bit per page for all 4,096
    pages of a 16M card: 512 bytes. A program that declares the most pages it will ever pool (`"pool_max_pages": 256` for a 1M
@@ -84,7 +84,14 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
 2. **A common page.** Give every module 4K at `>C000` and a shared 4K at `>D000` that is the same page for all of them:
    4K of shared code, but modules of at most 4K (the workbench's assembler, 5,542 bytes, would not fit; Reversi, 3,392,
    would). An all-or-nothing choice per application.
-3. **Trim the kernel** of what the program does not use (the music engine, the F18A modes): a per-application kernel build.
+3. **Trim the kernel** (built, 1.18.0: `"omit"` in `app.json`). `"omit": ["music", "files", "pool"]` leaves out of the kernel's own
+   assembly (the build defines `NOMUSIC`, `NOFILES`, `NOPOOL` for the assembler, and `kernel.a99` skips the file) any of: the **music**
+   engine (506 bytes; `MUTICK`, which the key loop calls, becomes a bare return), the **files** code (the DSR calls, `FOPEN` and the rest,
+   `CLKGET`: 1,962 bytes), the **page pool** (172 bytes, and, since there is then no bitmap, the 512 bytes it needed: the kernel may be
+   8,192 bytes instead of 7,680; it is an error to ask for `"omit": ["pool"]` and `"pool_max_pages"` together). All three together: a kernel
+   of 4,038 bytes instead of 6,678, with 4,154 bytes free in its 8K, four times the default room. A module (or the resident code, or a
+   file it `COPY`s) that uses a routine that was left out is refused by name, with the word that removes it. The F18A modes are not on
+   the list: the boot screen is set by `VMODE`, which carries all five, so there is nothing to cut without rewriting it.
 
 ## Testing
 
