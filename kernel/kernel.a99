@@ -52,6 +52,9 @@ KSTART LIMI 0
        MOVB R0,@TMRINC         byte to its frame counter at >8379 each frame
        BL   @KINIT             the keyboard as at power-up
        CLR  @QUITF
+       CLR  @FRMHK             no frame hook, no break pending
+       CLR  @FRMGD
+       CLR  @BRKF
        CLR  @NEXTPG
        CLR  @GOARG
        CLR  @PREVPG
@@ -61,7 +64,7 @@ KSTART LIMI 0
        MOV  R0,@NEXTPG
        JMP  KCHK
 KMAIN  BL   @VSYNC             once per frame
-       BL   @MUTICK            the song, if one is playing
+       BL   @KFRAME            the song, and the program's frame hook
        BL   @KPOLL
        BL   @KEYGET            R0 = next code or 0
        MOV  @>C002,R1          the module's TICK

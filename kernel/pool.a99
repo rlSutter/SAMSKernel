@@ -84,14 +84,39 @@ PB1    SRL  R4,1
 PB9    RT
 
 * PALLOC - the lowest free page: R0 = its number, or 0 if the pool is
-* empty.  The page is marked in use.  Uses R0-R5.  Leaf.
-PALLOC MOV  R11,R3
-       MOV  @FREECT,R0
+* empty.  The page is marked in use.  Uses R0-R6.  Leaf.
+* PALLOCA - the lowest free page at or above R0 (a page below the pool's first
+* is taken as the first; at or above its end, 0): R0 = its number, or 0.  A
+* program that keeps objects in the pages below 256 and bulk data above asks
+* PALLOCA for the second kind.  Marked in use.  Uses R0-R6.  Leaf.
+* Both skip a bitmap byte that is zero (eight pages in use) in a few
+* instructions instead of looking at its bits, so a pool nearly full costs
+* about a thousandth of what a bit by bit scan did.
+PALLOC MOV  @POOLLO,R0
+PALLOCA MOV R11,R3
+       MOV  @FREECT,R1
        JEQ  PA8                none free
+       MOV  @POOLHI,R6         the bitmap byte after the last page's
+       AI   R6,7
+       SRL  R6,3
+       C    R0,@POOLLO
+       JHE  PA1
        MOV  @POOLLO,R0
 PA1    C    R0,@POOLHI
        JHE  PA8
-       BL   @PBIT
+       MOV  R0,R2
+       SRL  R2,3               the byte this page is in
+       MOVB @POOLBM(R2),R5
+       JNE  PA3                a page in it is free: look at the bits
+PAS    INC  R2                 none: the next byte, in as few instructions
+       C    R2,R6               as the loop can take (five a byte)
+       JHE  PA8
+       MOVB @POOLBM(R2),R5
+       JEQ  PAS
+       MOV  R2,R0              a byte with a free page: its first page,
+       SLA  R0,3
+       JMP  PA1                and then its bits
+PA3    BL   @PBIT
        MOVB *R2,R5
        COC  R4,R5              the page's bit set (free)?
        JEQ  PA2

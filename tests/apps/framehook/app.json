@@ -1,0 +1,7 @@
+{
+  "name": "FRAMEHOOK TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "fh", "source": "fh.a99"}
+  ]
+}

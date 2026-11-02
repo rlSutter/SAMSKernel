@@ -328,7 +328,10 @@ JG2    MOV  @JOY2,R1
 * back on, should the console have blanked it: VR1 = VR1CPY with the
 * display bit set, so the current mode is kept (Text 80 in the editor,
 * Graphics II on the title).  Leaf.  Uses R2, R3.
-KPUT   MOV  @KHEAD,R2
+KPUT   CI   R0,KCLEAR*256       FCTN 4 is a break: remembered even if the
+       JNE  KPU0               buffer is full and the code is dropped
+       SETO @BRKF
+KPU0   MOV  @KHEAD,R2
        MOV  R2,R3
        INC  R3
        ANDI R3,63
@@ -372,8 +375,31 @@ KIDLE  .enter
        JEQ  KI9
        INC  @FRAME             count the frame
        BL   @KPOLL             and take any keys
-       BL   @MUTICK            and step the song
+       BL   @KFRAME            and step the song, and the hook
 KI9    .leave
+       RT
+
+* KFRAME - what the kernel does once a frame at each place it polls (the
+* main loop, KIDLE, KPFR, KWAIT): step the song (MUTICK), then call the
+* program's hook if it has set one: put the hook routine's address in FRMHK
+* (0 for none).  The hook is called with BL, may change R0-R8 and R12 as KIDLE
+* may, and must keep R9-R11 and the stack; it is not called again while it
+* runs (FRMGD), so a hook that calls KIDLE cannot recurse.  It runs wherever
+* KIDLE does, which is never inside a VDP address write, but also after a DSR
+* call and inside KWAIT, so it must not leave the VDP address changed and
+* must be resident (app.json "resident"): the module that was mapped when the
+* program set it may not be mapped when it is called.  A program with no hook
+* pays one test a frame.  Uses R0-R8, R12.
+KFRAME .enter
+       BL   @MUTICK
+       MOV  @FRMHK,R0
+       JEQ  KFR9
+       MOV  @FRMGD,R1
+       JNE  KFR9
+       SETO @FRMGD
+       BL   *R0
+       CLR  @FRMGD
+KFR9   .leave
        RT
 
 * KPFR - a frame has passed during a long byte loop (the caller read the
@@ -391,7 +417,7 @@ KPFR   .enter
        .push R8
        INC  @FRAME             count the frame
        BL   @KPOLL             and take any keys
-       BL   @MUTICK            and step the song
+       BL   @KFRAME            and step the song, and the hook
        .pop R8
        .pop R7
        .pop R6
@@ -409,7 +435,7 @@ KPFR   .enter
 * run meanwhile.  Uses R0-R8, R12.
 KWAIT  .enter
 KW1    BL   @VSYNC
-       BL   @MUTICK
+       BL   @KFRAME
        BL   @KPOLL
        BL   @KEYGET
        MOV  R0,R0

@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim textonly fastmap fileprog editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax poolscan trim textonly fastmap fileprog fplayout framehook brkflag editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -40,7 +40,7 @@ def boot():
     check(m.vregs[0] == 4 and m.vregs[1] == 0xF0 and m.vregs[49] == 0x40 and m.vregs[50] == 2 and m.vregs[51] == 0,
           'Text 80, 30 rows, position attributes, no sprites, display on')
     check('Hello, SAMS Kernel' in lines(m)[0], 'the module drew its title')
-    check(m.rw(0x834C) == 128 and m.rw(0x8348) == 1 and m.rw(0x834A) == 0x19, 'NPAGES 128, F18A found, version 1.9')
+    check(m.rw(0x8344) == 128 and m.rw(0x8348) == 1 and m.rw(0x8342) == 0x19, 'NPAGES 128, F18A found, version 1.9')
     check(m.scratch[0xC2] == 0x50 and m.scratch[0xFC] == 1, 'ISR flags >50, frame increment set')
     check(m.palette.get(1) == 0x23A and m.palette.get(2) == 0xDDE, 'colour scheme 0 in the palette')
     check(bytes(m.vram[0x1800 + 65 * 8:0x1800 + 66 * 8]) == bytes([0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0]), 'glyph A in the pattern table')
@@ -62,7 +62,7 @@ def refusal():
     m, cpu, halt = sim9900.run(c, frames=150, f18a=False)
     check(any('NEEDS AN F18A' in l for l in lines(m)), 'no F18A refused')
     m, cpu, halt = sim9900.run(c, frames=120, pages=256)
-    check(m.rw(0x834C) == 256 and 'Hello' in lines(m)[0], '1M card found as 256 pages and accepted')
+    check(m.rw(0x8344) == 256 and 'Hello' in lines(m)[0], '1M card found as 256 pages and accepted')
 
 def ram():
     c = build('hello')
@@ -1378,11 +1378,11 @@ def poolmax():
             open(d + '/app/resident.a99', 'a').write(edit_res)
         r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
         return r, d + '/out'
-    big = '       BSS  250\n'
+    big = '       BSS  150\n'
     r, out = build_variant(lambda j: j.pop('pool_max_pages', None))
     check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) the test application\'s resident code (LINEIN, with its scrolling field and long lines, is about 1,130 bytes) does not fit: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:90])
     r, out = build_variant(lambda j: j.update(pool_max_pages=256), big)
-    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 250 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
+    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 150 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
     syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
     check(syms['poolbm'] == 0xBFE0 and syms['poolmx'] == 256 and syms['poolwd'] == 16, 'kernel.equ says: POOLBM >%04X, POOLMX %d, POOLWD %d' % (syms['poolbm'], syms['poolmx'], syms['poolwd']))
     c = open(glob.glob(out + '/*8.bin')[0], 'rb').read()
@@ -1530,9 +1530,9 @@ def trim():
     check(r.returncode != 0 and 'pool_max_pages' in (r.stdout + r.stderr), '"omit": ["pool"] with "pool_max_pages" is refused: one or the other')
     # room for resident code: the resident test application (LINEIN: about 1,050 bytes) with 500 more bytes does not fit with a pool and
     # fits without one
-    big = lambda d: open(d + '/resident.a99', 'a').write('       BSS  400\n')
+    big = lambda d: open(d + '/resident.a99', 'a').write('       BSS  300\n')
     r, size, img = variant('tests/apps/resident', lambda j: j.pop('pool_max_pages', None), big)
-    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'resident code with 400 more bytes does not fit beside a full-size pool bitmap')
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'resident code with 300 more bytes does not fit beside a full-size pool bitmap')
     r, size, img = variant('tests/apps/resident', lambda j: (j.pop('pool_max_pages', None), j.update(omit=['pool'])), big)
     check(r.returncode == 0 and size is not None and size > 7680, 'with the pool left out the same kernel fits: %s bytes, more than the 7,680 the bitmap allows' % size)
 
@@ -1707,6 +1707,201 @@ def fileprog():
     r = call('fsave', r0=0x2000, r1=100, r2=W)[0]
     check(r == 0xFF, 'a name too long for the PAB is refused (>%02X)' % r)
 
+def fplayout():
+    """The scratchpad and slot A maps (kernel/kdefs.a99): nothing of the kernel's lies in the console's floating-point registers FAC
+    (>834A-8351) and ARG (>835C-8363), and no two variables share a word of slot A's kernel area."""
+    import re
+    vals = {}
+    pend = []
+    for line in open(os.path.join(ROOT, 'kernel', 'kdefs.a99'), encoding='latin-1'):
+        m = re.match(r'^(\w+)\s+EQU\s+(\S+)', line)
+        if m:
+            pend.append((m.group(1), m.group(2)))
+    for _ in range(6):                                          # names may refer to names later in the file
+        for name, expr in pend:
+            if name in vals:
+                continue
+            e = re.sub(r'>([0-9A-Fa-f]+)', lambda x: str(int(x.group(1), 16)), expr)
+            e = re.sub(r'[A-Za-z_]\w*', lambda x: str(vals[x.group(0)]) if x.group(0) in vals else 'None', e)
+            if 'None' in e:
+                continue
+            try:
+                vals[name] = eval(e, {}, {})
+            except Exception:
+                pass
+    pad = {n: v for n, v in vals.items() if 0x8300 <= v < 0x8400 and n not in ('WS', 'GPLWS', 'SCRTCH')}
+    hit = {n: hex(v) for n, v in pad.items() if 0x834A <= v <= 0x8351 or 0x835C <= v <= 0x8363}
+    check(not hit, 'no kernel name lies in FAC (>834A-8351) or ARG (>835C-8363): %s (%d scratchpad names checked)' % (hit or 'none', len(pad)))
+    check((vals['F18VER'], vals['NPAGES'], vals['QUITF'], vals['F18FLG']) == (0x8342, 0x8344, 0x8346, 0x8348) and vals['VDPPIC'] == 0x20AA,
+          'the four that were in FAC moved: F18VER, NPAGES, QUITF to >8342, >8344, >8346 and VDPPIC to slot A >20AA')
+    slot = {}
+    for n, v in vals.items():
+        if 0x2060 <= v < 0x2300 and v % 2 == 0 and n not in ('APPRAM', 'SLOTA'):     # (below that, names are also VRAM addresses)
+            slot.setdefault(v, []).append(n)
+    dup = {hex(a): ns for a, ns in slot.items() if len(ns) > 1}
+    check(not dup, 'no two names share a word of slot A\'s kernel area (>2060-22FF): %s' % (dup or 'none'))
+    check({'FRMHK': 0x20DA, 'FRMGD': 0x20DC, 'BRKF': 0x20DE}.items() <= vals.items(), 'the frame hook, its guard and the break flag are in the three free words >20DA, >20DC, >20DE')
+
+def framehook():
+    """The frame hook (KFRAME, FRMHK): a program's routine is called once a frame wherever the kernel polls (here a long loop that
+    calls only KIDLE, and a file call), not at all when none is set, and not again while it runs."""
+    import asmharness, skdisk, tifdc, tempfile
+    c = build('tests/apps/framehook')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'framehook', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'framehook', 'fh.equ')))
+    d = tempfile.mkdtemp()
+    open(d + '/rec.txt', 'w').write(''.join('record %d\n' % i for i in range(40)))
+    skdisk.make_disk(d + '/d.dsk', [d + '/rec.txt'])
+    m = sim9900.Machine(c)
+    if os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM']):
+        m.tifdc = tifdc.TIFDC(image=bytearray(open(d + '/d.dsk', 'rb').read()))
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    call = lambda n, **r: asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=40_000_000)
+    check(m.rw(syms['frmhk']) == 0 and m.rw(syms['frmgd']) == 0, 'at start there is no hook and the guard is clear')
+    f0 = m.rw(syms['frame'])
+    call('long', r1=200)
+    f1 = m.rw(syms['frame']) - f0
+    check(m.rw(syms['hkcnt']) == 0 and f1 >= 5, 'with no hook, nothing is called (%d frames passed in a long loop)' % f1)
+    call('seth1')
+    f0 = m.rw(syms['frame']); h0 = m.rw(syms['hkcnt'])
+    call('long', r1=300)
+    f1 = m.rw(syms['frame']) - f0; h1 = m.rw(syms['hkcnt']) - h0
+    check(f1 >= 5 and h1 == f1, 'a long loop that calls only KIDLE: the hook ran %d times in the %d frames that passed' % (h1, f1))
+    call('seth0')
+    h0 = m.rw(syms['hkcnt'])
+    call('long', r1=200)
+    check(m.rw(syms['hkcnt']) == h0, 'and none again once the hook is cleared')
+    call('seth2')
+    f0 = m.rw(syms['frame']); h0 = m.rw(syms['hk2cnt'])
+    s0 = m.rw(0x8300 + 20)
+    r = call('long', r1=120)
+    f1 = m.rw(syms['frame']) - f0; h1 = m.rw(syms['hk2cnt']) - h0
+    check(h1 >= 2 and h1 < f1 and m.rw(syms['frmgd']) == 0 and r[10] == s0,
+          'a hook that calls KIDLE itself (and runs past a frame) is not called again inside itself: %d calls in %d frames, guard clear afterwards, stack balanced' % (h1, f1))
+    call('seth1')
+    if getattr(m, 'tifdc', None):
+        h0 = m.rw(syms['hkcnt'])
+        sys_name = 'DSK1.REC/TXT'
+        W = 0x2300 + 5000
+        for i, b in enumerate(bytes([len(sys_name)]) + sys_name.encode()):
+            m.wb(W + i, b)
+        call('fsel', r0=0)
+        r = call('fopen', r0=0x1400, r1=0, r2=W)[0]
+        for _ in range(5):
+            call('fread', r1=W + 200)
+        check(r == 0 and m.rw(syms['hkcnt']) > h0, 'file calls reach KIDLE after the DSR returns, so the hook ran during them (%d calls)' % (m.rw(syms['hkcnt']) - h0))
+
+def brkflag():
+    """The break flag (BRKF): FCTN 4 sets it whether or not the key buffer has room; other keys leave it clear; the code is still buffered
+    when there is room; and a real FCTN 4 press through the keyboard decoder sets it."""
+    import asmharness
+    c = build('tests/apps/framehook')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'framehook', 'kernel.equ'))
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m, cpu, halt = sim9900.run(c, frames=60)
+        call = lambda n, **r: asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=1_000_000)
+        call('kflush')
+        m.ww(syms['brkf'], 0)
+        call('kput', r0=0x4100)
+        check(m.rw(syms['brkf']) == 0, 'an ordinary key (A) leaves the flag clear')
+        call('kput', r0=0xF400)
+        got = [call('keyget')[0] >> 8 for _ in range(3)]
+        check(m.rw(syms['brkf']) == 0xFFFF and got[:2] == [0x41, 0xF4], 'FCTN 4 with room sets the flag and is still buffered after the A: %s' % [hex(g) for g in got])
+        call('kflush'); m.ww(syms['brkf'], 0)
+        for _ in range(63):
+            call('kput', r0=0x4100)
+        head0 = m.rw(syms['khead'])
+        call('kput', r0=0x4200)
+        check(m.rw(syms['khead']) == head0, 'the buffer is full: 63 keys held, a 64th is dropped')
+        call('kput', r0=0xF400)
+        check(m.rw(syms['brkf']) == 0xFFFF and m.rw(syms['khead']) == head0, 'FCTN 4 with the buffer full: the code is dropped as before, but the flag is set')
+        m.ww(syms['brkf'], 0)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    m, cpu, halt = sim9900.run(c, frames=200, keys='<WAIT 20><F-4><WAIT 20>')
+    check(halt is None and m.rw(syms['brkf']) == 0xFFFF, 'a real FCTN 4 press through the keyboard decoder sets the flag (%04X)' % m.rw(syms['brkf']))
+    m, cpu, halt = sim9900.run(c, frames=200, keys='<WAIT 20>a<WAIT 20>')
+    check(halt is None and m.rw(syms['brkf']) == 0, 'and an ordinary press does not')
+
+def poolscan():
+    """PALLOC skips bitmap bytes with no free page, and PALLOCA takes the lowest free page at or above R0: against a plain model over
+    random allocate, release and PALLOCA sequences in three pool shapes; a nearly full 4,096-page pool costs under 3,000 instructions;
+    PALLOCA respects the pool's first page, its end and pool_max_pages."""
+    import asmharness, random, shutil, tempfile
+    c = build('hello')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'hello', 'kernel.equ'))
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m, cpu, halt = sim9900.run(c, frames=60)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    call = lambda n, **r: asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=5_000_000)
+    rnd = random.Random(99)
+    for lo, hi in ((0x40, 0x100), (0x43, 0x1F7), (0x10, 0x1000)):
+        call('pinit', r0=lo, r1=hi)
+        free = set(range(lo, hi)); used = []; bad = None
+        for step in range(500):
+            op = rnd.choice(('a', 'a', 'a', 'r', 'x'))
+            if op == 'a':
+                want = min(free) if free else 0
+                got = call('palloc')[0]
+                if got != want: bad = ('palloc', want, got); break
+                if got: free.discard(got); used.append(got)
+            elif op == 'x':
+                r0 = rnd.randrange(0, hi + 40)
+                cand = [p for p in free if p >= r0]
+                want = min(cand) if cand else 0
+                got = call('palloca', r0=r0)[0]
+                if got != want: bad = ('palloca', hex(r0), want, got); break
+                if got: free.discard(got); used.append(got)
+            elif used:
+                p = used.pop(rnd.randrange(len(used)))
+                call('prels', r0=p); free.add(p)
+            if m.rw(syms['freect']) != len(free): bad = ('freect', len(free), m.rw(syms['freect'])); break
+        check(bad is None, 'pool %#x-%#x: 500 random PALLOC / PALLOCA / PRELS steps agree with the model (%s)' % (lo, hi, bad or 'no difference'))
+    # a nearly full pool: the first 3,900 pages in use
+    call('pinit', r0=0x10, r1=0x1000)
+    bm = syms['poolbm']
+    for i in range((0x10 + 3900) // 8):
+        m.wb(bm + i, 0)
+    for p in range(0x10 + 3900 - ((0x10 + 3900) % 8), 0x10 + 3900):
+        call('palloc')
+    i0 = m.insns
+    got = call('palloc')[0]
+    cost = m.insns - i0
+    check(got >= 0x10 + 3900 - 8 and cost < 3000, 'PALLOC with about 3,900 pages in use finds page %d in %d instructions (a bit by bit scan took about 107,000)' % (got, cost))
+    call('pinit', r0=0x40, r1=0x80)
+    a = call('palloca', r0=0x10)[0]
+    b = call('palloca', r0=0x7F)[0]
+    cc = call('palloca', r0=0x7F)[0]
+    dd = call('palloca', r0=0x80)[0]
+    check((a, b, cc, dd) == (0x40, 0x7F, 0, 0), 'PALLOCA below the pool\'s first page gives the first (%#x), at its last page gives it once (%#x) and then 0 (%d), at its end 0 (%d)' % (a, b, cc, dd))
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'examples', 'hello'), d + '/app')
+    j = json.load(open(d + '/app/app.json')); j['pool_max_pages'] = 64; json.dump(j, open(d + '/app/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+    img = open(glob.glob(d + '/out/*8.bin')[0], 'rb').read()
+    s2 = asmharness.symbols(d + '/out/kernel.equ')
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m2, cpu2, halt = sim9900.run(img, frames=60)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    c2 = lambda n, **rr: asmharness.call(m2, cpu2, s2[n], {int(k[1:]): v for k, v in rr.items()}, limit=5_000_000)
+    c2('pinit', r0=0, r1=1000)
+    x = c2('palloca', r0=63)[0]
+    y = c2('palloca', r0=63)[0]
+    z = c2('palloca', r0=64)[0]
+    check(r.returncode == 0 and (x, y, z) == (63, 0, 0), 'with "pool_max_pages": 64, PALLOCA stops at page 63: %d, then %d, and nothing at 64 (%d)' % (x, y, z))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -1854,7 +2049,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

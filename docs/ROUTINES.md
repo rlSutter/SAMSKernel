@@ -232,6 +232,10 @@ throw away every buffered code (a key held down will repeat again).  Leaf.  Uses
 
 poll the keyboard if a frame has passed (the VDP's frame flag), so keys typed during long work are buffered, and steps the music player. Reading the flag clears it, so the console's interrupt does not fire in a LIMI 0 section.  Call only between VDP transfers.  Uses R0-R8, R12.
 
+### `KFRAME` *(internal)*
+
+what the kernel does once a frame at each place it polls (the main loop, KIDLE, KPFR, KWAIT): step the song (MUTICK), then call the program's hook if it has set one: put the hook routine's address in FRMHK (0 for none).  The hook is called with BL, may change R0-R8 and R12 as KIDLE may, and must keep R9-R11 and the stack; it is not called again while it runs (FRMGD), so a hook that calls KIDLE cannot recurse.  It runs wherever KIDLE does, which is never inside a VDP address write, but also after a DSR call and inside KWAIT, so it must not leave the VDP address changed and must be resident (app.json "resident"): the module that was mapped when the program set it may not be mapped when it is called.  A program with no hook pays one test a frame.  Uses R0-R8, R12.
+
 ### `KPFR`
 
 a frame has passed during a long byte loop (the caller read the VDP status, saw bit 7 and thereby cleared it): poll the keyboard, every register but R0 kept.  Use it inside tight loops that cannot afford KIDLE's own register use.
@@ -324,7 +328,11 @@ R2 = the address of page R0's bitmap byte, R4 = its mask (in the high byte).  Le
 
 ### `PALLOC`
 
-the lowest free page: R0 = its number, or 0 if the pool is empty.  The page is marked in use.  Uses R0-R5.  Leaf.
+the lowest free page: R0 = its number, or 0 if the pool is empty.  The page is marked in use.  Uses R0-R6.  Leaf.
+
+### `PALLOCA`
+
+the lowest free page at or above R0 (a page below the pool's first is taken as the first; at or above its end, 0): R0 = its number, or 0.  A program that keeps objects in the pages below 256 and bulk data above asks PALLOCA for the second kind.  Marked in use.  Uses R0-R6.  Leaf. Both skip a bitmap byte that is zero (eight pages in use) in a few instructions instead of looking at its bits, so a pool nearly full costs about a thousandth of what a bit by bit scan did.
 
 ### `PRELS`
 

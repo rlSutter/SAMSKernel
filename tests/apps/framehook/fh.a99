@@ -1,0 +1,51 @@
+*======================================================================
+* fh.a99 - routines for tests/test_kernel.py (group framehook): a frame hook
+* that counts the frames it is called in, one that calls KIDLE itself, and a
+* long computation that calls only KIDLE.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+HKCNT  EQU  APPRAM              frames the counting hook has run in
+HK2CNT EQU  APPRAM+2            and the one that calls KIDLE
+HK2I   EQU  APPRAM+6            its loop counter (KIDLE changes R0-R8)
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+* HOOK1 - count a call
+HOOK1  INC  @HKCNT
+       RT
+* HOOK2 - count, then run long enough for another frame to pass inside the
+* hook, calling KIDLE as a program would: it must not be called again
+HOOK2  .enter
+       INC  @HK2CNT
+       LI   R0,1500
+       MOV  R0,@HK2I
+H2A    BL   @KIDLE
+       DEC  @HK2I
+       JNE  H2A
+       .leave
+       RT
+* SETH1 / SETH2 / SETH0 - register the hook, or none
+SETH1  LI   R0,HOOK1
+       MOV  R0,@FRMHK
+       RT
+SETH2  LI   R0,HOOK2
+       MOV  R0,@FRMHK
+       RT
+SETH0  CLR  @FRMHK
+       RT
+* LONG - a long loop that calls only KIDLE: R1 = how many times round
+LONG   .enter
+       MOV  R1,R9              (KIDLE changes R0-R8 but keeps R9)
+LG1    LI   R2,40
+LG2    DEC  R2
+       JNE  LG2
+       BL   @KIDLE
+       DEC  R9
+       JNE  LG1
+       .leave
+       RT

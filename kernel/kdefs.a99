@@ -104,17 +104,22 @@ WS     EQU  >8300            the one workspace: R0-R15 (LWPI WS)
 HOT    EQU  >8340            kernel hot variables
 * 16-bit frame counter (VSYNC and the idle polls add 1)
 FRAME  EQU   HOT+0
-* (HOT+2, +4, +6: free; they held the packed slot words before 1.4.0)
+* The console's floating-point routines (FADD, FMUL, the conversions ...) keep
+* their working registers in the scratchpad: FAC at >834A-8351 and ARG at
+* >835C-8363.  Nothing of the kernel's is there (since 1.21.0: until then
+* F18VER, NPAGES, QUITF and VDPPIC were, and a float call corrupted them).
+* HOT+10 to HOT+15 and >8350-8351 are FAC's: never put a variable there.
+* F18A firmware version (status register 14), e.g. >0019
+F18VER EQU   HOT+2
+* SAMS pages present: 32, 64, 128, 256 ... 4096 (a 16M card)
+NPAGES EQU   HOT+4
+* non-zero: the application asks to quit to the TI title
+QUITF  EQU   HOT+6
 * >0001 if an F18A answered (the loader refuses otherwise)
 F18FLG EQU   HOT+8
-* F18A firmware version (status register 14), e.g. >0019
-F18VER EQU   HOT+10
-* SAMS pages present: 32, 64, 128, 256 ... 4096 (a 16M card)
-NPAGES EQU   HOT+12
-* non-zero: the application asks to quit to the TI title
-QUITF  EQU   HOT+14
-* non-zero: the F18A is a PICO9918 (DSR calls keep this word)
-VDPPIC EQU   >8350
+* non-zero: the F18A is a PICO9918 (in slot A: the loader's detection runs
+* after it has cleared slot A; it is read rarely)
+VDPPIC EQU   >20AA
 * 64 bytes: the loader's relocated bank copier (free afterwards)
 SCRTCH EQU   >8380
 
@@ -426,13 +431,21 @@ FUPDT  EQU  >0000            mode: update
 FOUT   EQU  >0200            mode: output (creates the file)
 FIN    EQU  >0400            mode: input
 FAPP   EQU  >0600            mode: append
-* the file service's own scratch words (>20D0-20DE): record buffers' addresses
+* the file service's own scratch words (>20D0-20D8): record buffers' addresses
 * and the like
 FRBUF  EQU  >20D0            FRREAD, FRWRITE: the caller's buffer
 FRLEN  EQU  >20D2            FRWRITE: its length
 FEXN   EQU  >20D4            FEXIST: the caller's file name
 FCRB   EQU  >20D6            FCATOP, FCATNX: the catalog record buffer
 FCEA   EQU  >20D8            FCATNX: the entry to fill
+* the frame hook and the break flag (1.21.0)
+* FRMHK: 0, or the address of a routine the kernel calls once a frame at every
+* place it polls the keyboard (see KFRAME); FRMGD is non-zero while it runs
+FRMHK  EQU  >20DA
+FRMGD  EQU  >20DC
+* BRKF: set (>FFFF) by the keyboard decoder when FCTN 4 (KCLEAR) is pressed,
+* whether or not the key buffer had room; the program clears it
+BRKF   EQU  >20DE
 * one file of a catalog, as FCATNX returns it (CE_SIZE bytes)
 * name: a length byte and up to 10 characters (11 bytes)
 CE_NAME EQU   0

@@ -486,6 +486,16 @@ practice means at each line read (`LINEIN`, `KWAIT` and every file call already 
 from `KWAIT` or `LINEIN`, or `FCTN =` at a `KEYGET` poll: set `QUITF`, or leave). A module that runs for seconds without `KIDLE` loses the keys typed and stops the song.
 `LINEIN` takes lines up to 159 characters, scrolling sideways in a field of any width (with a history page, 24 lines of up to 159 characters, or 50 of up to 79).
 
+**The frame hook.** A program that needs something done once a frame (moving sprites, timing a sound, a clock) wherever the kernel polls, including during a long
+`LINEIN`, `KWAIT` or file call, puts the address of a routine in `FRMHK` (0 for none). `KFRAME`, which the main loop, `KIDLE`, `KPFR` and `KWAIT` call in place
+of stepping the song directly, steps the song and then calls the hook with `BL`. The hook may change `R0-R8` and `R12` as `KIDLE` may, must keep `R9-R11` and the
+stack, must not leave the VDP address changed, and must be **resident code** (`"resident"` in `app.json`): the module that set it may not be mapped when it is
+called. It is not called again while it runs (`FRMGD`), so a hook that calls `KIDLE` cannot recurse. A program with no hook pays one test a frame.
+
+**The break flag.** FCTN 4 (`KCLEAR`, `>F4`) is also recorded in `BRKF` (set to `>FFFF`) when the keyboard decoder sees it, **before** the key buffer is
+tried, so a long computation that never reads keys, or a full buffer that drops the code, cannot lose a break. The code is buffered as before when there is room. The kernel
+clears `BRKF` only at start-up: the program tests it (at its frame points, or in the hook) and clears it when it has acted.
+
 ## 7. Memory
 
 ### Variables in slot A
@@ -558,7 +568,9 @@ itself remaps slot B (the rule applies to your own routines too).
 ### The page pool
 
 `PINIT` (R0 = first page, R1 = the page after the last) declares a pool and frees all its
-pages. `PALLOC` returns the lowest free page in R0 (0 when none is left); `PRELS` gives
+pages. `PALLOC` returns the lowest free page in R0 (0 when none is left); `PALLOCA` (R0 = the first page to consider) returns the lowest
+free page at or above R0, or 0, for a program that keeps some objects in near pages (below 256) and bulk data in far ones; both skip a bitmap byte with no free
+page in five instructions, so a nearly full 4,096-page pool costs about 2,600 instructions to allocate from, not 107,000; `PRELS` gives
 one back (twice is harmless; a page outside the pool is ignored). A page's contents are
 never touched. The pool is a bitmap (512 bytes at `>BE00` by default, in the kernel's pages) for up to 4,096 pages (`"pool_max_pages"` in `app.json` makes it smaller: pages/8 bytes at the top of the kernel's pages, and `PINIT` hands out no page from that number up); `FREECT` is the
 free count. The viewer in `examples/browser` takes pages from `PGFREE`, fills them with
@@ -655,7 +667,7 @@ the kernel's own pages, which are always mapped, and reached with a plain `BL @N
 
 `resident.a99` is an ordinary source with no `AORG` and no `END`; it may `COPY "linein.a99"` to carry the line editor
 once for the whole program. The listed labels join `kernel.equ`; nothing else in it is visible to the modules. There is
-room for about 1,000 bytes (the kernel is 6,678 of the 7,680 it may be; the line editor, about 1,050, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
+room for about 840 bytes (the kernel is 6,842 of the 7,680 it may be; the line editor, about 1,050, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
 a kernel that runs into the pool bitmap. **[PC] only.** The design, the options it was chosen over, how to write the
 routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/resident` is a worked two-module example.
 
@@ -907,7 +919,7 @@ there is no exit hook.
   bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192
   bytes; not together with `pool_max_pages`). The room goes to resident code; a module that uses a routine that is left out is refused by
   name. All three: a 4,038-byte kernel, 4,154 bytes free. Two more cut inside `VMODE`: `"graphics"` (Graphics I and II and Multicolor: 308
-  bytes) and `"enhanced"` (enhanced colour and sprites: 164 bytes), for a program that is all text; all five together make a 3,566-byte
+  bytes) and `"enhanced"` (enhanced colour and sprites: 164 bytes), for a program that is all text; all five together make a 3,622-byte
   kernel. Asking such a kernel for a mode it lacks, with a mode number worked out at run time, is undefined. See `docs/RESIDENT.md`.
 - **`pool_max_pages`** (optional, a multiple of 64 from 64 to 4096; default 4096) is the most pages your program's pool will ever
   manage. The pool's bitmap has a bit for each: pages/8 bytes (512 for the default), kept at the top of the kernel's pages, so a
