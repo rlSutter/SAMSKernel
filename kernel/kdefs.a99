@@ -106,9 +106,11 @@ HOT    EQU  >8340            kernel hot variables
 FRAME  EQU   HOT+0
 * The console's floating-point routines (FADD, FMUL, the conversions ...) keep
 * their working registers in the scratchpad: FAC at >834A-8351 and ARG at
-* >835C-8363.  Nothing of the kernel's is there (since 1.21.0: until then
-* F18VER, NPAGES, QUITF and VDPPIC were, and a float call corrupted them).
-* HOT+10 to HOT+15 and >8350-8351 are FAC's: never put a variable there.
+* >835C-8363, and they change bytes up to >836F (measured: >834A-8353,
+* >8356-8359, >835C-8361, >8365-8369).  Nothing of the kernel's is in >834A-836F
+* (since 1.21.0: until then F18VER, NPAGES, QUITF and VDPPIC were, and a float
+* call corrupted them).  HOT+10 to HOT+15 and >8350-836F: never put a
+* variable there.  lib/float.a99 calls the routines.
 * F18A firmware version (status register 14), e.g. >0019
 F18VER EQU   HOT+2
 * SAMS pages present: 32, 64, 128, 256 ... 4096 (a 16M card)

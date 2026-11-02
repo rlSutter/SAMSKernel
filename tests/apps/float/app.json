@@ -1,0 +1,7 @@
+{
+  "name": "FLOAT TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "fl", "source": "fl.a99"}
+  ]
+}

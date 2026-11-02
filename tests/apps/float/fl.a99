@@ -1,0 +1,13 @@
+*======================================================================
+* fl.a99 - a module for tests/test_kernel.py (group float): only the
+* floating-point include, so that the test can call FPCALL.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+       COPY "float.a99"

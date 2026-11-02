@@ -1,0 +1,83 @@
+*======================================================================
+* float.a99 - calling the console ROM's floating-point routines.  An optional
+* include: COPY "float.a99" after a module's code (or put it in resident code).
+*
+*   FPCALL   R0 = the routine's XML code, 0-255: the table in the high nibble
+*            (0 or 1), the entry in the low.  R0 comes back as the GPL status
+*            byte the routine left in >837C (the comparison result for FCOMP),
+*            or >FFFF if the code names no routine (an empty entry or a table
+*            that is not the console's).  Uses R0-R3 and the console routine's
+*            registers in the GPL workspace (>83E0-83FF); R4-R15 of the caller's
+*            workspace are untouched.
+*
+* The routines are the ones the TI's GPL interpreter reaches with its XML
+* instruction, and an assembly program may not use that instruction: they are
+* ordinary subroutines of the console ROM, found through its tables (table of
+* tables at >0CFA, then the table, then the entry), run here in the GPL
+* workspace the way the interpreter runs them, with R11 set to come back.  They
+* work on two eight-byte numbers kept in the scratchpad: FAC (the floating-
+* point accumulator) at >834A and ARG (the argument) at >835C, in the console's
+* radix-100 format: an exponent byte (>40 is 100^0; >3F 100^-1; a negative
+* number has its exponent and every digit pair complemented as a word's two's
+* complement: the first word negated) and seven digit pairs 00-99, most
+* significant first: 1.0 is >40 01 00 00 00 00 00 00, 12 is >40 0C 00 ...,
+* 0.25 is >3F 19 00 ....  The kernel keeps nothing in FAC, ARG or the bytes
+* around them that the routines use (see the scratchpad map in kdefs.a99).
+*
+* The verified entries (tests/test_kernel.py, group float; FAC and ARG as in
+* the console's own documentation):
+*   XFADD  >06   FAC = FAC + ARG
+*   XFSUB  >07   FAC = ARG - FAC
+*   XFMUL  >08   FAC = FAC * ARG
+*   XFDIV  >09   FAC = ARG / FAC
+*   XFCOMP >0A   compare: mask R0 (the GPL status byte) with >60: >20 if
+*                FAC = ARG, >40 if FAC is numerically LESS than ARG, 0 if it
+*                is greater.  (Bit >80, the "logical high" bit, follows the
+*                raw bytes as an unsigned compare, so with numbers of
+*                different sign it points the other way: ignore it.)
+* The entries at >0B-0F (the same on the SADD ... SCOMP side, with the
+* argument a number in a different place) and the second table (>10 and up:
+* the conversions between numbers and strings and integers) are reached the same
+* way; the build's test does not cover them.
+*
+* The routines change scratchpad bytes at >834A-8353 (FAC and its extension),
+* >8356-8359, >835C-8361 (ARG), >8365-8369, >8375, >8377 and the status byte at
+* >837C (measured over 240 random operations in the test).  The kernel keeps
+* nothing in >834A-836F and none of its own words at >8375, >8377 or >837C.
+* A routine may use the VDP (string conversions write to VRAM); callers must
+* not have a VDP address pending.
+*======================================================================
+XFADD  EQU  >06
+XFSUB  EQU  >07
+XFMUL  EQU  >08
+XFDIV  EQU  >09
+XFCOMP EQU  >0A
+FAC    EQU  >834A
+ARG    EQU  >835C
+FPSTAT EQU  >837C
+
+FPCALL .enter
+       MOV  R0,R1
+       SRL  R1,4
+       ANDI R1,>000F
+       CI   R1,1
+       JH   FPERR              only the console's two tables
+       SLA  R1,1
+       MOV  @>0CFA(R1),R3      the table's address
+       MOV  R0,R2
+       ANDI R2,>000F
+       SLA  R2,1
+       A    R2,R3
+       MOV  *R3,R3             the routine's address
+       JEQ  FPERR
+       LWPI GPLWS              the console routines' own registers (R0-R15
+       MOV  @WS+6,R3           now name the GPL workspace's words: fetch the
+       LI   R11,FPBACK         address from where the caller's R3 is kept; the
+       B    *R3                routine returns through R11 or R10, a copy of it
+FPBACK LWPI WS
+       MOVB @FPSTAT,R0
+       SRL  R0,8
+       JMP  FPEND
+FPERR  SETO R0
+FPEND  .leave
+       RT

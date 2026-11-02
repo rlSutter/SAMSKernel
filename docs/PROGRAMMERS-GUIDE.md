@@ -598,6 +598,23 @@ compare the page in `Rn` with the window's record (`CURBE` or `CURBF`); if it di
 calling code is running in; nothing else writes the registers (so the records stay true). `tests/apps/fastmap` compares 2,000 pseudo-random page reads through each macro and
 through the call. Where speed does not matter, use `MAPE` and `MAPF`: they are shorter.
 
+### Floating point (`lib/float.a99`)
+
+The console ROM holds a floating-point package (the radix-100 numbers of TI BASIC) that the GPL interpreter reaches with its `XML` instruction; an assembly program
+cannot use that instruction, and the kernel's workspace is not the one the routines expect (they use `R10` as a scratch register, which is the kernel's stack
+pointer). The optional include `lib/float.a99` (`COPY "float.a99"` in a module, or in resident code; 82 bytes) provides **`FPCALL`**, which finds the routine through
+the console's XML tables, switches to the GPL workspace the way the interpreter does, runs it and switches back. `R0` = the XML code (`XFADD` `>06`, `XFSUB` `>07`, `XFMUL`
+`>08`, `XFDIV` `>09`, `XFCOMP` `>0A`; the table is the high nibble, 0 or 1, the entry the low); it returns `R0` = the GPL status byte the routine left (for `XFCOMP`, mask it
+with `>60`: `>20` equal, `>40` FAC less than ARG, 0 greater) or `>FFFF` for a code that names no routine. The numbers are in the scratchpad: **FAC** at `>834A` and **ARG** at
+`>835C`, eight bytes each: an exponent byte (`>40` is 100^0) and seven digit pairs, so 1.0 is `>40 01 00 00 00 00 00 00` and 0.25 is `>3F 19 00 ...`; a negative number has
+its first word negated (-1.0 is `>BF FF 00 ...`). `FAC = FAC + ARG` (`XFADD`), `ARG - FAC` (`XFSUB`), `FAC * ARG` (`XFMUL`), `ARG / FAC` (`XFDIV`).
+Tested against Python on 240 random operations through the console's own ROM code in the simulator (relative error under 1e-12), group `float`; the other entries (the `S` forms
+at `>0B-0F` and the conversions of the second table) go through the same call and are not covered by the test.
+
+The routines change scratchpad bytes only in the console's float area, `>834A-836F`, plus `>8375`, `>8377` and the status byte `>837C`: the test records every byte they change
+and checks that none is one of the kernel's (the layout fix of 1.21.0 moved the four that used to be in FAC). The routines need the real console ROM, so the simulator runs them
+only when `TI_CONSOLE_ROM` names your own image of it; a program built without the include has no such need.
+
 ## 8. Several modules
 
 **[PC] only.** The TI route has one module: the workbench runs your program as a module and the only switch it offers is back (`LI R0,PG_WB / CLR R1 / BL @GOMOD`). Everything in this part is for programs built with `skbuild.py` from an `app.json` that lists more than one.

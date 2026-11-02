@@ -110,9 +110,8 @@ slot B are allowed (`MAPE` and `MAPF` each set one window); `PAGEB` sets a conse
 | `>8300-831F` | the workspace `WS`: R0-R15 |
 | `>8320-833F` | free (saved and restored around DSR calls) |
 | `>8340-8349` | `FRAME`, `F18VER`, `NPAGES`, `QUITF`, `F18FLG` (HOT+0, +2, +4, +6, +8) |
-| `>834A-8351` | **the console's floating-point register FAC: nothing of the kernel's may be here** (until 1.21.0 `F18VER`, `NPAGES`, `QUITF` and `VDPPIC` were, and a float call corrupted them) |
-| `>835C-8363` | the console's ARG, likewise reserved |
-| `>8352-835B`, `>8364-836F` | free; a DSR changes parts of `>8320-837F` while it runs and the file service puts them back |
+| `>834A-836F` | **the console's floating-point working area: FAC (`>834A`), ARG (`>835C`) and their temporaries; nothing of the kernel's may be here** (until 1.21.0 `F18VER`, `NPAGES`, `QUITF` and `VDPPIC` were, and a float call corrupted them). `lib/float.a99`'s `FPCALL` calls the routines; the bytes they change were measured (see that file) |
+| `>8370-837F` | the console's (`>8375`, `>8377`, the status byte `>837C` among them); a DSR changes parts of `>8320-837F` while it runs and the file service puts them back |
 | `>8354-8357` | the DSR's name length and pointer (while a call runs) |
 | `>8370` | the loader's failing page number (briefly); then the disk controller's "top of VRAM", **kept as it leaves it** |
 | `>8379` | the console ISR's frame counter |

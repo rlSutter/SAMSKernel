@@ -1707,9 +1707,8 @@ def fileprog():
     r = call('fsave', r0=0x2000, r1=100, r2=W)[0]
     check(r == 0xFF, 'a name too long for the PAB is refused (>%02X)' % r)
 
-def fplayout():
-    """The scratchpad and slot A maps (kernel/kdefs.a99): nothing of the kernel's lies in the console's floating-point registers FAC
-    (>834A-8351) and ARG (>835C-8363), and no two variables share a word of slot A's kernel area."""
+def kdefs_values():
+    """{name: value} for every EQU in kernel/kdefs.a99 (names may refer to names later in the file)."""
     import re
     vals = {}
     pend = []
@@ -1729,9 +1728,15 @@ def fplayout():
                 vals[name] = eval(e, {}, {})
             except Exception:
                 pass
+    return vals
+
+def fplayout():
+    """The scratchpad and slot A maps (kernel/kdefs.a99): nothing of the kernel's lies in the console's floating-point registers FAC
+    (>834A-8351) and ARG (>835C-8363), and no two variables share a word of slot A's kernel area."""
+    vals = kdefs_values()
     pad = {n: v for n, v in vals.items() if 0x8300 <= v < 0x8400 and n not in ('WS', 'GPLWS', 'SCRTCH')}
-    hit = {n: hex(v) for n, v in pad.items() if 0x834A <= v <= 0x8351 or 0x835C <= v <= 0x8363}
-    check(not hit, 'no kernel name lies in FAC (>834A-8351) or ARG (>835C-8363): %s (%d scratchpad names checked)' % (hit or 'none', len(pad)))
+    hit = {n: hex(v) for n, v in pad.items() if 0x834A <= v <= 0x836F}
+    check(not hit, 'no kernel name lies in the console float package\'s working area >834A-836F (FAC, ARG and their temporaries): %s (%d scratchpad names checked)' % (hit or 'none', len(pad)))
     check((vals['F18VER'], vals['NPAGES'], vals['QUITF'], vals['F18FLG']) == (0x8342, 0x8344, 0x8346, 0x8348) and vals['VDPPIC'] == 0x20AA,
           'the four that were in FAC moved: F18VER, NPAGES, QUITF to >8342, >8344, >8346 and VDPPIC to slot A >20AA')
     slot = {}
@@ -1981,6 +1986,112 @@ def slotd():
     r, out = variant(lambda j: j['modules'][0].update(size=5000))
     check(r.returncode != 0 and 'size' in out, 'a size other than 4096 or 8192 is refused')
 
+def float():
+    """lib/float.a99: FPCALL runs the console ROM's floating-point routines (its real code, in the simulator) through the XML tables: the
+    five arithmetic and comparison entries on random numbers against Python's, the callers' registers kept, an unknown code refused, and
+    -- finding K1 of the TIthon proposal -- every scratchpad byte the routines change is a byte of FAC, ARG or the console's float temporaries,
+    never one of the kernel's own variables."""
+    import asmharness, random
+    from decimal import Decimal, getcontext
+    getcontext().prec = 40
+    rom = os.environ.get('TI_CONSOLE_ROM')
+    if not (rom and os.path.exists(rom)):
+        print('  (skipped: the console ROM is needed: TI_CONSOLE_ROM)')
+        return
+    c = build('tests/apps/float')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'float', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'float', 'fl.equ')))
+    m = sim9900.Machine(c)
+    m.console_rom = sim9900.load_console_rom(rom)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    n = 0
+    while not (0xA000 <= cpu.pc < 0xE000 and cpu.wp == 0x8300) and n < 200000:     # not inside the console's interrupt routine
+        cpu.step(); n += 1
+    put = lambda a, b: [m.wb(a + i, x) for i, x in enumerate(b)]
+    get = lambda a, k=8: bytes(m.rb(a + i) for i in range(k))
+    def enc(x):
+        """radix-100: an exponent byte (>40 = 100^0) and seven digit pairs; a negative number has its first word negated"""
+        x = Decimal(x)
+        if x == 0:
+            return bytes(8)
+        neg = x < 0
+        x = abs(x)
+        k = 0
+        while x >= 100:
+            x /= 100; k += 1
+        while x < 1:
+            x *= 100; k -= 1
+        digits = []
+        for _ in range(7):
+            d = int(x)
+            digits.append(d); x = (x - d) * 100
+        word = ((0x40 + k) << 8) | digits[0]
+        if neg:
+            word = (-word) & 0xFFFF
+        return bytes([word >> 8, word & 255] + digits[1:])
+    def dec(b):
+        word = (b[0] << 8) | b[1]
+        if word == 0:
+            return Decimal(0)
+        neg = word & 0x8000
+        if neg:
+            word = (-word) & 0xFFFF
+        k = (word >> 8) - 0x40
+        v = Decimal(word & 255)
+        for i in range(2, 8):
+            v += Decimal(b[i]) / Decimal(100) ** (i - 1)
+        v = v * Decimal(100) ** k
+        return -v if neg else v
+    check(enc(1) == bytes([0x40, 1, 0, 0, 0, 0, 0, 0]) and enc('0.25') == bytes([0x3F, 25, 0, 0, 0, 0, 0, 0]) and enc(-1)[:2] == b'\xbf\xff' and dec(enc('-1234.5')) == Decimal('-1234.5'),
+          'the radix-100 encoding used here matches the console\'s (1.0, 0.25, -1.0 as >BFFF, and a round trip)')
+    call = lambda code: asmharness.call(m, cpu, syms['fpcall'], {0: code}, limit=2_000_000)
+    kernel_names = {v: n for n, v in kdefs_values().items() if 0x8300 <= v < 0x8400}
+    pad0 = 0x8300
+    rnd = random.Random(2026)
+    changed = set()
+    worst = Decimal(0)
+    bad = None
+    ops = {0x06: lambda f, a: f + a, 0x07: lambda f, a: a - f, 0x08: lambda f, a: f * a, 0x09: lambda f, a: a / f}
+    names = {0x06: 'FADD', 0x07: 'FSUB', 0x08: 'FMUL', 0x09: 'FDIV'}
+    for code, fn in ops.items():
+        for i in range(60):
+            xf = Decimal(rnd.choice([-1, 1])) * Decimal(rnd.randint(1, 10**9)) / Decimal(10) ** rnd.randint(0, 12) * Decimal(10) ** rnd.randint(-6, 8)
+            xa = Decimal(rnd.choice([-1, 1])) * Decimal(rnd.randint(1, 10**9)) / Decimal(10) ** rnd.randint(0, 12) * Decimal(10) ** rnd.randint(-6, 8)
+            put(0x834A, enc(xf)); put(0x835C, enc(xa))
+            before = get(pad0, 256)
+            regs = [m.rw(0x8300 + 2 * j) for j in range(16)]
+            r = call(code)
+            after = get(pad0, 256)
+            changed |= {pad0 + j for j in range(0xE0) if before[j] != after[j] and not 0x00 <= j < 0x20}
+            want = fn(dec(enc(xf)), dec(enc(xa)))
+            got = dec(get(0x834A))
+            err = abs(got - want) / abs(want) if want != 0 else abs(got)
+            worst = max(worst, err)
+            if err > Decimal('1e-12') and bad is None:
+                bad = (names[code], str(xf), str(xa), str(want), str(got))
+            kept = [r[j] for j in (4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)] == [regs[j] for j in (4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)]
+            if not kept and bad is None:
+                bad = ('registers changed', code, [hex(x) for x in r])
+    check(bad is None, 'FADD, FSUB (ARG - FAC), FMUL, FDIV (ARG / FAC): 240 random operations match Python to a relative error of at most %.1e, and R4-R10 and R12-R15 come back as they were (%s)' % (worst, bad or 'no difference'))
+    badc = None
+    for i in range(120):
+        xf = Decimal(rnd.choice([-1, 0, 1, 1])) * Decimal(rnd.randint(1, 50)) / Decimal(rnd.choice([1, 1, 10]))
+        xa = rnd.choice([xf, xf, Decimal(rnd.choice([-1, 1])) * Decimal(rnd.randint(1, 50)) / Decimal(rnd.choice([1, 1, 10]))])
+        put(0x834A, enc(xf)); put(0x835C, enc(xa))
+        got = call(0x0A)[0] & 0x60
+        want = 0x20 if dec(enc(xf)) == dec(enc(xa)) else (0x40 if dec(enc(xf)) < dec(enc(xa)) else 0)
+        if got != want:
+            badc = (str(xf), str(xa), hex(got), hex(want)); break
+    check(badc is None, 'FCOMP, 120 pairs of either sign: R0 & >60 is >20 for equal, >40 for FAC less than ARG, 0 for greater (%s)' % (badc or 'all as expected'))
+    check(call(0x20)[0] == 0xFFFF and call(0x00)[0] == 0xFFFF and call(0xF6)[0] == 0xFFFF, 'a code in a table that is not the console\'s, or an empty entry, is refused (>FFFF)')
+    overlap = {hex(a): kernel_names[a] for a in changed if a in kernel_names or (a - 1) in kernel_names}
+    outside = sorted(hex(a) for a in changed if not (0x834A <= a <= 0x8369 or 0x8370 <= a <= 0x837F))
+    check(not overlap and not outside, 'every scratchpad byte changed below the GPL workspace is the console float package\'s (%s), none of the kernel\'s (%s)' % (' '.join(sorted(hex(a) for a in changed)), overlap or 'none'))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2128,7 +2239,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':
