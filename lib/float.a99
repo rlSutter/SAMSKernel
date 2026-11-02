@@ -8,7 +8,9 @@
 *            or >FFFF if the code names no routine (an empty entry or a table
 *            that is not the console's).  Uses R0-R3 and the console routine's
 *            registers in the GPL workspace (>83E0-83FF); R4-R15 of the caller's
-*            workspace are untouched.
+*            workspace are untouched.  FPCALL sets GPL registers R13 and R15 to
+*            the console's own values (>9800, >8C02: the routines read the VDP
+*            through R15), as its start-up does.
 *
 * The routines are the ones the TI's GPL interpreter reaches with its XML
 * instruction, and an assembly program may not use that instruction: they are
@@ -35,15 +37,35 @@
 *                is greater.  (Bit >80, the "logical high" bit, follows the
 *                raw bytes as an unsigned compare, so with numbers of
 *                different sign it points the other way: ignore it.)
-* The entries at >0B-0F (the same on the SADD ... SCOMP side, with the
-* argument a number in a different place) and the second table (>10 and up:
-* the conversions between numbers and strings and integers) are reached the same
-* way; the build's test does not cover them.
+*   XSADD  >0B   FAC = FAC + the number at the top of the VDP value stack
+*   XSSUB  >0C   FAC = (that number) - FAC
+*   XSMUL  >0D   FAC = FAC * (that number)
+*   XSDIV  >0E   FAC = (that number) / FAC
+*   XSCOMP >0F   compare FAC with it, as XFCOMP does (status mask >60)
+*                The value stack lives in VRAM; its pointer is the word at >836E
+*                and addresses the TOP number (8 bytes): each of these five
+*                reads the number there and then lowers the pointer by 8.  The
+*                caller keeps the stack (pushes by writing the number at the
+*                pointer + 8 and raising the pointer); the stack must be in
+*                VRAM that nothing else is using.
+*   (>01 ROUND1, >02 ROUND, >03 STST, >04 OVEXP, >05 OV are also in table 0.
+*   ROUND reads its digit count from the byte at >8354, not >835C: the console
+*   code at >0FB2 does `MOVB @>8354,R1`, and with the count at >835C the result
+*   does not change.  The routine is not a drop-in "round to n places" for a
+*   plain number: it expects the state the BASIC interpreter leaves (the sign
+*   at >8375, a copy of the exponent at >8376), and the test does not cover it.)
+* The second table (>10 and up: the conversions between numbers and strings
+* and integers) is reached the same way; the test does not cover it.
+* (Operand order checked against the console's own code in the simulator: the
+* routines compute ARG - FAC and ARG / FAC, not FAC / ARG as one page of
+* Nouspikel's TI-99/4A tech pages has it for the divide.)
 *
 * The routines change scratchpad bytes at >834A-8353 (FAC and its extension),
-* >8356-8359, >835C-8361 (ARG), >8365-8369, >8375, >8377 and the status byte at
-* >837C (measured over 240 random operations in the test).  The kernel keeps
-* nothing in >834A-836F and none of its own words at >8375, >8377 or >837C.
+* >8356-8359, >835C-8361 (ARG), >8365-8369, >836E (the value stack pointer, for
+* the S forms), >8375, >8377 and the status byte at >837C (measured in the
+* test).  The kernel keeps nothing in >834A-836F and none of its own words at
+* >8375, >8377 or >837C.  (Nouspikel names >8375 the sign of FAC, >8376 a copy
+* of its exponent and >8354 the error code.)
 * A routine may use the VDP (string conversions write to VRAM); callers must
 * not have a VDP address pending.
 *======================================================================
@@ -52,6 +74,12 @@ XFSUB  EQU  >07
 XFMUL  EQU  >08
 XFDIV  EQU  >09
 XFCOMP EQU  >0A
+XSADD  EQU  >0B
+XSSUB  EQU  >0C
+XSMUL  EQU  >0D
+XSDIV  EQU  >0E
+XSCOMP EQU  >0F
+FPSTK  EQU  >836E
 FAC    EQU  >834A
 ARG    EQU  >835C
 FPSTAT EQU  >837C
@@ -72,8 +100,12 @@ FPCALL .enter
        JEQ  FPERR
        LWPI GPLWS              the console routines' own registers (R0-R15
        MOV  @WS+6,R3           now name the GPL workspace's words: fetch the
-       LI   R11,FPBACK         address from where the caller's R3 is kept; the
-       B    *R3                routine returns through R11 or R10, a copy of it
+       LI   R13,>9800          address from where the caller's R3 is kept; set
+       LI   R15,>8C02          the GPL's two port registers as the console's
+       LI   R11,FPBACK         start-up does (GROM read port, VDP address write
+       B    *R3                port: the routines that use the VDP value stack
+*                              need R15); the routine returns through R11 or
+*                              R10, a copy of it
 FPBACK LWPI WS
        MOVB @FPSTAT,R0
        SRL  R0,8

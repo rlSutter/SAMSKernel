@@ -608,8 +608,13 @@ the console's XML tables, switches to the GPL workspace the way the interpreter 
 with `>60`: `>20` equal, `>40` FAC less than ARG, 0 greater) or `>FFFF` for a code that names no routine. The numbers are in the scratchpad: **FAC** at `>834A` and **ARG** at
 `>835C`, eight bytes each: an exponent byte (`>40` is 100^0) and seven digit pairs, so 1.0 is `>40 01 00 00 00 00 00 00` and 0.25 is `>3F 19 00 ...`; a negative number has
 its first word negated (-1.0 is `>BF FF 00 ...`). `FAC = FAC + ARG` (`XFADD`), `ARG - FAC` (`XFSUB`), `FAC * ARG` (`XFMUL`), `ARG / FAC` (`XFDIV`).
-Tested against Python on 240 random operations through the console's own ROM code in the simulator (relative error under 1e-12), group `float`; the other entries (the `S` forms
-at `>0B-0F` and the conversions of the second table) go through the same call and are not covered by the test.
+The **stack forms** `XSADD` `>0B`, `XSSUB` `>0C`, `XSMUL` `>0D`, `XSDIV` `>0E` and `XSCOMP` `>0F` take the second number from the console's **value stack in VRAM**: its pointer is
+the word at `>836E` (`FPSTK`) and addresses the top number; each of these reads that number, then lowers the pointer by 8 (`XSSUB` is that number minus FAC, `XSDIV` that number
+divided by FAC). The caller keeps the stack in VRAM nothing else uses, pushing by writing a number at the pointer + 8 and raising it. `FPCALL` loads the GPL port registers
+R13 and R15 with the console's own `>9800` and `>8C02`, because these routines read the VRAM through R15, which the simulator's boot (and a cartridge started without the title
+screen) leaves zero. Tested against Python on 240 random operations and, for the stack forms, 120 more, through the console's own ROM code in the simulator (relative error under
+1e-12), group `float`; the conversions of the second table (`>10` and up) go through the same call and are not covered. One caution: Nouspikel's tech page on real numbers gives the
+divide as FAC / ARG; the console's code, run in the simulator, computes ARG / FAC (and so does the subtraction, ARG - FAC).
 
 The routines change scratchpad bytes only in the console's float area, `>834A-836F`, plus `>8375`, `>8377` and the status byte `>837C`: the test records every byte they change
 and checks that none is one of the kernel's (the layout fix of 1.21.0 moved the four that used to be in FAC). The routines need the real console ROM, so the simulator runs them

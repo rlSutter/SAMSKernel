@@ -1735,8 +1735,8 @@ def fplayout():
     (>834A-8351) and ARG (>835C-8363), and no two variables share a word of slot A's kernel area."""
     vals = kdefs_values()
     pad = {n: v for n, v in vals.items() if 0x8300 <= v < 0x8400 and n not in ('WS', 'GPLWS', 'SCRTCH')}
-    hit = {n: hex(v) for n, v in pad.items() if 0x834A <= v <= 0x836F}
-    check(not hit, 'no kernel name lies in the console float package\'s working area >834A-836F (FAC, ARG and their temporaries): %s (%d scratchpad names checked)' % (hit or 'none', len(pad)))
+    hit = {n: hex(v) for n, v in pad.items() if 0x834A <= v <= 0x836F or 0x8374 <= v <= 0x8377 or v in (0x837C, 0x837D)}
+    check(not hit, 'no kernel name lies in the console float package\'s working area >834A-836F (FAC, ARG, the error code at >8354, the stack pointer at >836E and their temporaries), or at >8374-8377 (the sign byte, a copy of the exponent) or >837C (the GPL status byte): %s (%d scratchpad names checked)' % (hit or 'none', len(pad)))
     check((vals['F18VER'], vals['NPAGES'], vals['QUITF'], vals['F18FLG']) == (0x8342, 0x8344, 0x8346, 0x8348) and vals['VDPPIC'] == 0x20AA,
           'the four that were in FAC moved: F18VER, NPAGES, QUITF to >8342, >8344, >8346 and VDPPIC to slot A >20AA')
     slot = {}
@@ -2087,9 +2087,46 @@ def float():
         if got != want:
             badc = (str(xf), str(xa), hex(got), hex(want)); break
     check(badc is None, 'FCOMP, 120 pairs of either sign: R0 & >60 is >20 for equal, >40 for FAC less than ARG, 0 for greater (%s)' % (badc or 'all as expected'))
+    # the stack forms: the second number is the one at the top of the VDP value stack (the pointer at >836E), and the pointer drops by 8
+    sops = {0x0B: lambda f, a: f + a, 0x0C: lambda f, a: a - f, 0x0D: lambda f, a: f * a, 0x0E: lambda f, a: a / f}
+    snames = {0x0B: 'SADD', 0x0C: 'SSUB', 0x0D: 'SMUL', 0x0E: 'SDIV'}
+    badS, worstS = None, Decimal(0)
+    for code, fn in sops.items():
+        for i in range(30):
+            xf = Decimal(rnd.choice([-1, 1])) * Decimal(rnd.randint(1, 10**6)) / Decimal(10) ** rnd.randint(0, 6)
+            xa = Decimal(rnd.choice([-1, 1])) * Decimal(rnd.randint(1, 10**6)) / Decimal(10) ** rnd.randint(0, 6)
+            ptr = 0x3008 + 8 * rnd.randint(0, 6)
+            for j in range(0x2F80, 0x3100):
+                m.vram[j] = 0
+            for j, x in enumerate(enc(xa)):
+                m.vram[ptr + j] = x
+            put(0x834A, enc(xf)); m.ww(0x836E, ptr)
+            before = get(pad0, 256)
+            call(code)
+            after = get(pad0, 256)
+            changed |= {pad0 + j for j in range(0xE0) if before[j] != after[j] and not 0x00 <= j < 0x20}
+            want = fn(dec(enc(xf)), dec(enc(xa)))
+            got = dec(get(0x834A))
+            err = abs(got - want) / abs(want) if want != 0 else abs(got)
+            worstS = max(worstS, err)
+            if (err > Decimal('1e-12') or m.rw(0x836E) != ptr - 8) and badS is None:
+                badS = (snames[code], str(xf), str(xa), str(want), str(got), hex(m.rw(0x836E)), hex(ptr))
+    check(badS is None, 'SADD, SSUB, SMUL, SDIV (the number at the top of the VDP stack is the first operand of the subtraction and the dividend): 120 random operations match Python to %.1e and the stack pointer drops by 8 each time (%s)' % (worstS, badS or 'no difference'))
+    badC = None
+    for xf, xa in ((3, 5), (5, 5), (7, 5), (-2, 4), (4, -2)):
+        for j in range(0x2F80, 0x3100):
+            m.vram[j] = 0
+        for j, x in enumerate(enc(xa)):
+            m.vram[0x3008 + j] = x
+        put(0x834A, enc(xf)); m.ww(0x836E, 0x3008)
+        got = call(0x0F)[0] & 0x60
+        want = 0x20 if xf == xa else (0x40 if xf < xa else 0)
+        if got != want and badC is None:
+            badC = (xf, xa, hex(got), hex(want))
+    check(badC is None, 'SCOMP: the same result bits as FCOMP, against the number on the stack (%s)' % (badC or 'all as expected'))
     check(call(0x20)[0] == 0xFFFF and call(0x00)[0] == 0xFFFF and call(0xF6)[0] == 0xFFFF, 'a code in a table that is not the console\'s, or an empty entry, is refused (>FFFF)')
     overlap = {hex(a): kernel_names[a] for a in changed if a in kernel_names or (a - 1) in kernel_names}
-    outside = sorted(hex(a) for a in changed if not (0x834A <= a <= 0x8369 or 0x8370 <= a <= 0x837F))
+    outside = sorted(hex(a) for a in changed if not (0x834A <= a <= 0x836F or 0x8370 <= a <= 0x837F))
     check(not overlap and not outside, 'every scratchpad byte changed below the GPL workspace is the console float package\'s (%s), none of the kernel\'s (%s)' % (' '.join(sorted(hex(a) for a in changed)), overlap or 'none'))
 
 def workbench():

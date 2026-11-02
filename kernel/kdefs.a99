@@ -110,7 +110,9 @@ FRAME  EQU   HOT+0
 * >8356-8359, >835C-8361, >8365-8369).  Nothing of the kernel's is in >834A-836F
 * (since 1.21.0: until then F18VER, NPAGES, QUITF and VDPPIC were, and a float
 * call corrupted them).  HOT+10 to HOT+15 and >8350-836F: never put a
-* variable there.  lib/float.a99 calls the routines.
+* variable there.  The package also uses >8375 (the sign of FAC), >8376 (a copy
+* of its exponent), >8377 and the GPL status byte >837C: nor there.
+* lib/float.a99 calls the routines.
 * F18A firmware version (status register 14), e.g. >0019
 F18VER EQU   HOT+2
 * SAMS pages present: 32, 64, 128, 256 ... 4096 (a 16M card)
