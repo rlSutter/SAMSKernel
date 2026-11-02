@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim textonly editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax trim textonly fastmap fileprog editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -520,7 +520,7 @@ def tiprograms():
     check('10 29 2026' in lines(m)[4] and '14 5  9' in lines(m)[4], 'clock: assembled on the TI, it reads a TIPI model\'s clock: %r' % lines(m)[4].strip())
     m, img = go('JOY/A99', [os.path.join(ROOT, 'examples/joystick/joy.a99')], '<J1-FIRE><WAIT 8><J1-FIRE><WAIT 8>', 2800)
     check(m.rw(0x2300 + 5760) == 2, 'joystick: the program assembled on the TI counts two fire presses (%d)' % m.rw(0x2300 + 5760))
-    m, img = go('ASK/A99', [P + 'ask.a99', os.path.join(ROOT, 'lib', 'linein.a99')], 'ann<ENTER><WAIT 40>bob<ENTER><WAIT 40><F-E><WAIT 40>', 3300)
+    m, img = go('ASK/A99', [P + 'ask.a99', os.path.join(ROOT, 'lib', 'linein.a99')], 'ann<ENTER><WAIT 40>bob<ENTER><WAIT 40><F-E><WAIT 40>', 3900)
     ln = lines(m)
     check('Hello, BOB' in ln[8] and ln[5].strip().endswith('BOB'),
           'ask: assembled on the TI with LINEIN/A99 included from its disk, LINEIN reads two names, greets them, and UP brings the last one back into the field: %r, %r' % (ln[8].strip(), ln[5].strip()))
@@ -1221,8 +1221,8 @@ def linein():
     check(good, 'a start text is kept and the cursor begins at its end (%r)' % got)
     good, got = ok('{ENTER}', 'abcde', start='abcdefghij', maxlen=5)
     check(good, 'a start text longer than the field is cut (%r)' % got)
-    good, got = ok('{ENTER}', 'x' * 79, start='x' * 100, maxlen=200)
-    check(good, 'a longest length over 79 is taken as 79: a 100-character start text is cut to %d' % len(got))
+    good, got = ok('{ENTER}', 'x' * 159, start='x' * 200, maxlen=250)
+    check(good, 'a longest length over 159 is taken as 159: a 200-character start text is cut to %d' % len(got))
     r, got = run('xy{BACK}')
     check(r[0] == 0xF900 and got == 'xy', 'BACK ends it with KBACK, the text typed so far kept (>%04X, %r)' % (r[0], got))
     # the screen
@@ -1295,6 +1295,21 @@ def linein():
     check(good, 'the history keeps the newest 50 of 55 lines: UP as far as it goes reaches L6 (%r)' % got)
     good, got = ok('{UP}{BACK}', 'L55', hist=page2)
     check(good, 'and the newest is L55 (%r)' % got)
+    # long lines: up to 159 characters, and a history page set up for them has 160-byte slots, 24 of them
+    r, got = run('{ENTER}', start='x' * 150, maxlen=159)
+    check(len(got) == 150 and r[0] == 0x0D00, 'a 150-character line with no history (the longest allowed is 159): %d characters kept' % len(got))
+    r, got = run('{ENTER}', start='y' * 120, maxlen=159, hist=page)
+    check(len(got) == 79, 'a history page that was set up for lines up to 79 cuts a longer one to 79 (%d)' % len(got))
+    page3 = asmharness.call(m, cpu, syms['palloc'])[0]
+    r, got = run('{ENTER}', start='a' * 150, maxlen=159, hist=page3)
+    check(len(got) == 150, 'a page set up for lines up to 159 holds a 150-character line (%d characters)' % len(got))
+    run('{ENTER}', start='b' * 5, maxlen=159, hist=page3)
+    good, got = ok('{UP}{UP}{BACK}', 'a' * 150, hist=page3, maxlen=159)
+    check(good, 'and UP brings the long line back whole (%d characters)' % len(got))
+    for i in range(1, 27):
+        run('{ENTER}', start=('%02d' % i) + 'z' * 100, maxlen=159, hist=page3)
+    good, got = ok('{UP}' * 40 + '{BACK}', '03' + 'z' * 100, hist=page3, maxlen=159)
+    check(good, 'its ring holds 24 lines: of 26 entered the oldest kept is the third (%r)' % got[:4])
     # slot B and the stack
     asmharness.call(m, cpu, syms['mape'], {0: 0x41})
     asmharness.call(m, cpu, syms['mapf'], {0: 0x42})
@@ -1363,11 +1378,11 @@ def poolmax():
             open(d + '/app/resident.a99', 'a').write(edit_res)
         r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
         return r, d + '/out'
-    big = '       BSS  300\n'
+    big = '       BSS  250\n'
     r, out = build_variant(lambda j: j.pop('pool_max_pages', None))
-    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) the test application\'s resident code (LINEIN, with its scrolling field, is about 1,050 bytes) does not fit: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:90])
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) the test application\'s resident code (LINEIN, with its scrolling field and long lines, is about 1,130 bytes) does not fit: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:90])
     r, out = build_variant(lambda j: j.update(pool_max_pages=256), big)
-    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 300 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
+    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 250 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
     syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
     check(syms['poolbm'] == 0xBFE0 and syms['poolmx'] == 256 and syms['poolwd'] == 16, 'kernel.equ says: POOLBM >%04X, POOLMX %d, POOLWD %d' % (syms['poolbm'], syms['poolmx'], syms['poolwd']))
     c = open(glob.glob(out + '/*8.bin')[0], 'rb').read()
@@ -1515,9 +1530,9 @@ def trim():
     check(r.returncode != 0 and 'pool_max_pages' in (r.stdout + r.stderr), '"omit": ["pool"] with "pool_max_pages" is refused: one or the other')
     # room for resident code: the resident test application (LINEIN: about 1,050 bytes) with 500 more bytes does not fit with a pool and
     # fits without one
-    big = lambda d: open(d + '/resident.a99', 'a').write('       BSS  500\n')
+    big = lambda d: open(d + '/resident.a99', 'a').write('       BSS  400\n')
     r, size, img = variant('tests/apps/resident', lambda j: j.pop('pool_max_pages', None), big)
-    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'resident code with 500 more bytes does not fit beside a full-size pool bitmap')
+    check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'resident code with 400 more bytes does not fit beside a full-size pool bitmap')
     r, size, img = variant('tests/apps/resident', lambda j: (j.pop('pool_max_pages', None), j.update(omit=['pool'])), big)
     check(r.returncode == 0 and size is not None and size > 7680, 'with the pool left out the same kernel fits: %s bytes, more than the 7,680 the bitmap allows' % size)
 
@@ -1580,6 +1595,117 @@ def textonly():
               'a module that uses %s, with "%s" left out, is refused by name: %s' % (name, word, (r.stdout + r.stderr).strip().split('\n')[-1][:100]))
     r, size, img, out = variant(['graphics'], names('VOSPR', 'VOTE1'))
     check(r.returncode == 0, 'and the options that were not left out are fine (VOSPR, VOTE1 with only graphics omitted)')
+
+def fastmap():
+    """The .mape and .mapf macros (kernel/macros.a99): the page a macro maps is the page MAPE or MAPF maps, for pseudo-random
+    pages in both windows; the records CURBE and CURBF follow it; GETPB returns the record and SETPB puts it back."""
+    import asmharness
+    c = build('tests/apps/fastmap')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'fastmap', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'fastmap', 'fm.equ')))
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m, cpu, halt = sim9900.run(c, frames=100)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    call = lambda n, **r: asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=1_000_000)
+    for pg in range(0x40, 0x80):                                    # each page holds its own number in its first word
+        call('fmw', r1=pg)
+    rnd, bad, n = 12345, [], 2000
+    pages = []
+    for i in range(n):
+        rnd = (rnd * 1103515245 + 12345) & 0x7FFFFFFF
+        pages.append(0x40 + (rnd >> 8) % 64)
+    for name, other, rec in (('fma', 'fmb', 'curbe'), ('fmc', 'fmd', 'curbf')):
+        bad = []
+        for pg in pages:
+            a = call(name, r1=pg)[0]
+            ra = m.rw(syms[rec])
+            b = call(other, r1=pg)[0]
+            if not (a == b == pg and ra == pg):
+                bad.append((name, hex(pg), a, b, ra))
+                break
+        check(not bad, '%s: %d pseudo-random page reads through the macro and through the call give the same word as the page number, and %s follows (%s)' % (name, n, rec.upper(), bad[:1]))
+    call('fma', r1=0x41); call('fmc', r1=0x42)
+    r = call('getpb')
+    check((r[0], r[1]) == (0x41, 0x42), 'GETPB returns what the macros last mapped: >%02X, >%02X' % (r[0], r[1]))
+    call('fmb', r1=0x50); call('fmd', r1=0x51)
+    call('setpb', r0=0x41, r1=0x42)
+    check((m.rw(syms['curbe']), m.rw(syms['curbf'])) == (0x41, 0x42) and call('fma', r1=0x41)[0] == 0x41 and call('fmc', r1=0x42)[0] == 0x42,
+          'SETPB puts the pair back: the records and the pages themselves')
+    first = call('fma', r1=0x41)                                     # nothing to do when it is there already: R12 is not touched
+    m.ww(0x8300 + 24, 0x1234)
+    first = asmharness.call(m, cpu, syms['fma'], {1: 0x41}, limit=100000)
+    check(first[12] == 0x1234, 'when the page is already there the macro writes nothing, R12 included')
+
+def fileprog():
+    """FLOAD and FSAVE (kernel/files.a99): a PROGRAM file saved from VRAM and loaded back byte for byte, through TI's controller (its real
+    ROM); a missing file and a name too long are errors; and a load or save on one handle leaves a record file open on another readable."""
+    import tempfile, asmharness, skdisk, tifdc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    c = build('hello')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'hello', 'kernel.equ'))
+    d = tempfile.mkdtemp()
+    open(d + '/rec.txt', 'w').write(''.join('record number %d\n' % i for i in range(30)))
+    p = d + '/d.dsk'
+    skdisk.make_disk(p, [d + '/rec.txt'])
+    img = bytearray(open(p, 'rb').read())
+    m = sim9900.Machine(c)
+    m.tifdc = tifdc.TIFDC(image=img)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    W = 0x2300 + 5000
+    def put(nm):
+        for i, b in enumerate(bytes([len(nm)]) + nm.encode()):
+            m.wb(W + i, b)
+    def call(n, **r):
+        return asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=60_000_000)
+    def sel(h):
+        call('fsel', r0=h)
+    # a record file open on handle 0, one record read
+    sel(0); put('DSK1.REC/TXT')
+    r = call('fopen', r0=0x1400, r1=0, r2=W)[0]
+    def rd():
+        r = call('fread', r1=W + 200)
+        return (r[0], bytes(m.rb(W + 200 + i) for i in range(r[2])).decode())
+    first = rd()
+    check(r == 0 and first == (0, 'record number 0'), 'a record file is open on handle 0 and its first record read (%d, %r)' % (r, first))
+    pattern = bytes((i * 7 + 3) & 255 for i in range(4096))
+    for i, b in enumerate(pattern):
+        m.vram[0x2000 + i] = b
+    sel(1); put('DSK1.PROG')
+    r = call('fsave', r0=0x2000, r1=4096, r2=W)[0]
+    check(r == 0, 'FSAVE writes 4,096 bytes of VRAM as DSK1.PROG (error %d)' % r)
+    for i in range(4096):
+        m.vram[0x2000 + i] = 0
+    r = call('fload', r0=0x2000, r1=4096, r2=W)[0]
+    got = bytes(m.vram[0x2000:0x3000])
+    check(r == 0 and got == pattern, 'FLOAD brings it back byte for byte (error %d, %d of 4096 bytes right)' % (r, sum(a == b for a, b in zip(got, pattern))))
+    sel(0)
+    second = rd()
+    check(second == (0, 'record number 1'), 'the record file on handle 0 is still open: the next record is %r (finding 1.1: a power-up in between would lose it)' % (second,))
+    big = 0x3600 - 0x2000                       # the longest free run in Text 80: up to the file service's own buffer
+    pat2 = bytes((i * 13 + 5) & 255 for i in range(big))
+    for i, b in enumerate(pat2):
+        m.vram[0x2000 + i] = b
+    sel(1); put('DSK1.BIG')
+    r1 = call('fsave', r0=0x2000, r1=big, r2=W)[0]
+    for i in range(big):
+        m.vram[0x2000 + i] = 0
+    r2 = call('fload', r0=0x2000, r1=big, r2=W)[0]
+    check(r1 == 0 and r2 == 0 and bytes(m.vram[0x2000:0x2000 + big]) == pat2, 'a larger file, %d bytes (>2000-35FF, up to the file service\'s own buffer at >3600): saved and loaded byte for byte (errors %d, %d)' % (big, r1, r2))
+    put('DSK1.NOSUCH')
+    r = call('fload', r0=0x2000, r1=100, r2=W)[0]
+    check(r != 0, 'FLOAD of a file that is not there is an error (%d)' % r)
+    put('DSK1.' + 'X' * 60)
+    r = call('fsave', r0=0x2000, r1=100, r2=W)[0]
+    check(r == 0xFF, 'a name too long for the PAB is refused (>%02X)' % r)
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -1728,7 +1854,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

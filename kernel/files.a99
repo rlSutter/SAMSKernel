@@ -101,7 +101,7 @@ FPABOP .enter
        MOVB R1,*R2+            record number
        MOVB R1,*R2+
        MOVB R1,*R2+            screen offset
-       MOV  @FNMP,R1           name length and name
+FONM   MOV  @FNMP,R1           name length and name
        CLR  R3
        MOVB *R1,R3             its length ...
        SWPB R3
@@ -188,6 +188,41 @@ FDELETE LI  R3,>0700           opcode 7: DELETE
        CLR  R0
        LI   R1,80
        B    @FPABOP
+
+* FLOAD - load the PROGRAM file named by R2 (a length-prefixed string,
+* 'DSK1.NAME') into VRAM from the address R0, at most R1 bytes: the DSR's LOAD
+* (opcode 5), on the selected handle's PAB.  R0 = 0 or the error.  The file's
+* bytes go straight to VRAM, so the address must be clear of what the screen
+* uses in the current mode, of this file service's own record buffer and PAB
+* (>3600-37D7) and of the controller's buffers (>37D8 up): in Text 80 the
+* free run is >2000-35FF (5,632 bytes) without enhanced colour and sprites,
+* >2000-2FFF with sprites.  A 6K picture does not fit beside file calls.
+* FSAVE - save R1 bytes of VRAM from the address R0 as the PROGRAM file R2
+* names: the DSR's SAVE (opcode 6).  R0 = 0 or the error.  Neither touches a
+* file another handle has open.  Uses R0-R9 and the DSR's.
+FLOAD  LI   R3,>0500
+       JMP  FPGM
+FSAVE  LI   R3,>0600
+FPGM   .enter
+       MOV  R2,@FNMP
+       MOVB *R2,R4             a name too long for the PAB?
+       SRL  R4,8
+       CI   R4,53
+       JH   FOBAD
+       LI   R2,FPAB
+       MOVB R3,*R2+            the opcode
+       CLR  R4
+       MOVB R4,*R2+            flags
+       MOVB R0,*R2+            the VRAM address, high byte first
+       SWPB R0
+       MOVB R0,*R2+
+       MOVB R4,*R2+            record length
+       MOVB R4,*R2+            character count
+       MOVB R1,*R2+            the byte count (the 'record number' field)
+       SWPB R1
+       MOVB R1,*R2+
+       MOVB R4,*R2+            screen offset
+       B    @FONM
 
 * FCALL - call the DSR for the PAB at FPABV: the previous error cleared,
 * the scratchpad it uses kept and put back, >8356 at the name length.

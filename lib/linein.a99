@@ -37,12 +37,18 @@
 * program's own pages are never left changed.  The page is laid out:
 *       >F000  the word >A55A once the page has been set up (a page that does
 *              not begin with it is taken to be empty and is set up)
-*       >F002  how many lines it holds, 0-50
-*       >F004  the slot the next line goes in (0-49): the lines are a ring,
-*              the oldest overwritten by the 51st
-*       >F008  the line being typed, kept while the arrows show older ones
-*       >F060  the 50 slots, 80 bytes each: a length byte and up to 79
-*              characters (which is why the field is at most 79 long)
+*       >F002  how many lines it holds
+*       >F004  the slot the next line goes in: the lines are a ring, the
+*              oldest overwritten when it is full
+*       >F006  the size of a slot, 80 or 160 bytes: a length byte and up to 79
+*              or 159 characters.  Set once, when the page is set up, from the
+*              longest line that call allowed: up to 79 gives 80, more gives 160
+*       >F008  how many slots there are: 50 of 80 bytes, or 24 of 160
+*       >F00A  the line being typed, kept while the arrows show older ones
+*              (one slot's size)
+*       after it the slots
+* A page keeps the size it was set up with: a later call that allows longer
+* lines than its slots hold is cut to what they hold (79 on an 80-byte page).
 * A line that is entered is added if it is not empty and not the same as the
 * one before it.  Up (FCTN E) steps back to an older line, down (FCTN X)
 * forward again, and past the newest the line as it was typed comes back.
@@ -61,14 +67,16 @@
 *   R1 = the buffer: a length-prefixed string, which holds the text to start
 *        with (length byte 0: an empty line) and the edited line at the end
 *   R2 = the attribute (high byte) of the text; the cursor is its swap
-*   R3 = the longest the line may be, 1 to 79 (more is taken as 79), in the
-*        low byte; the buffer must have room for a length byte and that many
-*        characters.  The high byte, if not 0, is the field's WIDTH in cells
-*        (2 or more): a longer line scrolls sideways in it, keeping the cursor
-*        in view (LI R3,20*256+60: a line of up to 60 in a field of 20).  With
-*        0 there, or a width of the longest line + 1 or more, the field is the
-*        longest line and one cell more (for the cursor) and does not scroll.
-*        Either way the field must fit on the screen's row.
+*   R3 = the longest the line may be, 1 to 159 (more is taken as 159), in the
+*        low byte (79 at most with a history page that was set up for
+*        lines up to 79); the buffer must have room for a length byte and
+*        that many characters.  The high byte, if not 0, is the field's
+*        WIDTH in cells (2 or more): a longer line scrolls sideways in it,
+*        keeping the cursor in view (LI R3,20*256+60: a line of up to 60 in
+*        a field of 20).  With 0 there, or a width of the longest line + 1 or
+*        more, the field is the longest line and one cell more (for the
+*        cursor) and does not scroll.  Either way the field must fit on the
+*        screen's row.
 *   R4 = a history page from the pool, or 0 for no history
 * Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high
 * byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it
@@ -84,9 +92,9 @@ LINEIN .enter
        MOV  R3,R5
        SRL  R5,8               the width asked for (0: all of the line)
        ANDI R3,>00FF
-       CI   R3,79              at most 79: a history line is 80 bytes
+       CI   R3,159             at most 159: a history slot is 160 bytes
        JLE  LNI0
-       LI   R3,79
+       LI   R3,159
 LNI0   MOV  R3,@6(R9)          +6  the longest line
        MOV  R3,R6
        INC  R6                 the line and a cell for the cursor
@@ -102,6 +110,10 @@ LNIX   MOV  R5,@24(R9)         +24 the field's width in cells
        SETO @14(R9)            +14 insert mode (non-zero) or overtype (0)
 *                              +10 the cursor: 0 is before the first character
 *                              +16 the key that ended it, +18 and +20 slot B
+       MOV  R4,R4              a history page: set it up, and the longest line
+       JEQ  LNIH               is cut to what its slots hold
+       BL   @LNHCLP
+LNIH   MOV  @6(R9),R3
        BL   @LNLEN             a start text longer than the field is cut
        C    R2,R3
        JLE  LNI1
@@ -255,7 +267,7 @@ LNUP   MOV  @8(R9),R0
        JHE  LNU2               at the oldest already
        MOV  R5,R5
        JNE  LNU1
-       LI   R7,>F008           leaving the typed line: keep it
+       LI   R7,>F00A           leaving the typed line: keep it
        BL   @LNPUT
 LNU1   INC  R5
        MOV  R5,@12(R9)
@@ -271,7 +283,7 @@ LNDWN  MOV  @8(R9),R0
        DEC  R5
        MOV  R5,@12(R9)
        JNE  LND3
-       LI   R6,>F008           back to the line as typed
+       LI   R6,>F00A           back to the line as typed
        JMP  LND4
 LND3   BL   @LNHADR
 LND4   BL   @LNHGET
@@ -380,6 +392,15 @@ LNHCNT MOV  @>F000,R4
        MOV  R4,@>F000
        CLR  @>F002
        CLR  @>F004
+       LI   R4,80              the slot size from the longest line allowed
+       LI   R5,50
+       MOV  @6(R9),R6
+       CI   R6,79
+       JLE  LNK0
+       LI   R4,160
+       LI   R5,24
+LNK0   MOV  R4,@>F006
+       MOV  R5,@>F008
 LNK1   MOV  @>F002,R4
        RT
 
@@ -388,15 +409,29 @@ LNHADR MOV  @>F004,R6          the slot the next line goes in
        S    R5,R6              the newest is the one before it
        JLT  LNA1
        B    @LNHSL
-LNA1   AI   R6,50              (the ring wraps)
+LNA1   A    @>F008,R6          (the ring wraps)
        B    @LNHSL
 
 * LNHSL - R6 = a slot number, 0-49: R6 -> that slot.  Uses R6, R7.
-LNHSL  MPY  @LNC80,R6          R6:R7 = the slot * 80
-       AI   R7,>F060
+LNHSL  MPY  @>F006,R6          R6:R7 = the slot * its size
+       A    @>F006,R7          the slots begin after the line being typed,
+       AI   R7,>F00A           which is one slot's size from >F00A
        MOV  R7,R6
        RT
-LNC80  DATA 80
+
+* LNHCLP - with a history page: set it up if it is not (from this call's
+* longest line) and cut the longest line to what its slots hold.
+LNHCLP .enter
+       BL   @LNHMAP
+       BL   @LNHCNT
+       MOV  @>F006,R5
+       DEC  R5
+       C    @6(R9),R5
+       JLE  LNP9
+       MOV  R5,@6(R9)
+LNP9   BL   @LNHUNM
+       .leave
+       RT
 
 * LNHGET - copy the line at R6 into the buffer (cut to the field's length) and
 * put the cursor at its end.  Uses R2, R3, R6, R7.
@@ -453,12 +488,12 @@ LNL2   MOV  @>F004,R6
        BL   @LNPUT
        MOV  @>F004,R6
        INC  R6
-       CI   R6,50
+       C    R6,@>F008
        JL   LNL3
        CLR  R6
 LNL3   MOV  R6,@>F004
        MOV  @>F002,R6
-       CI   R6,50
+       C    R6,@>F008
        JHE  LNL9
        INC  R6
        MOV  R6,@>F002

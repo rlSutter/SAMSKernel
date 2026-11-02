@@ -314,8 +314,26 @@ Without the priority bit the layer shows only where the tile layer is the backgr
 
 ![Bitmap layer, 16 colours](images/mode-bitmap-layer-16.png)
 
-This is the way to put real graphics on a screen without giving up the file service (Graphics II uses the controller's VRAM). **The demo uses it over Graphics I.** In Text 80 the layer's position test is in 256-pixel units, but js99er's offset into the bitmap is
-not halved to match, so it is unclear what the hardware does there; I did not use Text 80 for the demo, and you should check it on hardware before relying on it.
+This is the way to put real graphics on a screen without giving up the file service (Graphics II uses the controller's VRAM). **The demo uses it over Graphics I.**
+
+**Over Text 80** (reported by the TXA project, 1 November 2026, tested on js99er only; I have not run it, and no real F18A has been tried). The layer's position test is in
+256-pixel units, but js99er's offset into the bitmap is not halved to match, so js99er draws such a picture **doubled horizontally** (a bug reported to js99er's author); what
+the hardware does is unknown. TXA's working settings for a 16-colour (fat pixel) picture above the 80-column text, with the bitmap at `>2800`:
+
+| Register | Value | Meaning |
+| --- | --- | --- |
+| `VR_BMPAD` (32) | `>A0` | the bitmap at `>2800` (64-byte units) |
+| `VR_BMPX` (33), `VR_BMPY` (34) | `>00`, `>08` | x 0; y 8: under an 8-scanline status row |
+| `VR_BMPW` (35), `VR_BMPH` (36) | `>00`, `>60` | 256 wide: the full Text 80 width; 96 rows |
+| `VR_BMPCT` (31) | `>D8` | on, priority, fat pixels (16 colours), palette select 8: entries 32-47 |
+
+The picture's 16 colours go into palette entries 32-47, so the text's colours are untouched; the text rows the picture covers are blanked and the text window starts below it.
+
+**Keep a bitmap out of every file buffer.** The disk controller reads and writes through VRAM, and so does this kernel's file service: a bitmap stored where a file call
+puts its data is overwritten by the next disk call (the same warning as for Graphics II's colour table, part 6). In the map above `>3600-36FF` is the file service's record buffer,
+`>3700-37D7` its PABs and `>37D8-3FFF` the controller's. **The free run in Text 80 is `>2000-35FF`, 5,632 bytes** (and only `>2000-2FFF` with sprites or enhanced colour planes),
+so TXA's 6,144-byte bitmap at `>2800` overlaps the file service and has to be redrawn after every disk call (TXA's `PICRDW`). Either keep a picture to 5,632 bytes (for example
+128 x 88 fat pixels) or redraw it after file calls.
 
 ## 11. Other registers (set them with VREG)
 

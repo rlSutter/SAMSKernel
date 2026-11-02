@@ -1,0 +1,43 @@
+*======================================================================
+* fm.a99 - routines for tests/test_kernel.py (group fastmap): the same read
+* of a page's first word through MAPE and through the .mape macro, and the
+* same for window F, so that the test can compare them page after page.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+* FMW - write R1 (a page number) into the first word of page R1, through MAPE
+FMW    .enter
+       MOV  R1,R4              (MAPE changes R1-R3)
+       MOV  R1,R0
+       BL   @MAPE
+       MOV  R4,@>E000
+       .leave
+       RT
+* FMA - the first word of page R1 through the macro, window E; R0 = it
+FMA    .mape R1
+       MOV  @>E000,R0
+       RT
+* FMB - the same through MAPE
+FMB    .enter
+       MOV  R1,R0
+       BL   @MAPE
+       MOV  @>E000,R0
+       .leave
+       RT
+* FMC - the same through the macro, window F
+FMC    .mapf R1
+       MOV  @>F000,R0
+       RT
+* FMD - the same through MAPF
+FMD    .enter
+       MOV  R1,R0
+       BL   @MAPF
+       MOV  @>F000,R0
+       .leave
+       RT

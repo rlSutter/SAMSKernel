@@ -360,6 +360,14 @@ close the file.  R0 = 0 or the error.  Uses R0-R9.
 
 delete the file named by R2 (DSR opcode 7).  R0 = 0 or the error.  Uses R0-R9.
 
+### `FLOAD`
+
+load the PROGRAM file named by R2 (a length-prefixed string, 'DSK1.NAME') into VRAM from the address R0, at most R1 bytes: the DSR's LOAD (opcode 5), on the selected handle's PAB.  R0 = 0 or the error.  The file's bytes go straight to VRAM, so the address must be clear of what the screen uses in the current mode, of this file service's own record buffer and PAB (>3600-37D7) and of the controller's buffers (>37D8 up): in Text 80 the free run is >2000-35FF (5,632 bytes) without enhanced colour and sprites, >2000-2FFF with sprites.  A 6K picture does not fit beside file calls.
+
+### `FSAVE`
+
+save R1 bytes of VRAM from the address R0 as the PROGRAM file R2 names: the DSR's SAVE (opcode 6).  R0 = 0 or the error.  Neither touches a file another handle has open.  Uses R0-R9 and the DSR's.
+
 ### `FCALL`
 
 call the DSR for the PAB at FPABV: the previous error cleared, the scratchpad it uses kept and put back, >8356 at the name length. R0 = 0, the error, or >FF.  After the call it polls the keyboard and steps the music (KIDLE) if a frame passed meanwhile: a DSR runs with interrupts off, so without this the keys typed and the song playing during a long job (an assembly, a load, a save) would be lost.  Uses R0-R9.
@@ -450,7 +458,7 @@ set a tone voice directly (sound effects, or music of your own). R0 = the voice 
 
 ### `LINEIN`
 
-read a line of text at a screen position. R0 = the position of the field's first cell (row * columns + column) R1 = the buffer: a length-prefixed string, which holds the text to start with (length byte 0: an empty line) and the edited line at the end R2 = the attribute (high byte) of the text; the cursor is its swap R3 = the longest the line may be, 1 to 79 (more is taken as 79), in the low byte; the buffer must have room for a length byte and that many characters.  The high byte, if not 0, is the field's WIDTH in cells (2 or more): a longer line scrolls sideways in it, keeping the cursor in view (LI R3,20*256+60: a line of up to 60 in a field of 20).  With 0 there, or a width of the longest line + 1 or more, the field is the longest line and one cell more (for the cursor) and does not scroll. Either way the field must fit on the screen's row. R4 = a history page from the pool, or 0 for no history Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it is not put back as it was); only ENTER adds the line to the history. Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
+read a line of text at a screen position. R0 = the position of the field's first cell (row * columns + column) R1 = the buffer: a length-prefixed string, which holds the text to start with (length byte 0: an empty line) and the edited line at the end R2 = the attribute (high byte) of the text; the cursor is its swap R3 = the longest the line may be, 1 to 159 (more is taken as 159), in the low byte (79 at most with a history page that was set up for lines up to 79); the buffer must have room for a length byte and that many characters.  The high byte, if not 0, is the field's WIDTH in cells (2 or more): a longer line scrolls sideways in it, keeping the cursor in view (LI R3,20*256+60: a line of up to 60 in a field of 20).  With 0 there, or a width of the longest line + 1 or more, the field is the longest line and one cell more (for the cursor) and does not scroll.  Either way the field must fit on the screen's row. R4 = a history page from the pool, or 0 for no history Returns R0 = the key that ended the line: KENTER, KBACK or KQUIT (in the high byte).  With KBACK or KQUIT the buffer holds what had been typed so far (it is not put back as it was); only ENTER adds the line to the history. Uses R0-R8 and R12; R9 comes back as it was.  Needs about 60 bytes of stack.
 
 ### `LNDRAW` *(internal)*
 
@@ -487,6 +495,10 @@ R6 -> the R5-th newest line (R5 = 1 is the newest).  Uses R6, R7.
 ### `LNHSL` *(internal)*
 
 R6 = a slot number, 0-49: R6 -> that slot.  Uses R6, R7.
+
+### `LNHCLP` *(internal)*
+
+with a history page: set it up if it is not (from this call's longest line) and cut the longest line to what its slots hold.
 
 ### `LNHGET` *(internal)*
 

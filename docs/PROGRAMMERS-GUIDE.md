@@ -391,7 +391,7 @@ labels. **[TI]** `programs/ask.a99` asks for a name and greets it, with a histor
        LI   R0,5*COLS+14      where the field starts (row * columns + column)
        LI   R1,NAMBUF         the buffer: a length byte, then the characters
        LI   R2,ABOLD          the text's attribute (high byte)
-       LI   R3,30             the longest the line may be (1-79)
+       LI   R3,30             the longest the line may be (1-159)
        MOV  @HPAGE,R4         a history page from the pool, or 0 for none
        BL   @LINEIN           R0 = KENTER, KBACK or KQUIT
 ```
@@ -409,7 +409,8 @@ swapped, so it shows in the modes that have an attribute table.
 
 **The history.** Ask the pool for one page (`PINIT`, `PALLOC`) and pass its number in `R4` on every call; keep the page
 between calls and give it back (`PRELS`) when you have finished. `LINEIN` stores each non-empty line that ENTER ends (not
-a repeat of the line before it) in a ring of 50 lines, and the up and down arrows bring older and newer ones back into the
+a repeat of the line before it) in a ring (50 lines of up to 79 characters, or, if the first call that used the page allowed more than 79, 24 lines of up to
+159: the page keeps the size it was set up with), and the up and down arrows bring older and newer ones back into the
 buffer; going down past the newest brings back the line as it was typed. A page that does not hold a history yet is set
 up on first use (nothing needs clearing); the page layout is in `lib/linein.a99`. `LINEIN` maps the page into window
 `>F000` for a moment each time it reads or writes it and puts slot B back as it found it. Under the workbench the pool
@@ -476,6 +477,14 @@ and hello examples quit immediately.
 
 Every key restarts the console's nine-minute screen-blank timer, and turns the display
 back on if it had blanked.
+
+### A module that never returns (an interpreter)
+
+The kernel's model is a main loop that calls your `TICK` each frame. A program such as a story interpreter can instead run for a whole game inside one module and read
+its own lines. That works if the module keeps the kernel alive: call `KIDLE` (the keys are polled and the song stepped if a frame has passed) at least once a frame, which in
+practice means at each line read (`LINEIN`, `KWAIT` and every file call already do) and every so many instructions of a long computation; and handle quit yourself (`KQUIT`
+from `KWAIT` or `LINEIN`, or `FCTN =` at a `KEYGET` poll: set `QUITF`, or leave). A module that runs for seconds without `KIDLE` loses the keys typed and stops the song.
+`LINEIN` takes lines up to 159 characters, scrolling sideways in a field of any width (with a history page, 24 lines of up to 159 characters, or 50 of up to 79).
 
 ## 7. Memory
 
@@ -566,6 +575,16 @@ lines of a file, and draws from them:
 
 **Check `NPAGES`** (128 or 256) if you take pages near the top: the card the user owns may
 be bigger than `min_pages`, never smaller (the loader refuses it).
+
+### Mapping fast: `.mape` and `.mapf`
+
+`MAPE` and `MAPF` are calls: about 17 instructions and the call round them when the page changes (the check, the record, the write with the mapper's registers switched
+on and off). Code that remaps on almost every byte (a reader walking tables in several pages) can use the **macros** `.mape Rn` and `.mapf Rn`, which do the same inline:
+compare the page in `Rn` with the window's record (`CURBE` or `CURBF`); if it differs, write the record and the mapper's register, switching the registers on and off exactly as
+`MAPPG` does. It comes to about 10 instructions when the page changes and 2 when it does not (TXA measured an 18% faster compile from using it in its readers). The rules:
+`Rn` is not `R12` (the macro loads `R12` with the mapper's CRU address and leaves it so), holds the page number and comes back as it was; slot B only; never the window the
+calling code is running in; nothing else writes the registers (so the records stay true). `tests/apps/fastmap` compares 2,000 pseudo-random page reads through each macro and
+through the call. Where speed does not matter, use `MAPE` and `MAPF`: they are shorter.
 
 ## 8. Several modules
 
@@ -665,6 +684,8 @@ disk controller (`DSK1.`), TIPI (`PI.`), a printer port (`PIO`), and so on. It c
 | `FWRITE` | R1 = buffer; R2 = length | R0 = 0 or the error |
 | `FCLOSE` | | R0 = 0 or the error |
 | `FDELETE` | R2 = the name | R0 = 0 or the error |
+| `FLOAD` | R2 = the name of a PROGRAM file, R0 = the VRAM address to load it to, R1 = the most bytes | R0 = 0 or the error |
+| `FSAVE` | R2 = the name, R0 = the VRAM address, R1 = the number of bytes | R0 = 0 or the error |
 | `FCNUM` | R1 = a catalog record, R2 = n (0-2) | R0 = number n of the record |
 
 **Flags** are added together, one from each group, and passed in the *high byte* of R0:

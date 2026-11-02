@@ -100,7 +100,7 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
 
 ## Testing
 
-`python3 tests/test_kernel.py poolmax` builds the test application with `"pool_max_pages": 256` and 500 more resident bytes (which do not fit
+`python3 tests/test_kernel.py poolmax` builds the test application with `"pool_max_pages": 256` and 250 more resident bytes (which do not fit
 with the default bitmap), checks `POOLBM`/`POOLMX`/`POOLWD`, that `PINIT` is cut to 256 pages and writes nothing below the
 smaller bitmap, that `PALLOC` hands out exactly the 224 pages from `>20` to 255, that `PRELS` ignores pages the bitmap has no bit
 for, and that bad values are refused.

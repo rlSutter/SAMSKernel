@@ -1,0 +1,7 @@
+{
+  "name": "FASTMAP TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "fm", "source": "fm.a99"}
+  ]
+}

@@ -6,6 +6,8 @@
 *             flags from R11, so results go in registers, not flags
 *   .push Rn  / .pop Rn   save and restore a register on the software stack
 *   .intsvc   let the console ISR run once (interrupts on, then off)
+*   .mape Rn / .mapf Rn   map the page in Rn into window >E000 / >F000,
+*             inline (below): MAPE and MAPF without the call
 *   .callmod PAGE,N   call entry N of the module whose first page is
 *             PAGE (MODCALL: R0 returns); N counts from 0: INIT 0, TICK 1,
 *             REDRAW 2, reserved 3, your own entries from 4
@@ -42,6 +44,37 @@
        .defm intsvc
        LIMI 2
        LIMI 0
+       .endm
+* .mape Rn - the page in Rn into window >E000, recorded in CURBE; .mapf Rn -
+* the same for >F000 and CURBF.  Inline, about 10 instructions when the page
+* changes (MAPE with its call and the saving round it is about 23) and 2
+* when it is already there.  Rules: Rn is not R12 (the macro loads R12 with the
+* mapper's CRU address and leaves it so); Rn holds the page number, 0-4095,
+* and comes back as it was; the registers are written by this macro and
+* nothing else, as MAPPG does, so the records stay right; never use it on
+* the window the calling code is running in, which is the rule for MAPE too.
+* Use MAPE and MAPF where speed does not matter: they are shorter.
+       .defm mape
+       C    #1,@CURBE
+       JEQ  $+22
+       MOV  #1,@CURBE
+       LI   R12,AMSCRU
+       SBO  0
+       SWPB #1
+       MOV  #1,@AMSREG+>1C
+       SWPB #1
+       SBZ  0
+       .endm
+       .defm mapf
+       C    #1,@CURBF
+       JEQ  $+22
+       MOV  #1,@CURBF
+       LI   R12,AMSCRU
+       SBO  0
+       SWPB #1
+       MOV  #1,@AMSREG+>1E
+       SWPB #1
+       SBZ  0
        .endm
        .defm callmod
        LI   R0,#1
