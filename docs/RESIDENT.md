@@ -81,9 +81,12 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
    `POOLBM`, `POOLMX` and `POOLWD` are written into `appcfg.a99` by the build; `PINIT` cuts its range to `POOLMX` (no page from
    there up is handed out, and `PRELS` ignores one); a limit at or below the first free page is refused (the pool would be
    empty). The cost: the pool cannot use the pages above the limit, so declare what the program really needs.
-2. **A common page.** Give every module 4K at `>C000` and a shared 4K at `>D000` that is the same page for all of them:
+2. **A common page** (the mechanism is built, 1.22.0: single-page modules, `"size": 4096`, window `>D000` is then the program's, `MAPD`, and a
+   `MODCALL` that restores it). Give every module 4K at `>C000` and a shared 4K at `>D000` that is the same page for all of them:
    4K of shared code, but modules of at most 4K (the workbench's assembler, 5,542 bytes, would not fit; Reversi, 3,392,
-   would). An all-or-nothing choice per application.
+   would). What is **not** built is the build's help in placing the shared code: it must be assembled at `>D000`, put in a page (a
+   `"data"` file, or a pool page filled at start-up) and mapped by the program with `MAPD` at start-up and after any switch to an 8K
+   module. Programs can also mix, and keep ordinary 8K modules for the large ones.
 3. **Trim the kernel** (built, 1.18.0: `"omit"` in `app.json`). `"omit": ["music", "files", "pool"]` leaves out of the kernel's own
    assembly (the build defines `NOMUSIC`, `NOFILES`, `NOPOOL` for the assembler, and `kernel.a99` skips the file) any of: the **music**
    engine (506 bytes; `MUTICK`, which the key loop calls, becomes a bare return), the **files** code (the DSR calls, `FOPEN` and the rest,
@@ -100,7 +103,7 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
 
 ## Testing
 
-`python3 tests/test_kernel.py poolmax` builds the test application with `"pool_max_pages": 256` and 150 more resident bytes (which do not fit
+`python3 tests/test_kernel.py poolmax` builds the test application with `"pool_max_pages": 256` and 100 more resident bytes (which do not fit
 with the default bitmap), checks `POOLBM`/`POOLMX`/`POOLWD`, that `PINIT` is cut to 256 pages and writes nothing below the
 smaller bitmap, that `PALLOC` hands out exactly the 224 pages from `>20` to 255, that `PRELS` ignores pages the bitmap has no bit
 for, and that bad values are refused.

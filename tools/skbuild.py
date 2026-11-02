@@ -12,10 +12,12 @@ app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
+    "module_size": 8192,               optional: 8192 (default) or 4096: the size every module may be
     "modules": [                       each an 8K bank of code run in slot C
       {"name": "hello", "source": "hello.a99"},
-      {"name": "more",  "source": "more.a99", "page": "0x20"}   (optional page)
-    ],
+      {"name": "more",  "source": "more.a99", "page": "0x20"},   (optional page)
+      {"name": "vm",    "source": "vm.a99", "size": 4096}   (optional: this module's size; at most 4K,
+    ],                                  and it leaves window >D000 to the program: docs, part 8)
     "boot":      "hello",              the module that starts (default: the first)
     "omit": ["music"],                  optional: parts of the kernel the program does not use and leaves out, from
                                          "music", "files", "pool", "graphics" (Graphics I, Graphics II, Multicolor)
@@ -173,6 +175,13 @@ def load_app(appdir):
     names = [m['name'] for m in app['modules']]
     if len(set(ident(n) for n in names)) != len(names):
         die('module names must be distinct')
+    ms = app.setdefault('module_size', 8192)
+    if ms not in (4096, 8192):
+        die('\"module_size\" is 4096 or 8192')
+    for m in app['modules']:
+        m.setdefault('size', ms)
+        if m['size'] not in (4096, 8192):
+            die('module %s: \"size\" is 4096 or 8192' % m['name'])
     app.setdefault('boot', names[0])
     if app['boot'] not in names:
         die('"boot" names no module')
@@ -413,6 +422,14 @@ def main():
         src = os.path.join(appdir, m['source'])
         out = os.path.join(bdir, m['name'] + '.bin')
         b = asm(src, out, incs, os.path.join(bdir, m['name'] + '.lst'), os.path.join(bdir, m['name'] + '.equ'))   # (the module's symbols: for tests and debugging)
+        if m['size'] == 4096:
+            # a single-page module: at most 4K, and a flag in the last word of its header (>C006) tells the kernel
+            # not to map a second page into >D000 (the program owns that window)
+            if len(b) > 4096:
+                die('module %s is %d bytes: with \"size\": 4096 it may be at most 4,096' % (m['name'], len(b)))
+            if len(b) < 8:
+                die('module %s is too short to have the four-word header' % m['name'])
+            b = b[:6] + (int.from_bytes(b[6:8], 'big') | 1).to_bytes(2, 'big') + b[8:]
         images.append(b)
         sizes.append((m['name'], len(b)))
     for d in app['data']:

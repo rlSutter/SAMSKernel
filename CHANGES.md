@@ -1,5 +1,16 @@
 # Changes
 
+## 1.22.0 (2 November 2026)
+
+K5 of the TIthon proposal and request 2.4 of the TXA proposal, as one design (`TIthon-proposal-assessment.md`, `TXA-proposal-assessment.md`). Kernel 6,888 bytes (+46), 792 free.
+
+- **Single-page modules.** A module of at most 4K declares `"size": 4096` (or the application `"module_size": 4096`; a module's own `"size"` wins). The build refuses one that assembles to more than 4,096 bytes and sets bit 0 of the last word of its header (`>C006`); `PAGEC` reads it and, for such a module, maps only `>C000` and **leaves `>D000` as the program had it**. A module of the default size is as before (its second page at `>D000`), so nothing existing changes. The image still occupies an 8K bank and two SAMS pages.
+- **`MAPD`** (public; R0 = a page; unless it is there already; recorded in `CURCD`) and **`.mapd Rn`** (inline, the rules of `.mape`): window `>D000` for the program. `KSTART` maps page `>0D` there so that `CURCD` is true from the start.
+- **`MODCALL` saves and restores both windows** `>C000` and `>D000` separately (it restored the first page of the pair, through `PAGEC`, before), so a callee of either size, and TIthon's native calls from a 4K VM core into 8K modules, leave the window as the caller had it. `GOMOD` does not restore it: a switch to a single-page module leaves it, a switch to an 8K module overwrites it, and a return to a single-page module does not put the old page back (the program maps its own).
+- Settles the one point on which the two proposals differed: TIthon would have `GOMOD` map the new module's pair; TXA only `>C000`. Both are right for their module sizes, decided per module by the header flag.
+- Test group `slotd`: the flag in the image (set in the two 4K modules, clear in the 8K one); a single-page boot module's `MAPD` stays; `GOMOD` between single-page modules leaves `>D000`; to an 8K module maps its second page; back does not restore; `MODCALL` into each size restores both windows (also after a trip through the 8K module); `.mapd` against `MAPD` over 600 pseudo-random pages; the build refuses a 4K module that is larger, a default that does not fit, a bad size. The existing `modules` group passes unchanged.
+- RESIDENT.md's lever 2 (a common page): the mechanism now exists; the build's help in placing shared code at `>D000` does not.
+
 ## 1.21.0 (2 November 2026)
 
 From the TIthon project's proposal (K1 to K4; `TIthon-proposal-assessment.md`). Kernel 6,842 bytes (+104), 838 free.

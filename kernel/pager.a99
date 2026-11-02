@@ -45,20 +45,43 @@
 * a mapper register written any other way leaves the record wrong and the next
 * borrower restores the wrong page.
 
-* PAGEC - map pages R0 and R0+1 into slot C (>C000, >D000): a module.
-* Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R7, R12.
+* PAGEC - map the module whose first page is R0 into slot C: R0 into >C000
+* and, unless the module says it is a single page, R0+1 into >D000.  A module
+* says so in the last word of its header (>C006: bit 0 set; the build sets it
+* for a module declared with "size": 4096).  Then window >D000 belongs to the
+* program, which maps it with MAPD, and a switch to such a module leaves it as
+* it was.  Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3,
+* R12.
 PAGEC  .enter
-       MOV  R0,@CURCC
-       MOV  R0,R7
-       INC  R7
-       MOV  R7,@CURCD
-       LI   R1,>C              window >C000
-       BL   @MAPPG
-       MOV  R7,R0
-       LI   R1,>D              window >D000
-       BL   @MAPPG
-       .leave
+       BL   @MAPC
+       MOV  @>C006,R1          the module's header: a single page?
+       ANDI R1,1
+       JNE  PGC9
+       INC  R0
+       BL   @MAPD
+PGC9   .leave
        RT
+
+* MAPC - map page R0 into >C000, recorded in CURCC.  Kernel use only.  Uses
+* R0-R3, R12 (R0 comes back as it was).  Leaf.
+MAPC   MOV  R0,@CURCC
+       LI   R1,>C
+       B    @MAPPG
+
+* MAPD - map page R0 into window >D000 unless it is there already, recorded
+* in CURCD.  For a program whose modules are single pages (app.json "size":
+* 4096): the window is then the program's, as >E000 and >F000 are, for a
+* third table or the running function's code page.  Do not use it while the
+* running module is an 8K one: the window holds that module's second page.
+* A switch to an 8K module, or a call (MODCALL) into one, maps its second page
+* there; MODCALL puts it back when the call returns, GOMOD does not.  Uses
+* R0-R3, R12.  Leaf.
+MAPD   C    R0,@CURCD
+       JEQ  MPD9
+       MOV  R0,@CURCD
+       LI   R1,>D
+       B    @MAPPG
+MPD9   RT
 
 * MAPPG - map one page into one window.
 *   R0 = page (0-4095), R1 = window (0-15)

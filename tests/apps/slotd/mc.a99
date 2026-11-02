@@ -1,0 +1,24 @@
+*======================================================================
+* mc.a99 - an ordinary 8K module for group slotd: its second page begins with
+* the word >C0DE, which is what window D holds while this module runs
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+VCD    EQU  APPRAM+2
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0,C4
+INIT   MOV  @>D000,@VCD
+       RT
+TICK   CI   R0,'A'*256
+       JNE  TK9
+       LI   R0,PG_MA
+       CLR  R1
+       B    @GOMOD
+TK9    RT
+* entry 4: the first word at >D000 as this module sees it (its own second page)
+C4     MOV  @>D000,R0
+       RT
+       BSS  >D000-$
+       DATA >C0DE

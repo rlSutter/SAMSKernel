@@ -47,15 +47,20 @@
 * routine does.
 MODCALL .enter
        MOV  @CURCC,R2          the calling module's first page ...
-       .push R2                ... kept
+       .push R2                ... and what window >D000 holds, kept: each
+       MOV  @CURCD,R2          window is put back by itself afterwards, so
+       .push R2                a callee of either size leaves both as they were
        MOV  R1,@MCENT          (the entry's address)
        BL   @PAGEC             map the module
        MOV  @MCENT,R1
        MOV  *R1,R1             its entry: the routine's address
        BL   *R1                call it
        MOV  R0,@MCRET          its result, kept
-       .pop R0
-       BL   @PAGEC             map the caller back
+       .pop R5                 the caller's >D000
+       .pop R0                 and its >C000, back
+       BL   @MAPC
+       MOV  R5,R0
+       BL   @MAPD
        MOV  @MCRET,R0          the result
        .leave
        RT

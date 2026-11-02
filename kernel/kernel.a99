@@ -52,6 +52,8 @@ KSTART LIMI 0
        MOVB R0,@TMRINC         byte to its frame counter at >8379 each frame
        BL   @KINIT             the keyboard as at power-up
        CLR  @QUITF
+       LI   R0,>D              window >D000 as the identity map has it (and so
+       BL   @MAPD              the record), until a module or the program says
        CLR  @FRMHK             no frame hook, no break pending
        CLR  @FRMGD
        CLR  @BRKF

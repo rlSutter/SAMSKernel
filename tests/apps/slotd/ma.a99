@@ -1,0 +1,85 @@
+*======================================================================
+* ma.a99 - a single-page module (size 4096) for tests/test_kernel.py (group
+* slotd).  Its INIT writes a word into two pool pages and maps one into
+* >D000 with MAPD; keys then switch modules (GOMOD) or call them (MODCALL) and
+* every module records the word it finds at >D000.
+*   B  GOMOD to mb          C  GOMOD to mc          M  MODCALL mb, then mc (typed lower case: the keyboard gives capitals)
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+VBD    EQU  APPRAM              what mb's INIT found at >D000
+VCD    EQU  APPRAM+2            mc's
+VMB    EQU  APPRAM+4            what MODCALL of mb's entry 4 returned
+VMC    EQU  APPRAM+6            mc's
+VAD    EQU  APPRAM+8            what ma finds at >D000 after both calls
+VCC    EQU  APPRAM+10           CURCC after both calls
+VCDR   EQU  APPRAM+12           CURCD after both calls
+VINIT  EQU  APPRAM+14           ma's INIT ran (counts)
+VAI    EQU  APPRAM+16           what ma's INIT found at >D000 on a return
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       MOV  @VINIT,R2
+       JNE  IN2                 only the first time: set the pages up
+       LI   R0,>40
+       BL   @MAPE
+       LI   R1,>5858
+       MOV  R1,@>E000
+       LI   R0,>41
+       BL   @MAPE
+       LI   R1,>5959
+       MOV  R1,@>E000
+       LI   R0,>40
+       BL   @MAPD
+IN2    INC  @VINIT
+       MOV  @>D000,@VAI
+       .leave
+       RT
+TICK   .enter
+       CI   R0,'B'*256
+       JNE  T1
+       LI   R0,PG_MB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T1     CI   R0,'C'*256
+       JNE  T2
+       LI   R0,PG_MC
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T2     CI   R0,'M'*256
+       JNE  T9
+       LI   R0,>40              D := >40 first: mc's second page was left there
+       BL   @MAPD
+       .callmod PG_MB,4
+       MOV  R0,@VMB
+       .callmod PG_MC,4
+       MOV  R0,@VMC
+       MOV  @>D000,@VAD
+       MOV  @CURCC,@VCC
+       MOV  @CURCD,@VCDR
+T9     .leave
+       RT
+
+* AMD1 / AMD2 - map page R1 into >D000 by the macro and by the call; R0 = the
+* first word found there
+AMD1   .mapd R1
+       MOV  @>D000,R0
+       RT
+AMD2   .enter
+       MOV  R1,R0
+       BL   @MAPD
+       MOV  @>D000,R0
+       .leave
+       RT
+* AWR - write R1 (a page number) into the first word of page R1
+AWR    .enter
+       MOV  R1,R4
+       MOV  R1,R0
+       BL   @MAPE
+       MOV  R4,@>E000
+       .leave
+       RT

@@ -3,7 +3,7 @@
 
   python3 tests/test_kernel.py [group ...]      (no names: all)
 
-Groups: sources dbg sams16 tipi hfdccru linein resident poolmax poolscan trim textonly fastmap fileprog fplayout framehook brkflag editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
+Groups: sources dbg sams16 tipi hfdccru linein resident poolmax poolscan slotd trim textonly fastmap fileprog fplayout framehook brkflag editorapp sourcesdisk jumpcheck fileapi dsdd dsddworkbench editorpages reversi reversiti joystick files2 native nativemods nativedisk tiprograms workbench workbenchfull boot refusal ram keys quit modules files browser modes modesquit music rom realdsr
 Builds the examples first (tools/skbuild.py; XAS99 or ./xdt99 needed).
 The 'rom' group runs the real console ROM's interrupt routine when
 TI_CONSOLE_ROM names your own copy of the 8K console ROM (a raw dump, or
@@ -1378,11 +1378,11 @@ def poolmax():
             open(d + '/app/resident.a99', 'a').write(edit_res)
         r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
         return r, d + '/out'
-    big = '       BSS  150\n'
+    big = '       BSS  100\n'
     r, out = build_variant(lambda j: j.pop('pool_max_pages', None))
     check(r.returncode != 0 and 'page-pool bitmap' in (r.stdout + r.stderr), 'with the default bitmap (512 bytes) the test application\'s resident code (LINEIN, with its scrolling field and long lines, is about 1,130 bytes) does not fit: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:90])
     r, out = build_variant(lambda j: j.update(pool_max_pages=256), big)
-    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 150 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
+    check(r.returncode == 0 and 'at >BFE0' in r.stdout, 'with "pool_max_pages": 256 (a 32-byte bitmap at >BFE0) it fits with 100 more bytes: %s' % [l for l in r.stdout.split('\n') if l.startswith('kernel')])
     syms = asmharness.symbols(os.path.join(out, 'kernel.equ'))
     check(syms['poolbm'] == 0xBFE0 and syms['poolmx'] == 256 and syms['poolwd'] == 16, 'kernel.equ says: POOLBM >%04X, POOLMX %d, POOLWD %d' % (syms['poolbm'], syms['poolmx'], syms['poolwd']))
     c = open(glob.glob(out + '/*8.bin')[0], 'rb').read()
@@ -1902,6 +1902,85 @@ def poolscan():
     z = c2('palloca', r0=64)[0]
     check(r.returncode == 0 and (x, y, z) == (63, 0, 0), 'with "pool_max_pages": 64, PALLOCA stops at page 63: %d, then %d, and nothing at 64 (%d)' % (x, y, z))
 
+def slotd():
+    """Single-page modules ("size": 4096) and window >D000 (MAPD, .mapd, a MODCALL that restores both windows): the build refuses a module
+    over 4K and sets the header flag; a switch (GOMOD) between single-page modules leaves >D000 as the program set it, a switch to an
+    8K module maps its second page there and a return to a single-page module does not put it back; MODCALL puts both windows back
+    whichever size the callee is; MAPD and its macro agree page after page."""
+    import asmharness, shutil, tempfile
+    c = build('tests/apps/slotd')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'slotd', 'kernel.equ'))
+    for n in ('ma', 'mb', 'mc'):
+        syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'slotd', n + '.equ')))
+    bank = lambda i: c[i * 0x2000:(i + 1) * 0x2000]
+    flags = [int.from_bytes(bank(i)[6:8], 'big') & 1 for i in (3, 4, 5)]
+    check(flags == [1, 1, 0], 'the build sets the single-page flag (bit 0 of the header\'s last word) in the two 4K modules and not in the 8K one: %s' % flags)
+    def run_keys(keys):
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)
+        try:
+            return sim9900.run(c, frames=400, keys=keys)
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+    word = lambda m, n: m.rw(syms[n])
+    m, cpu, halt = run_keys('<WAIT 30>')
+    check(halt is None and m.rw(0xD000) == 0x5858 and word(m, 'curcd') == 0x40 and word(m, 'vinit') == 1 and word(m, 'curcc') == syms['pg_ma'],
+          'a single-page boot module maps a page into >D000 with MAPD and it stays: >D000 holds %04X, CURCD >%02X' % (m.rw(0xD000), word(m, 'curcd')))
+    m, cpu, halt = run_keys('<WAIT 20>b<WAIT 30>')
+    check(word(m, 'curcc') == syms['pg_mb'] and word(m, 'vbd') == 0x5858 and word(m, 'curcd') == 0x40,
+          'GOMOD to another single-page module leaves >D000 as it was: mb found %04X, CURCD >%02X' % (word(m, 'vbd'), word(m, 'curcd')))
+    m, cpu, halt = run_keys('<WAIT 20>c<WAIT 30>')
+    check(word(m, 'curcc') == syms['pg_mc'] and word(m, 'vcd') == 0xC0DE and word(m, 'curcd') == syms['pg_mc'] + 1 and m.rw(0xD000) == 0xC0DE,
+          'GOMOD to an 8K module maps its second page into >D000 as before: mc found %04X, CURCD >%02X (its page >%02X + 1)' % (word(m, 'vcd'), word(m, 'curcd'), syms['pg_mc']))
+    m, cpu, halt = run_keys('<WAIT 20>c<WAIT 20>a<WAIT 30>')
+    check(word(m, 'curcc') == syms['pg_ma'] and word(m, 'vinit') == 2 and word(m, 'vai') == 0xC0DE and m.rw(0xD000) == 0xC0DE,
+          'and a return to the single-page module does not put the old page back: >D000 still holds %04X (the program maps it again if it cares)' % m.rw(0xD000))
+    for pre in ('', 'c<WAIT 20>a<WAIT 20>'):
+        m, cpu, halt = run_keys('<WAIT 20>' + pre + 'm<WAIT 40>')
+        got = tuple(word(m, n) for n in ('vmb', 'vmc', 'vad', 'vcc', 'vcdr'))
+        check(got == (0x5858, 0xC0DE, 0x5858, syms['pg_ma'], 0x40),
+              'MODCALL into a single-page module (saw %04X), then an 8K one (saw its own %04X): afterwards >D000 holds %04X, CURCC >%02X and CURCD >%02X: both windows put back%s' % (got[0], got[1], got[2], got[3], got[4], ' (after coming back from mc)' if pre else ''))
+    m, cpu, halt = run_keys('<WAIT 20>')
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m, cpu, halt = sim9900.run(c, frames=60)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    call = lambda n, **r: asmharness.call(m, cpu, syms[n], {int(k[1:]): v for k, v in r.items()}, limit=1_000_000)
+    for pg in range(0x40, 0x80):
+        call('awr', r1=pg)
+    rnd, bad = 777, None
+    for i in range(600):
+        rnd = (rnd * 1103515245 + 12345) & 0x7FFFFFFF
+        pg = 0x40 + (rnd >> 8) % 64
+        a = call('amd1', r1=pg)[0]
+        ra = m.rw(syms['curcd'])
+        b = call('amd2', r1=pg)[0]
+        if not (a == b == pg and ra == pg):
+            bad = (hex(pg), a, b, ra); break
+    check(bad is None, 'the .mapd macro and the MAPD call: 600 pseudo-random pages read the same word, CURCD follows (%s)' % (bad or 'no difference'))
+    def variant(edit_json=None, edit_file=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'slotd'), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_file:
+            edit_file(d + '/app')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        return r, (r.stdout + r.stderr)
+    r, out = variant(edit_file=lambda d: open(d + '/mb.a99', 'a').write('       BSS  4100\n'))
+    check(r.returncode != 0 and 'mb' in out and 'at most 4,096' in out, 'a module declared 4K that assembles to more is refused by name: %s' % out.strip().split('\n')[-1][:90])
+    r, out = variant(lambda j: j.update(module_size=4096))
+    check(r.returncode != 0 and 'mc' in out and 'at most 4,096' in out, '"module_size": 4096 as the default applies to mc, which is over 4K: %s' % out.strip().split('\n')[-1][:90])
+    def allsmall(j):
+        j['module_size'] = 4096
+        j['modules'][2]['size'] = 8192
+    r, out = variant(allsmall)
+    check(r.returncode == 0, '"module_size": 4096 with "size": 8192 on mc builds: the module\'s own size wins')
+    r, out = variant(lambda j: j['modules'][0].update(size=5000))
+    check(r.returncode != 0 and 'size' in out, 'a size other than 4096 or 8192 is refused')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2049,7 +2128,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

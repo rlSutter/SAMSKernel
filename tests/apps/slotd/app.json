@@ -1,0 +1,9 @@
+{
+  "name": "SLOTD TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "ma", "source": "ma.a99", "size": 4096},
+    {"name": "mb", "source": "mb.a99", "size": 4096},
+    {"name": "mc", "source": "mc.a99"}
+  ]
+}

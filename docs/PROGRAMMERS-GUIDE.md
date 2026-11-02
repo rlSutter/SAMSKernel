@@ -681,6 +681,30 @@ routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/res
 - A module that must be callable by `MODCALL` while *also* being switched to
   needs its entry table the same either way.
 
+### Single-page modules and the window `>D000`
+
+An ordinary module is an 8K image that fills slot C: its first page at `>C000` and its second at `>D000`. A module of **at most 4K** can say so, and then the
+kernel maps only its page at `>C000` and **leaves `>D000` to the program**, to use as a third window (a third table, the running function's code page) the way
+`>E000` and `>F000` are used. Declare it in `app.json`: `"size": 4096` on a module, or `"module_size": 4096` for every module (a module's own `"size"` overrides it).
+The build refuses a module of that size that assembles to more than 4,096 bytes, and sets bit 0 of the **last word of the module's header** (`>C006`, the word after the
+three entry addresses, which a module writes as 0); that bit is what the kernel reads. The image still takes an 8K bank and two pages in SAMS (the second is unused).
+
+`MAPD` (R0 = a page) maps it into `>D000` unless it is already there, recorded in `CURCD` as `MAPE` does for `>E000`; `.mapd Rn` is the same inline (about 10
+instructions when the page changes; the rules of `.mape`). What happens to the window:
+
+| | the window `>D000` |
+| --- | --- |
+| a switch (`GOMOD`) to a single-page module | untouched: it holds what the program last mapped there |
+| a switch to an 8K module | that module's second page, as always |
+| a return to a single-page module from an 8K one | still the 8K module's page: the program maps its own again (it knows what it wants) |
+| `MODCALL` into a module of either size | the caller's `>C000` **and** `>D000` are saved and put back separately when the call returns, so a callee of either size leaves both as they were |
+| the first module, at start-up | page `>0D`, as the identity map has it (`CURCD` says so) |
+
+So a program whose modules are all single pages owns `>D000` outright; a program that mixes them (a 4K core with the running code in `>D000`, calling 8K modules for the rare
+long jobs) can rely on `MODCALL` to restore the window and must map it again after a `GOMOD`. Never use `MAPD` while the running module is an 8K one: the window holds its
+second page. The flag costs 46 bytes of kernel (`MAPD`, `MAPC`, the check in `PAGEC` and the second restore in `MODCALL`). Test group `slotd`
+(`tests/apps/slotd`: two single-page modules and one 8K, every row above, the macro against the call over 600 pages, the build's refusals).
+
 ## 9. Files
 
 **[TI]** `programs/copy.a99` on the workbench disk copies `DSK1.SRC` to `DSK1.DST` through two handles at once: the file calls below, running. **[PC]** `tests/apps/files2` is the same idea as a cartridge, checked against TI's own disk controller ROM in the simulator.
@@ -915,6 +939,7 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
   bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192
   bytes; not together with `pool_max_pages`). The room goes to resident code; a module that uses a routine that is left out is refused by

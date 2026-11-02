@@ -122,7 +122,15 @@ write a page-specific word to the first and last word of every page from >10 up 
 
 ### `PAGEC` *(internal)*
 
-map pages R0 and R0+1 into slot C (>C000, >D000): a module. Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R7, R12.
+map the module whose first page is R0 into slot C: R0 into >C000 and, unless the module says it is a single page, R0+1 into >D000.  A module says so in the last word of its header (>C006: bit 0 set; the build sets it for a module declared with "size": 4096).  Then window >D000 belongs to the program, which maps it with MAPD, and a switch to such a module leaves it as it was.  Recorded in CURCC/CURCD.  Kernel use only (see above).  Uses R0-R3, R12.
+
+### `MAPC` *(internal)*
+
+map page R0 into >C000, recorded in CURCC.  Kernel use only.  Uses R0-R3, R12 (R0 comes back as it was).  Leaf.
+
+### `MAPD`
+
+map page R0 into window >D000 unless it is there already, recorded in CURCD.  For a program whose modules are single pages (app.json "size": 4096): the window is then the program's, as >E000 and >F000 are, for a third table or the running function's code page.  Do not use it while the running module is an 8K one: the window holds that module's second page. A switch to an 8K module, or a call (MODCALL) into one, maps its second page there; MODCALL puts it back when the call returns, GOMOD does not.  Uses R0-R3, R12.  Leaf.
 
 ### `MAPPG`
 

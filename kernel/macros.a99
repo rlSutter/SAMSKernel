@@ -6,8 +6,8 @@
 *             flags from R11, so results go in registers, not flags
 *   .push Rn  / .pop Rn   save and restore a register on the software stack
 *   .intsvc   let the console ISR run once (interrupts on, then off)
-*   .mape Rn / .mapf Rn   map the page in Rn into window >E000 / >F000,
-*             inline (below): MAPE and MAPF without the call
+*   .mape/.mapf/.mapd Rn   map the page in Rn into window >E000 / >F000 /
+*             >D000, inline (below): MAPE, MAPF and MAPD without the call
 *   .callmod PAGE,N   call entry N of the module whose first page is
 *             PAGE (MODCALL: R0 returns); N counts from 0: INIT 0, TICK 1,
 *             REDRAW 2, reserved 3, your own entries from 4
@@ -73,6 +73,20 @@
        SBO  0
        SWPB #1
        MOV  #1,@AMSREG+>1E
+       SWPB #1
+       SBZ  0
+       .endm
+* .mapd Rn - the page in Rn into window >D000, recorded in CURCD: MAPD inline,
+* with the same rules as .mape (Rn not R12, left as it was; R12 changes), and
+* MAPD's own: for programs whose modules are single pages.
+       .defm mapd
+       C    #1,@CURCD
+       JEQ  $+22
+       MOV  #1,@CURCD
+       LI   R12,AMSCRU
+       SBO  0
+       SWPB #1
+       MOV  #1,@AMSREG+>1A
        SWPB #1
        SBZ  0
        .endm

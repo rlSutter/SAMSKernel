@@ -1,0 +1,21 @@
+*======================================================================
+* mb.a99 - a second single-page module for group slotd
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+VBD    EQU  APPRAM
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0,B4
+INIT   MOV  @>D000,@VBD         what window D holds when this module starts
+       RT
+TICK   CI   R0,'A'*256
+       JNE  TK9
+       LI   R0,PG_MA
+       CLR  R1
+       B    @GOMOD
+TK9    RT
+* entry 4: the first word at >D000 as this module sees it
+B4     MOV  @>D000,R0
+       RT
