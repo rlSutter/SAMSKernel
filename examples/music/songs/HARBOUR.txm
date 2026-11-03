@@ -1,0 +1,15 @@
+! HARBOUR - TXA music, converted from harbour.mid by midi2txa 1.0
+! options: -q --wav HARBOUR.wav
+ENV 1 0 1 3 6 10 15   ! kick
+ENV 2 0 1 2 3 5 7 9 11 13 15   ! snare
+ENV 3 0 3 6 10 15   ! short
+A: T100 L8 V14 O5 [ C D E G F E D C | ]3 D E F# A G F# E D | T133 [ C D E G F E
+A: D C | ]3 D E F# A G F# E D
+B: T100 L1 V13 O3 B | > E | < G | > C | T133 < B | > E | < G | > C
+C: T100 L1 V13 O3 G | > C | < B | > E | T133 < G | > C | < B | > E
+N: T100 L16 [ @1 O2 P8 V12 @3 O0 W R V15 @2 O1 W8 V12 @3 O0 W R V15 @1 O2 P8
+N: V12 @3 O0 W R V15 @2 O1 W8 V12 @3 O0 W R | V15 ]3 @1 O2 P8 V12 @3 O0 W R V15
+N: @2 O1 W8 V12 @3 O0 W R V15 @1 O2 P8 V12 @3 O0 W R V15 @2 O1 W8 V12 @3 O0 W R
+N: | T133 [ V15 @1 O2 P8 V12 @3 O0 W R V15 @2 O1 W8 V12 @3 O0 W R V15 @1 O2 P8
+N: V12 @3 O0 W R V15 @2 O1 W8 V12 @3 O0 W R | ]3 [ V15 @1 O2 P8 V12 @3 O0 W R
+N: V15 @2 O1 W8 V12 @3 O0 W R ]2

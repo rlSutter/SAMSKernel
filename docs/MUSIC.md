@@ -163,8 +163,17 @@ python3 tests/test_kernel.py music                                              
 `examples/music` plays two songs from a Text 80 screen: `1` the tune, `2` one A, `SPACE` pause or resume, `S` stop, `B` a beep with `SNDTONE`, `O` `SNDOFF`, `W` two seconds of work
 that never returns to the main loop and steps the music with `KIDLE`. Load `music8.bin` in js99er (or run it on the TI) and listen.
 
-## Decision: the default notation will be TXA's `.txm` (2 November 2026)
+## The default notation: TXA's `.txm` (1.27.0)
 
-The owner has decided that TXA's `.txm` notation is the default for songs and sound effects. It is **not built yet**: the build needs TXA's notation specification and its compiler, which
-this tree does not have. Until it exists, songs are made with `tools/skmusic.py` as described above and the player's song format (bytes in consecutive pages) is unchanged. When `.txm` arrives it
-will compile to that same format (so existing songs and the player keep working), and `SFXPLAY` (effects that borrow voices from the song and give them back) will be added to the player.
+The owner decided (2 November 2026) that TXA's music notation, `.txm`, is the default for songs, and it is built. `tools/skmusic.py song.txm -o song.skm --loop` (and an `app.json` data entry
+`{"file": "tune.skm", "from": "songs/tune.txm", "loop": true}`) compiles a `.txm` file through **`tools/txamusic.py`, TXA's own reference compiler, vendored unchanged** (MIT; it defines the
+notation: where it and TXA's `docs/MUSIC.md` disagree, the file is right). The compiler turns the notation into one state per 1/60 second for each voice (A, B, C: the tone divider and attenuation; N:
+the noise control byte and attenuation); `skmusic.py` writes those states in the player's own format (SKM, above), so **the player and every existing song are unchanged**; `.mml` text scores and MIDI
+files still compile as before. The notation: three tone voices `A:` `B:` `C:` and noise `N:`, notes `C`-`B` with `#` `+` `-`, lengths 1-192 (triplets), dots, `R`, `&` ties, `L` `O` `T` `V` and `<` `>`,
+envelopes (`ENV n step step ...` and `@n`), repeats `[ ... ]n` (up to 8 deep), the range A2 to B7; see TXA's `docs/MUSIC.md` for the whole of it. A PAL console's 50 frames a second take the state at each
+frame's time. `--volume` and `--transpose` are for MML and MIDI only (a `.txm` file has its own `V` and notes). Two of TXA's examples are in `examples/music/songs/`: `HARBOUR.txm` and `HARBOURB.txm`
+(the same tune with envelopes). Tests, group `txm`: the compiled song, decoded and applied to a model of the chip, is the reference compiler's state at every tick over two loops for both tunes; a bad
+file is an error with its line; the music demo built with a `.txm` tune plays exactly the compiled bytes in the simulator.
+
+**Not built: `SFXPLAY`**, sound effects that borrow voices from the song and give them back (TXA's player does this; the kernel's `MUPLAY` plays one song). It needs the player to keep the song's state
+for the voices an effect takes and restore it when the effect ends; the format and the compiler would not change.

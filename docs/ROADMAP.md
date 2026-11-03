@@ -7,7 +7,7 @@ Where the SAMS Kernel project stands after 1.24.0, so that the repository says i
 | Question | Decision |
 | --- | --- |
 | Is a disk-started kernel in scope? | **Yes**, and built (1.25.0). See `docs/DISKSTART.md`. |
-| Which music notation is the default? | TXA's `.txm`. Not built yet: the build needs TXA's notation specification and its compiler (`docs/MUSIC.md` notes this); the kernel's own song format and `skmusic.py` stay until it exists. |
+| Which music notation is the default? | TXA's `.txm`: **built** (1.27.0): `skmusic.py` compiles it through TXA's reference compiler; the kernel's song format is unchanged (`docs/MUSIC.md`). |
 | Licence of code taken in from TXA, TIthon and the owner's other projects | **MIT**, each file saying so. |
 | The ROM files in `roms/` | **They stay** (see `roms/README.md`). |
 
@@ -19,7 +19,7 @@ the frame hook, the break flag, the float-safe scratchpad, the faster pool and `
 ## Open
 
 - **The disk start and `PRUN`**: built and tested in the simulator (1.25.0, `docs/DISKSTART.md`); steps D1-D5 of the hardware checklist are the open part. Not done: two small modules in one bank, a bootstrap that finds its own name.
-- **`.txm` as the default notation and `SFXPLAY`** (needs TXA's specification and compiler).
+- **`SFXPLAY`**: effects that borrow voices from the song and give them back (the notation, `.txm`, is done).
 - **Picture libraries and `BMLON`/`BMLOFF`** (TXA 1.4, 1.5, 2.6).
 - Packing two 4K modules in one bank; the second table's float entries other than `XCFI`; the HFDC hard-disk side; a real-TIPI model for the simulator; self-hosting the
   kernel's assembly on the TI (the assembler's 4,096-byte output buffer and 580-name symbol table are the obstacles).

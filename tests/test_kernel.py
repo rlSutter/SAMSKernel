@@ -2486,6 +2486,73 @@ def arcode():
         check(rd.returncode == 0 and 'ARCODE' in sim9900.screen(md) and bytes(md.rb(0x2300 + i) for i in range(len(code))) == code,
               'started from a disk the program has its code in RAM at >2300 as well (the code is one more bank file)')
 
+def txm():
+    """TXA music notation (.txm) as the default notation: tools/skmusic.py compiles it through TXA's own reference compiler (tools/txamusic.py, vendored) and the kernel's player plays it.
+    Checks: the compiled song, decoded and applied to a model of the chip frame by frame, is the reference compiler's state at every tick (two loops, both example tunes); a bad file is an
+    error with its line; the music demo built with a .txm tune plays exactly the bytes the compiler made, in the simulator."""
+    import skmusic, txamusic, shutil, tempfile
+    def chip_after(events, nframes, ticks, loops=2):
+        chip = {0: [0, 15], 1: [0, 15], 2: [0, 15], 3: [0, 15]}
+        latch = [None]
+        def write(b):
+            if b & 0x80:
+                ch = (b >> 5) & 3
+                if b & 0x10:
+                    chip[ch][1] = b & 15
+                elif ch == 3:
+                    chip[3][0] = 0xE0 | (b & 7); latch[0] = None
+                else:
+                    chip[ch][0] = (chip[ch][0] & 0x3F0) | (b & 15); latch[0] = ch
+            elif latch[0] is not None:
+                chip[latch[0]][0] = (chip[latch[0]][0] & 15) | ((b & 0x3F) << 4)
+        states, k = [], 0
+        for f in range(ticks * loops):
+            while k < len(events) and events[k][0] <= f:
+                write(events[k][1]); k += 1
+            states.append({c: tuple(v) for c, v in chip.items()})
+        return states
+    for name in ('HARBOUR.txm', 'HARBOURB.txm'):
+        path = os.path.join(ROOT, 'examples', 'music', 'songs', name)
+        skm, info = skmusic.compile_file(path, loop=True)
+        song = txamusic.compile_text(open(path).read())
+        ev, nframes = skmusic.decode(skm, 2)
+        states = chip_after(ev, nframes, song.ticks)
+        bad = []
+        for t in range(song.ticks * 2):
+            for v in song.voices:
+                ch = 'ABCN'.index(v)
+                want = song.voices[v][t % song.ticks]
+                got = states[t][ch]
+                ok = (got[1] == want[1] == 15) or got == tuple(want)
+                if not ok and len(bad) < 4:
+                    bad.append((t, v, got, want))
+        check(not bad and info['frames'] == song.ticks, '%s: %d ticks, %d bytes: the chip state the compiled song gives is the reference compiler\'s at every tick, twice round (%s)' % (name, song.ticks, len(skm), bad or 'no difference'))
+    bad_file = tempfile.mkdtemp() + '/bad.txm'
+    open(bad_file, 'w').write('A: O4 C D E\nA: O9 C\n')
+    try:
+        skmusic.compile_file(bad_file)
+        msg = None
+    except SystemExit as e:
+        msg = str(e)
+    check(msg and 'skmusic' in msg, 'a note outside the notation\'s range is an error that says where: %r' % (msg or '')[:100])
+    pal, info = skmusic.compile_file(os.path.join(ROOT, 'examples', 'music', 'songs', 'HARBOURB.txm'), fps=50)
+    ev50, n50 = skmusic.decode(pal)
+    check(abs(n50 - 1009 * 50 / 60.0) <= 2, 'at 50 frames a second (a PAL console) the same tune is %d frames: the same time (%.1f s)' % (n50, n50 / 50.0))
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'examples', 'music'), d + '/app')
+    j = json.load(open(d + '/app/app.json'))
+    j['data'][0]['from'] = 'songs/HARBOURB.txm'
+    json.dump(j, open(d + '/app/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+    check(r.returncode == 0, 'the music demo builds with a .txm tune (app.json "from": "songs/HARBOURB.txm")')
+    img = open(glob.glob(d + '/out/*8.bin')[0], 'rb').read()
+    skm, info = skmusic.compile_file(os.path.join(ROOT, 'examples', 'music', 'songs', 'HARBOURB.txm'), loop=True)
+    ev, nframes = skmusic.decode(skm, 2)
+    m, cpu, halt = sim9900.run(img, keys='<WAIT 5>1<WAIT 1180>', frames=1300)
+    log = [(i, b) for (src, i, b) in m.chip_log if src == 'cpu']
+    got = [b for i, b in log[4:]]
+    check(len(got) > 600 and got == [b for f, b in ev][:len(got)], 'in the simulator the kernel\'s player writes the compiled tune\'s bytes to the chip, exactly (%d bytes of %d)' % (len(got), len(ev)))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2633,7 +2700,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """skmusic.py - make SKM music for the SAMS Kernel from a MIDI file or a text score.
 
+    python3 tools/skmusic.py song.txm -o song.skm --loop     a TXA notation file (.txm: the default notation, below)
     python3 tools/skmusic.py tune.mml -o tune.skm            a text score (MML, below)
     python3 tools/skmusic.py song.mid -o song.skm --loop      a MIDI file
     python3 tools/skmusic.py tune.mml --wav tune.wav --info   hear it, and see what it came to
+
+TXA notation (.txm, docs/MUSIC.md) is compiled by tools/txamusic.py, TXA's own reference compiler, into one state per 1/60 second for each voice; a
+PAL console's 50 frames a second take the state at each frame's time.  The notation has three tone voices (A, B, C), noise (N), envelopes and repeats.
 
 Options:  --fps 60|50        the machine's frame rate (a PAL console runs at 50)
           --loop             play the song over and over from its start
@@ -270,10 +274,38 @@ def decode(skm, passes=1):
     return ev, frame
 
 
+def read_txm(text, fps):
+    """TXA music notation -> the frame states encode() takes: tools/txamusic.py compiles it, tick by tick (1/60 s), to (value, attenuation) for each of
+    the voices A, B, C (the tone dividers) and N (the noise control byte); a silent tick is (0, 15)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import txamusic
+    try:
+        song = txamusic.compile_text(text)
+    except txamusic.MusicError as e:
+        raise SystemExit('skmusic: %s' % e)
+    n = song.ticks
+    frames = n if fps == 60 else int(n * fps / 60.0)
+    silent = [(0, 15)] * n
+    states = []
+    for f in range(frames):
+        t = min(n - 1, int(f * 60 / float(fps)))
+        tone = []
+        for v in 'ABC':
+            value, att = song.voices.get(v, silent)[t]
+            tone.append((None if (att == 15 and value == 0) else value, att))
+        value, att = song.voices.get('N', silent)[t]
+        states.append({'t': tone, 'n': (None if (att == 15 and value == 0) else value & 7, att)})
+    return states, sum(song.note_counts.values()), song.warnings
+
+
 def compile_file(path, fps=FPS, loop=False, loop_at=None, volume=0, transpose=0):
     data = open(path, 'rb').read()
     info = {}
-    if path.lower().endswith(('.mid', '.midi')):
+    if path.lower().endswith('.txm'):
+        states, info['notes'], info['warnings'] = read_txm(data.decode('latin-1'), fps)
+        if volume or transpose:
+            raise SystemExit('skmusic: --volume and --transpose are for MML and MIDI; a .txm file has its own V and notes')
+    elif path.lower().endswith(('.mid', '.midi')):
         notes = read_midi(data, fps)
         tone, noise, dropped = allocate_midi(notes, transpose, volume)
         info['notes'] = len(notes); info['dropped'] = dropped
