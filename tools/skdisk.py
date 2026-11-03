@@ -37,7 +37,7 @@ def equ_lines(path):
     return '\n'.join(out) + '\n'
 
 
-def make_disk(out, files, kernel_equ=None, volume='SKDISK', geometry='sssd'):
+def make_disk(out, files, kernel_equ=None, volume='SKDISK', geometry='sssd', programs=()):
     x = xdm()
     if os.path.exists(out):
         os.remove(out)
@@ -60,6 +60,14 @@ def make_disk(out, files, kernel_equ=None, volume='SKDISK', geometry='sssd'):
             if len(line.rstrip('\r\n')) > 80:
                 sys.exit('skdisk: %s line %d is over 80 columns (tools/lint80.py)' % (path, n))
         r = subprocess.run([sys.executable, x, out, '-a', path, '-n', name, '-f', 'DIS/VAR80'], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(r.stderr + r.stdout)
+    for name, data in programs:                      # PROGRAM files: (disk name, bytes), as an E/A option 5 loader or a DSR LOAD reads them
+        if len(name) > 10:
+            sys.exit('skdisk: %s: a TI file name has at most 10 characters' % name)
+        p = os.path.join(tmp, 'prog.bin')
+        open(p, 'wb').write(data)
+        r = subprocess.run([sys.executable, x, out, '-a', p, '-n', name.upper(), '-f', 'PROGRAM'], capture_output=True, text=True)
         if r.returncode:
             sys.exit(r.stderr + r.stdout)
     return out

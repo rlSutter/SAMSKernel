@@ -156,6 +156,34 @@ def read_file(image, name):
     return recs
 
 
+def read_program(image, name):
+    """A PROGRAM file's bytes, read straight from a disk image: its sectors in order, the last cut to the file's end-of-file offset (0 means all 256);
+    None if the file is not there."""
+    index = image[256:512]
+    for k in range(0, 256, 2):
+        s = (index[k] << 8) | index[k + 1]
+        if s == 0:
+            return None
+        fdr = image[s * 256:(s + 1) * 256]
+        if bytes(fdr[0:10]).decode('ascii', 'replace').rstrip() == name:
+            break
+    else:
+        return None
+    used, eof = (fdr[14] << 8) | fdr[15], fdr[16]
+    sectors, k = [], 28
+    while k + 3 <= 256 and len(sectors) < used:
+        b0, b1, b2 = fdr[k], fdr[k + 1], fdr[k + 2]
+        start = b0 | ((b1 & 0x0F) << 8)
+        last = (b1 >> 4) | (b2 << 4)
+        if start == 0 and last == 0:
+            break
+        for sct in range(start, start + last - len(sectors) + 1):
+            sectors.append(sct)
+        k += 3
+    data = b''.join(bytes(image[sct * 256:(sct + 1) * 256]) for sct in sectors[:used])
+    return data[:len(data) - 256 + eof] if eof else data
+
+
 if __name__ == '__main__' and len(sys.argv) == 3 and sys.argv[1] == '--extract':
     s = open(sys.argv[2]).read()
     m = re.search(r'TI_FDC_DSR_ROM\s*=\s*\[(.*?)\]', s, re.S)

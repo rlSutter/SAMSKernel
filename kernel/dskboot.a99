@@ -1,0 +1,157 @@
+*======================================================================
+* dskboot.a99 - the disk start's bank reader (loader.a99 includes it when
+* DISKBOOT is defined; docs/DISKSTART.md): every bank of the program is a
+* PROGRAM file NAME/Bnn on the disk, read with the kernel's own file service
+* (files.a99: FSEL, FLOAD, and the DSR lookup and power-up under them), which
+* needs only the slot A variables the loader has cleared by now.
+*
+* The kernel bank (bank 1) goes to >A000 and the first read also finds the
+* disk: DSK1 to DSK3 are tried in turn for NAME/B01.  Every other bank listed
+* in BANKTB goes to its page pair through slot B (>E000), as from a cartridge.
+* A file that cannot be read shows a refusal screen.  The file NAME is the
+* build's (app.json "disk_name", at most 6 characters), in DKTMPL.
+*======================================================================
+       COPY "files.a99"
+
+* VRAM that a bank file is loaded to (8K, below the file service's >3600)
+DKBUF  EQU  >1000
+* the name being built: a length byte and up to 31 characters
+DKNMB  EQU  >2060
+DKDST  EQU  >2082              where the bank goes
+DKBN   EQU  >2084              the bank number being paged in
+DKTBP  EQU  >2086              the bank table's pointer
+* the bank number being read (FLOAD changes R0-R9, so it is kept here)
+DKBNK  EQU  >2088
+* non-zero: no device was named by the handoff, so DSK1 to DSK3 are tried
+DKPRB  EQU  >208A
+* the device prefix: a length byte, up to 20 characters ('DSK1.' ...)
+DKPFX  EQU  >2090
+* the handoff block a program that runs us with PRUN leaves in the scratchpad
+HOMAG  EQU  >8320              >A55A
+HOLEN  EQU  >8322              the device prefix's length
+HODEV  EQU  >8324              the prefix, up to 26 characters
+HOEND  EQU  >833E              >5AA5
+
+* DSKBOOT - read the kernel bank to >A000 and then every bank of BANKTB to
+* its pages.
+DSKBOOT .enter
+       LI   R1,DKDEF           the default device: DSK1.
+       LI   R2,DKPFX
+       LI   R3,6               (its length byte and five characters)
+DBD    MOVB *R1+,*R2+
+       DEC  R3
+       JNE  DBD
+       SETO @DKPRB             nothing named: try DSK1 to DSK3
+       C    @HOMAG,@HOMAGV     a handoff block: its device is the one to use
+       JNE  DB0
+       C    @HOEND,@HOENDV
+       JNE  DB0
+       MOV  @HOLEN,R1
+       CI   R1,20
+       JH   DB0
+       CLR  @DKPRB
+       MOV  R1,R2
+       SWPB R1
+       MOVB R1,@DKPFX          the length byte
+       LI   R3,HODEV
+       LI   R4,DKPFX+1
+DBH    MOVB *R3+,*R4+
+       DEC  R2
+       JNE  DBH
+DB0    CLR  @HOMAG             (used up: a later launch must not find it)
+       CLR  R0
+       BL   @FSEL              file handle 0
+       LI   R1,1
+       LI   R2,>A000
+       BL   @DKBANK
+       LI   R0,BANKTB
+       MOV  R0,@DKTBP
+DB1    MOV  @DKTBP,R1
+       MOV  *R1+,R2            the bank number
+       JEQ  DB9                0: the table's end
+       MOV  *R1+,R0            its page pair
+       MOV  R1,@DKTBP
+       MOV  R2,@DKBN
+       BL   @PAGEB             slot B shows them (uses R0-R4, R7)
+       MOV  @DKBN,R1
+       LI   R2,>E000
+       BL   @DKBANK
+       JMP  DB1
+DB9    .leave
+       RT
+
+* DKBANK - read bank R1 (1-99) from its disk file into the 8K at R2.
+* The first call, with the device unknown, tries DSK1 to DSK3.  Never returns on
+* failure: a refusal screen.
+DKBANK .enter
+       MOV  R2,@DKDST
+       MOV  R1,@DKBNK
+DK0    LI   R6,DKNMB+1         the name: device prefix, template, two digits
+       LI   R5,DKPFX
+       MOVB *R5+,R7            the prefix's length
+       SRL  R7,8
+       MOV  R7,R3
+       JEQ  DK1A
+DK1    MOVB *R5+,*R6+
+       DEC  R3
+       JNE  DK1
+DK1A   LI   R5,DKTMPL
+       MOVB *R5+,R3            the template's length
+       SRL  R3,8
+       A    R3,R7
+       JEQ  DK2A
+DK2    MOVB *R5+,*R6+
+       DEC  R3
+       JNE  DK2
+DK2A   INCT R7                 and the two digits
+       MOV  @DKBNK,R3          the bank's number: tens and units
+       CLR  R2
+       DIV  @TEN,R2
+       AI   R2,>30
+       AI   R3,>30
+       SWPB R2
+       MOVB R2,*R6+
+       SWPB R3
+       MOVB R3,*R6+
+       SWPB R7
+       MOVB R7,@DKNMB          the whole length
+       LI   R0,DKBUF
+       LI   R1,>2000           8K
+       LI   R2,DKNMB
+       BL   @FLOAD
+       MOV  R0,R0
+       JEQ  DK3
+       MOV  @DKPRB,R0          not read: another device, if we are still looking
+       JEQ  DKFAIL
+       CB   @DKPFX+4,@DK3C     DSK3 was the last (the digit is the fifth byte)
+       JHE  DKFAIL
+       AB   @DK1B,@DKPFX+4     the next device digit
+       JMP  DK0
+DK3    LI   R0,DKBUF           its bytes, VRAM to the destination
+       BL   @VRAD
+       MOV  @DKDST,R2
+       LI   R3,>1000           >1000 words
+DK4    MOVB @VDPRD,*R2+
+       MOVB @VDPRD,*R2+
+       DEC  R3
+       JNE  DK4
+       .leave
+       RT
+DKFAIL LI   R1,MSGDSK
+       B    @REFUSE
+TEN    DATA 10
+HOMAGV DATA >A55A
+HOENDV DATA >5AA5
+DK3C   BYTE >33
+DK1B   BYTE 1
+DKDEF  STRI 'DSK1.'
+       EVEN
+
+MSGDSK BYTE 8
+       STRI 'THE PROGRAM CANNOT BE READ FROM THE DISK'
+       BYTE 11
+       STRI 'ITS FILES MUST BE ON DSK1 TO DSK3.'
+       BYTE 16
+       STRI 'PRESS FCTN = TO RETURN TO THE TITLE'
+       BYTE >FF
+       EVEN

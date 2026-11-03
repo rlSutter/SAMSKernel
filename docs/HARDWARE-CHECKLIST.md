@@ -54,6 +54,18 @@ js99er's TIPI setting has three values (read from its source, `tipi.ts`): **No T
 | TIPI: the device names, the clock record, the power-up of every card, includes in the main file's directory | the TIPI wiki as Press's design used it (Press's file speed was measured on a TIPI); a model of a TIPI in the simulator | a real TIPI's DSR, its open-file limit and its catalog |
 | the page tests at power-up take about a second on a 16M card | 0.25 million instructions in the simulator | an estimate; I have not timed it |
 
+## The disk start (1.25.0; nothing of it has run on a real machine)
+
+Build with `python3 tools/skbuild.py examples/hello --disk --geometry sssd` and put `build/hello/hello.dsk` on a real disk (or use a CF7+, TIPI or other volume). On a TI-99/4A with an F18A (or PICO9918), a SAMS card and a disk controller:
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| D1 | Editor/Assembler, option 5, `DSK1.HELLO` | the drive runs, then the application's screen (`Hello, SAMS Kernel`); a refusal screen names what is missing | that option 5 starts the bootstrap at `>C000` and that the DSR LOAD of the bank files works on your controller |
+| D2 | the same with the SAMS card left mapped by an earlier program (run the workbench cartridge, quit, then D1) | the same | the mapper is reset by the bootstrap |
+| D3 | a program with `"prun": true` (`tests/apps/prun_a`, `prun_b` on one disk): run ALPHA, press G | BETA's screen | `PRUN` and the handoff block |
+| D4 | D3 with the programs on `DSK2.` and ALPHA started from `DSK2.` | the same | the device probing and the handoff's device |
+| D5 | note the time from the return key to the application's screen | a number | how long a disk start takes on a floppy (not known) |
+
 ## How to report
 
 A short note per step is enough: the step number, what you saw, the machine (console, F18A or PICO9918 with its firmware, SAMS size and brand, disk controller or TIPI), and for emulators the version and settings. A photograph of a refusal

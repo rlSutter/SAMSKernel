@@ -404,6 +404,14 @@ run the power-up routines of every card, as the console does when it starts (the
 
 (entered after LWPI GPLWS, so R9 R12 R13 R15 here are the GPL workspace's) call the DSR entry in FDENT as the console's GPL would: R12 = the ROM's CRU base, R13 = >9800 (GROM read), R15 = >8C02 (VDP address).  The DSR returns to R11+2 when it handled the call, R11 if not.
 
+### `PRUN`
+
+replace the running program with a disk-started one: R2 = the path of its bootstrap file, a length-prefixed string such as 'DSK1.GAME' (what is in front of the last '.' is where its bank files are looked for).  If the file cannot be loaded, or is not a one-file option 5 image for >C000, PRUN returns R0 = the DSR's error (>FF: no such device) or >FE (not that kind of file) and the running program goes on, its VRAM untouched but for >2000-35FF.  If it can, PRUN does not return: the bootstrap is loaded into >C000 (SAMS pages >0C-0D, mapped there first), a handoff block naming the device is left in the scratchpad (>8320-833F), and the bootstrap runs, reads the new program's banks and starts it.  Nothing of the old program survives but the handoff and the files it wrote.  It loads into VRAM >2000-35FF, so a bootstrap over 5,632 bytes is refused.  Uses R0-R9 and the stack.
+
+### `PRWORD` *(internal)*
+
+R3 = the next word of the VRAM data being read
+
 ### `CLKGET`
 
 read TIPI's clock (the device PI.CLOCK, one record "w,mm/dd/yy,HH:MM:SS": the form of the Corcomp clock) into the words DTDOW DTMON DTDAY DTYEAR (two digits) DTHOUR DTMIN DTSEC (0 if the record has no seconds).  R0 = 0 if it worked; else the DSR's error (>FF: there is no such device, no TIPI) or 1 (a record too short), and the words are 0.  It uses file handle 2 for a moment and puts the selected handle back: do not call it while handle 2 holds an open file of yours.  It is slow on a real TIPI (it asks the Pi).  Uses R0-R9.

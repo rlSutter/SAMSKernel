@@ -162,3 +162,9 @@ python3 tests/test_kernel.py music                                              
 
 `examples/music` plays two songs from a Text 80 screen: `1` the tune, `2` one A, `SPACE` pause or resume, `S` stop, `B` a beep with `SNDTONE`, `O` `SNDOFF`, `W` two seconds of work
 that never returns to the main loop and steps the music with `KIDLE`. Load `music8.bin` in js99er (or run it on the TI) and listen.
+
+## Decision: the default notation will be TXA's `.txm` (2 November 2026)
+
+The owner has decided that TXA's `.txm` notation is the default for songs and sound effects. It is **not built yet**: the build needs TXA's notation specification and its compiler, which
+this tree does not have. Until it exists, songs are made with `tools/skmusic.py` as described above and the player's song format (bytes in consecutive pages) is unchanged. When `.txm` arrives it
+will compile to that same format (so existing songs and the player keep working), and `SFXPLAY` (effects that borrow voices from the song and give them back) will be added to the player.

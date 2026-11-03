@@ -1,0 +1,20 @@
+*======================================================================
+* b.a99 - the second of the two programs for the PRUN test: it shows BETA
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+ATEXT  EQU  (RTEXT*16+RBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       LI   R1,ATEXT
+       BL   @CLS
+       LI   R0,2*COLS+2
+       LI   R1,SMSG
+       LI   R2,ATEXT
+       BL   @PUTS
+       .leave
+       RT
+TICK   RT
+SMSG   STRI 'BETA'

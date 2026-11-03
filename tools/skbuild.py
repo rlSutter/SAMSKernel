@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """skbuild.py - build a SAMS Kernel application into a cartridge image.
 
-    python3 tools/skbuild.py APPDIR [--out DIR]
+    python3 tools/skbuild.py APPDIR [--out DIR] [--disk [--geometry sssd|dsdd]]
 
 APPDIR holds app.json and the application's sources.  The result is
 OUT/APPNAME8.bin (default OUT: build/APPDIR-name): a FinalGROM 99 "8"
@@ -12,6 +12,8 @@ app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
+    "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
+    "disk_name": "HELLO",              optional: the name of the program on a disk (--disk): 1-6 capitals and digits
     "module_size": 8192,               optional: 8192 (default) or 4096: the size every module may be
     "common": {"source": "common.a99",   optional: code shared by every module, assembled at >D000 (the source says AORG >D000),
                 "exports": ["NAME"]},    at most 4K, mapped into window >D000 at start-up and never moved; its exports are
@@ -55,7 +57,7 @@ every module see the application's directory first, so an application may replac
 The assembler is xdt99's xas99.py: set XAS99, or put xdt99 beside this
 directory (./xdt99 or ../xdt99).
 """
-import json, os, re, shutil, subprocess, sys
+import json, os, re, shutil, struct, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BANK = 0x2000
@@ -185,6 +187,9 @@ def load_app(appdir):
         m.setdefault('size', ms)
         if m['size'] not in (4096, 8192):
             die('module %s: \"size\" is 4096 or 8192' % m['name'])
+    app.setdefault('disk_name', (re.sub('[^A-Z0-9]', '', app.get('name', 'APP').upper()) or 'APP')[:6])
+    if not re.fullmatch('[A-Z0-9]{1,6}', app['disk_name']):
+        die('\"disk_name\" is 1 to 6 capital letters and digits')
     app.setdefault('boot', names[0])
     if app['boot'] not in names:
         die('"boot" names no module')
@@ -202,6 +207,9 @@ def load_app(appdir):
     omit = app.setdefault('omit', [])
     if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
         die('"omit" lists some of: %s' % ', '.join(sorted(OMITTABLE)))
+    app.setdefault('prun', False)
+    if app['prun'] and 'files' in omit:
+        die('\"prun\": true needs the file service: \"files\" is left out')
     if 'pool' in omit and 'pool_max_pages' in app:
         die('"omit": ["pool"] leaves out the page pool, and "pool_max_pages" sets the size of its bitmap: use one')
     app.setdefault('pool_max_pages', 4096)
@@ -321,6 +329,8 @@ def write_cfg(app, bdir, banks, pgfree):
     for bank, page in banks:
         msg.append('       DATA %d,>%02X' % (bank, page))
     msg.append('       DATA 0')
+    msg += ['       EVEN', "* DKTMPL: the disk start's file name template (docs/DISKSTART.md): the name and /B; the device and two digits go either side",
+            "DKTMPL STRI '%s/B'" % app['disk_name'], '       EVEN']
     open(os.path.join(bdir, 'appmsg.a99'), 'w').write('\n'.join(msg) + '\n')
 
 
@@ -360,6 +370,25 @@ def export_public(ksrc, bdir, equ, extra=()):
             i += 1
     open(equ, 'w').write('\n'.join(out) + '\n')
     return total, len(out) // 2
+
+
+def write_disk(app, bdir, images, kincs, ksrc, args):
+    """The disk start (docs/DISKSTART.md): the bootstrap, an Editor/Assembler option 5 image of the loader assembled with DISKBOOT and loaded at >C000, and
+    every bank after bank 0 as an 8K PROGRAM file NAME/Bnn, on a disk image OUT/NAME.dsk."""
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import skdisk
+    boot = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'bootstrap.bin'), kincs, os.path.join(bdir, 'bootstrap.lst'), None, ['DISKBOOT'])
+    if len(boot) > BANK:
+        die('the disk bootstrap is %d bytes: at most 8,192' % len(boot))
+    name = app['disk_name']
+    progs = [(name, struct.pack('>HHH', 0, len(boot), 0xC000) + boot)]
+    for i in range(1, len(images)):
+        progs.append(('%s/B%02d' % (name, i), images[i].ljust(BANK, b'\0')))
+    geo = args[args.index('--geometry') + 1] if '--geometry' in args else 'dsdd'
+    path = os.path.join(bdir, name.lower() + '.dsk')
+    skdisk.make_disk(path, [], None, name, geo, programs=progs)
+    print('wrote %s: %s disk, the bootstrap %s (%d bytes at >C000) and %d bank files %s/B01-B%02d' %
+          (path, geo, name, len(boot), len(progs) - 1, name, len(images) - 1))
 
 
 def main():
@@ -408,18 +437,22 @@ def main():
     else:
         text = '* no resident code\nKRESB\nKRESE\n'
     open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
-    if app['omit']:
+    if app['omit'] or not app['prun']:
         gone = omitted_routines(app, ksrc)
+        if not app['prun']:
+            gone['PRUN'] = 'prun'
         users = [(m['name'], os.path.join(appdir, m['source'])) for m in app['modules']]
         if res:
             users.append(('the resident code', os.path.join(appdir, res['source'])))
         for who, path in users:
             hit = sorted(gone.keys() & source_words(path, incs))
             if hit:
+                if gone[hit[0]] == 'prun':
+                    die('%s uses %s, which this kernel does not have: app.json needs "prun": true' % (who, hit[0]))
                 die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']])
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []))
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']
     for n in (res or {}).get('exports', []):
@@ -485,6 +518,8 @@ def main():
     image = b''.join(b.ljust(BANK, b'\0') for b in images).ljust(n * BANK, b'\0')
     out = os.path.join(bdir, app['name'].lower().replace(' ', '') + '8.bin')
     open(out, 'wb').write(image)
+    if '--disk' in args:
+        write_disk(app, bdir, images, kincs, ksrc, args)
     print('kernel %d bytes (ends >%04X, %d free %s)' % (len(kernel), 0xA000 + len(kernel), kmax - len(kernel),
           'in its 8K: no pool, no bitmap' if nopool else 'below the page-pool bitmap at >%04X' % (0xA000 + kmax)))
     if app['omit']:

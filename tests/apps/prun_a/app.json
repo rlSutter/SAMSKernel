@@ -1,0 +1,2 @@
+{"name": "ALPHA", "min_pages": 128, "disk_name": "ALPHA", "prun": true,
+ "modules": [{"name": "a", "source": "a.a99"}]}

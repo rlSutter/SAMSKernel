@@ -1445,7 +1445,7 @@ def editorapp():
     check(any('needs more after the dot' in l for l in ln) and any(l.startswith('File:') for l in ln), 'ENTER on the bare device is refused with a message, and the prompt stays: %r' % [l for l in ln if 'needs more' in l or l.startswith('File:')])
 
 def sourcesdisk():
-    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the four long names
+    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the five long names
     are shortened with the COPY lines that name them changed to match (and the repository's files are not touched), every file a
     source COPYs is on the disk except the three the build writes for each application, and the disk reads back."""
     import re, tempfile, subprocess, mksources, tifdc
@@ -2254,6 +2254,178 @@ def cycles():
         cpu.step()
     check(m.insns - before == 100, 'the model only measures: the simulator\'s own instruction count (and so its frames and interrupts) advances exactly as without it (100 steps: %d)' % (m.insns - before))
 
+def ea5():
+    """tools/ea5.py: Editor/Assembler option 5 for the simulator.  A one-file image assembled with `xas99 -i` goes on a disk image as a PROGRAM file, is loaded into a simulated machine
+    the way option 5 loads it, and runs from its load address; a chain of two files (a second segment elsewhere) loads both and starts at the first; a missing file is an error."""
+    import tempfile, ea5 as ea, skdisk, tifdc
+    d = tempfile.mkdtemp()
+    open(d + '/p.a99', 'w').write("       AORG >C000\nSTART  LWPI >8300\n       LI   R0,>1234\n       MOV  R0,@>8320\n       LI   R1,>4321\n"
+                                  "       MOV  R1,@>3FF0\nLOOP   JMP  LOOP\n       END  START\n")
+    r = subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-i', '-q', d + '/p.a99', '-o', d + '/PROG'], capture_output=True, text=True)
+    check(r.returncode == 0 and os.path.exists(d + '/PROG'), 'xas99 -i writes the image file')
+    skdisk.make_disk(d + '/d.dsk', [], None, 'EA5', 'sssd', programs=[('HELLO', open(d + '/PROG', 'rb').read())])
+    img = bytearray(open(d + '/d.dsk', 'rb').read())
+    m = sim9900.Machine(bytes(8192))
+    cpu = sim9900.CPU(m)
+    entry = ea.load(m, img, 'HELLO')
+    cpu.pc, cpu.wp, cpu.limi = entry, 0x83E0, 0
+    for i in range(30):
+        cpu.step()
+    check(entry == 0xC000 and m.rw(0x8320) == 0x1234 and m.rw(0x3FF0) == 0x4321, 'a one-file image loads at >C000 and runs from its first byte (entry >%04X, wrote %04X and %04X)' % (entry, m.rw(0x8320), m.rw(0x3FF0)))
+    open(d + '/q.a99', 'w').write("       AORG >A000\nSTART  LWPI >8300\n       B    @MORE\n       AORG >B000\nMORE   LI   R2,>0F0F\n       MOV  R2,@>8322\nLOOP   JMP  LOOP\n       END  START\n")
+    for f in os.listdir(d):
+        if f.startswith('CH'):
+            os.remove(os.path.join(d, f))
+    r = subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-i', '-q', d + '/q.a99', '-o', d + '/CHAIN'], capture_output=True, text=True)
+    files = sorted(f for f in os.listdir(d) if f.startswith('CHAI'))
+    progs = [(f.upper(), open(os.path.join(d, f), 'rb').read()) for f in files]
+    skdisk.make_disk(d + '/e.dsk', [], None, 'EA5', 'sssd', programs=progs)
+    img2 = bytearray(open(d + '/e.dsk', 'rb').read())
+    m2 = sim9900.Machine(bytes(8192))
+    cpu2 = sim9900.CPU(m2)
+    entry2 = ea.load(m2, img2, 'CHAIN')
+    cpu2.pc, cpu2.wp, cpu2.limi = entry2, 0x83E0, 0
+    for i in range(30):
+        cpu2.step()
+    check(len(files) == 2 and entry2 == 0xA000 and m2.rw(0x8322) == 0x0F0F, 'a two-file chain (%s) loads both segments, starts at the first (>%04X) and runs into the second' % (files, entry2))
+    try:
+        ea.load(m, img, 'NOSUCH')
+        gone = False
+    except FileNotFoundError:
+        gone = True
+    check(gone, 'a file that is not on the disk is an error')
+
+def diskboot():
+    """The disk start (docs/DISKSTART.md), first stage: `skbuild --disk` writes the bootstrap (an option 5 image at >C000, the loader assembled with DISKBOOT) and every bank as a PROGRAM
+    file; the bootstrap is run the way option 5 runs it (tools/ea5.py) in a simulated machine with TI's real controller ROM, and it reads the banks through the kernel's file service and
+    starts the kernel: the application's screen appears."""
+    import tempfile, ea5 as ea, tifdc, asmharness
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    d = tempfile.mkdtemp()
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d, '--disk', '--geometry', 'sssd'], capture_output=True, text=True)
+    check(r.returncode == 0 and os.path.exists(d + '/hello.dsk'), '`skbuild --disk` writes the disk image: %s' % [l for l in r.stdout.split('\n') if 'bank files' in l][:1])
+    img = bytearray(open(d + '/hello.dsk', 'rb').read())
+    boot = tifdc.read_program(img, 'HELLO')
+    names = [n for n in tifdc.TIFDC(image=img).files()]
+    check(boot is not None and boot[:2] == b'\x00\x00' and boot[4:6] == b'\xc0\x00' and len(boot) == 6 + ((boot[2] << 8) | boot[3]) and names.count('HELLO') == 1 and 'HELLO/B01' in names and 'HELLO/B03' in names,
+          'the bootstrap file is an option 5 image for >C000 (%d bytes) and the banks are HELLO/B01 to B03: %s' % (len(boot or b''), sorted(names)))
+    m = sim9900.Machine(bytes(8192))
+    m.tifdc = tifdc.TIFDC(image=img)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc, cpu.wp, cpu.limi = ea.load(m, img, 'HELLO'), 0x83E0, 0
+    shown = False
+    for chunk in range(120):
+        for i in range(100000):
+            cpu.step()
+        if any('Hello' in l for l in sim9900.screen(m).split('\n')[:3]):
+            shown = True
+            break
+    scr = [l.rstrip() for l in sim9900.screen(m).split('\n') if l.strip()]
+    check(shown, 'the bootstrap reads the three bank files from the disk and the kernel runs the application: its screen shows %r after %d instructions' % (scr[:1], m.insns))
+    # a disk without the bank files: the refusal screen, not a crash
+    only_boot = bytearray(img)
+    import skdisk as sk2
+    sk2.make_disk(d + '/bare.dsk', [], None, 'BARE', 'sssd', programs=[('HELLO', boot)])
+    bare = bytearray(open(d + '/bare.dsk', 'rb').read())
+    m3 = sim9900.Machine(bytes(8192)); m3.tifdc = tifdc.TIFDC(image=bare)
+    m3.presses, m3.toggles, end = sim9900.schedule([])
+    cpu3 = sim9900.CPU(m3)
+    cpu3.pc, cpu3.wp, cpu3.limi = ea.load(m3, bare, 'HELLO'), 0x83E0, 0
+    for i in range(3_000_000):
+        cpu3.step()
+    scr3 = sim9900.screen(m3)
+    check('CANNOT BE READ FROM THE DISK' in scr3, 'with the bootstrap but not the bank files on the disk it shows the refusal screen (and does not crash): %r' % [l.strip() for l in scr3.split('\n') if l.strip()][:1])
+    # the double-density cards, with a double-density disk
+    cards = []
+    if __import__('ccfdc').available():
+        cards.append(('CorComp', lambda im: __import__('ccfdc').CCFDC(image=im)))
+    if __import__('myfdc').available():
+        cards.append(('Myarc DDCC-1', lambda im: __import__('myfdc').MYFDC(image=im)))
+    if __import__('hfdc').available():
+        cards.append(('Myarc HFDC', lambda im: __import__('hfdc').HFDC(image=im)))
+    only = os.environ.get('TESTCARDS')
+    if only:
+        cards = [c for c in cards if any(w in c[0] for w in only.split(','))]
+    d2 = tempfile.mkdtemp()
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d2, '--disk', '--geometry', 'dsdd'], capture_output=True, text=True)
+    dimg = open(d2 + '/hello.dsk', 'rb').read()
+    for label, make_card in cards:
+        im = bytearray(dimg)
+        mm = sim9900.Machine(bytes(8192)); mm.tifdc = make_card(im)
+        mm.presses, mm.toggles, end = sim9900.schedule([])
+        cc = sim9900.CPU(mm)
+        cc.pc, cc.wp, cc.limi = ea.load(mm, im, 'HELLO'), 0x83E0, 0
+        shown2 = False
+        for chunk in range(200):
+            for i in range(100000):
+                cc.step()
+            if any('Hello' in l for l in sim9900.screen(mm).split('\n')[:3]):
+                shown2 = True
+                break
+        check(shown2, '[%s] the same bootstrap reads the banks from a double-density disk and the application runs (after %d instructions)' % (label, mm.insns))
+
+def prun():
+    """PRUN (kernel/files.a99): a disk-started program replaces itself with another.  Two tiny programs, ALPHA and BETA, are built for disk and put on one disk image; ALPHA is
+    started the way option 5 starts it, shows ALPHA, and on G runs DSK1.BETA: the bootstrap is loaded to >C000 with the handoff block, reads BETA's banks and BETA shows its own
+    screen; on X it tries a program that is not there and keeps running, with PRUN's error returned."""
+    import tempfile, shutil, ea5 as ea, tifdc, skdisk
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    progs = []
+    for app in ('prun_a', 'prun_b'):
+        d = tempfile.mkdtemp()
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', app), '--out', d, '--disk', '--geometry', 'sssd'],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        img = bytearray(open(glob.glob(d + '/*.dsk')[0], 'rb').read())
+        for n in tifdc.TIFDC(image=img).files():
+            progs.append((n, tifdc.read_program(img, n)))
+    dd = tempfile.mkdtemp()
+    skdisk.make_disk(dd + '/both.dsk', [], None, 'PRUN', 'sssd', programs=progs)
+    base = bytearray(open(dd + '/both.dsk', 'rb').read())
+    names = sorted(tifdc.TIFDC(image=base).files())
+    check('ALPHA' in names and 'BETA' in names and 'ALPHA/B01' in names and 'BETA/B03' in names, 'the disk holds both programs: %s' % names)
+    def run(keys, until, cap=60, full=False):
+        img = bytearray(base)
+        m = sim9900.Machine(bytes(8192))
+        m.tifdc = tifdc.TIFDC(image=img)
+        m.presses, m.toggles, end = sim9900.schedule(sim9900.parse_keys(keys) if hasattr(sim9900, 'parse_keys') else keys)
+        cpu = sim9900.CPU(m)
+        cpu.pc, cpu.wp, cpu.limi = ea.load(m, img, 'ALPHA'), 0x83E0, 0
+        seen = []
+        for chunk in range(cap):
+            for i in range(100000):
+                cpu.step()
+            line = ' '.join(l.strip() for l in sim9900.screen(m).split('\n')[:4])
+            if until in line and not full:
+                return m, cpu, True, line
+        return m, cpu, until in line, line
+    def variant(edit_json):
+        dv = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'prun_a'), dv + '/app')
+        j = json.load(open(dv + '/app/app.json')); edit_json(j); json.dump(j, open(dv + '/app/app.json', 'w'))
+        rv = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), dv + '/app', '--out', dv + '/out'], capture_output=True, text=True)
+        return rv, rv.stdout + rv.stderr
+    rv, out = variant(lambda j: j.update(prun=False))
+    check(rv.returncode != 0 and 'PRUN' in out and '"prun": true' in out, 'a program that uses PRUN without "prun": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
+    rv, out = variant(lambda j: j.update(omit=['files']))
+    check(rv.returncode != 0 and 'files' in out, '"prun": true with the file service left out is refused: %s' % out.strip().split('\n')[-1][:100])
+    rb, outb = variant(lambda j: j.update(prun=True))
+    kb = [int(l.split()[1]) for l in outb.split('\n') if l.startswith('kernel ')]
+    rc, outc = variant(lambda j: (j.update(prun=False), None))
+    check(rb.returncode == 0 and kb and kb[0] >= 7000, 'with "prun": true the kernel is %s bytes (206 more than without)' % kb)
+    m, cpu, ok, line = run('<WAIT 20>', 'ALPHA')
+    check(ok, 'ALPHA starts from the disk and shows its screen: %r' % line)
+    m, cpu, ok, line = run('<WAIT 450>g<WAIT 20>', 'BETA', cap=120)
+    check(ok and 'ALPHA' not in line, 'G in ALPHA runs DSK1.BETA: its bootstrap, then its banks, then its own screen: %r' % line)
+    m, cpu, ok, line = run('<WAIT 450>x<WAIT 40>', 'ALPHA', cap=70, full=True)
+    err = m.rw(0x2300)                                    # APPRAM: where ALPHA keeps PRUN's answer
+    check(ok and err != 0, 'X in ALPHA tries a program that is not on the disk: PRUN returns the error (%d) and ALPHA is still running (%r)' % (err, line))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2401,7 +2573,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

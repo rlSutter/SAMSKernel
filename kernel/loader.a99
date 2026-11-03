@@ -45,7 +45,13 @@
 * the console's own font, copied from GROM, in the plain 40-column mode that
 * any video chip can show.
        COPY "kdefs.a99"
-
+       .ifdef DISKBOOT
+* Assembled with -D DISKBOOT this is the disk start's bootstrap
+* (docs/DISKSTART.md): an
+* Editor/Assembler option 5 image loaded at >C000, which reads the banks from
+* disk files instead of copying them from the cartridge.
+       AORG >C000
+       .else
        AORG >6000
        BYTE >AA,>01,>01,>00    header: valid, version, programs, reserved
        DATA >0000              power-up list
@@ -58,6 +64,7 @@ PRGLST DATA >0000              next program: none
 * BYTE n, TEXT '...' : the name the console's menu shows
        COPY  "appname.a99"
        EVEN
+       .endif
 
 * START - the cartridge's program: the four checks, then the copy.  Never
 * returns: it ends by branching to the kernel, or in REFUSE.
@@ -104,6 +111,12 @@ ST3    BL   @F18UNL            lock-safe: unlocks only if not unlocked
        LI   R1,MSGF18
        B    @REFUSE
 ST4    BL   @F18RDV
+       .ifdef DISKBOOT
+       BL   @DSKBOOT           every bank from its disk file (or a refusal)
+       LI   R0,PGLOWB          slot B back to its default pair
+       BL   @PAGEB
+       B    @>A000             the kernel (KSTART)
+       .else
 * relocate the bank copier into scratchpad
        LI   R1,CPBK
        LI   R2,SCRTCH
@@ -130,7 +143,9 @@ ST6    MOV  *R8+,R1            the bank number
 ST7    LI   R0,PGLOWB          slot B back to its default pair
        BL   @PAGEB
        B    @>A000             the kernel (KSTART)
+       .endif
 
+       .ifndef DISKBOOT
 * CPBK - copy the 8K bank selected by writing *R1 to R2.
 * Position independent; uses R3, R4; never touches R11.
 CPBK   CLR  *R1                writing in the bank window selects that bank
@@ -142,6 +157,7 @@ CPL    MOV  *R3+,*R2+
        CLR  @CBANK0            back to bank 0 before returning into it
        RT
 CPBKE
+       .endif
 
 * REFUSE - show the message list at R1 in 40-column text and wait for
 * FCTN = .  No stack and no expansion RAM are assumed (there may be no
@@ -259,4 +275,7 @@ BADPG  EQU  >8370              the failing page, for the message (scratchpad)
        COPY "pager.a99"
        COPY "amsinit.a99"
        COPY "f18det.a99"
+       .ifdef DISKBOOT
+       COPY "dskboot.a99"
+       .endif
        END

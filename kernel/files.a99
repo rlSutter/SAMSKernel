@@ -264,7 +264,9 @@ FC2    MOV  *R1+,*R2+
 *                              it; restoring the old value hangs every later
 *                              access on a real TI controller)
        .push R0
+       .ifndef DISKBOOT
        BL   @KIDLE             a frame passed during the call?  take the keys
+       .endif
        .pop R0                 (the keyboard and the music: see KIDLE)
        .leave
        RT
@@ -490,6 +492,103 @@ DLGPL  MOV  @FDCRU,R12
 HAA    BYTE >AA
 DOT    BYTE '.'
        EVEN
+
+       .ifdef WITHPRUN
+*----------------------------------------------------------------------
+* PRUN - run another program from disk (docs/DISKSTART.md); an application
+* asks for it with "prun": true in app.json (206 bytes of kernel)
+*----------------------------------------------------------------------
+* PRUN - replace the running program with a disk-started one: R2 = the path
+* of its bootstrap file, a length-prefixed string such as 'DSK1.GAME' (what
+* is in
+* front of the last '.' is where its bank files are looked for).  If the file
+* cannot be loaded, or is not a one-file option 5 image for >C000, PRUN returns
+* R0 = the DSR's error (>FF: no such device) or >FE (not that kind of file) and
+* the running program goes on, its VRAM untouched but for >2000-35FF.  If
+* it can,
+* PRUN does not return: the bootstrap is loaded into >C000 (SAMS pages >0C-0D,
+* mapped there first), a handoff block naming the device is left in the
+* scratchpad (>8320-833F), and the bootstrap runs, reads the new program's banks
+* and starts it.  Nothing of the old program survives but the handoff and the
+* files it wrote.  It loads into VRAM >2000-35FF, so a bootstrap over 5,632
+* bytes is refused.  Uses R0-R9 and the stack.
+PRBUF  EQU  >2000              VRAM the bootstrap file is loaded to
+PRMAX  EQU  >1600              the most it may be (>2000-35FF)
+PRUN   .enter
+       .push R2                the name
+       LI   R0,PRBUF
+       LI   R1,PRMAX
+       BL   @FLOAD
+       MOV  R0,R0
+       JNE  PRX                an error: back to the program
+       LI   R0,PRBUF           the image's six-byte header
+       BL   @VRAD
+       BL   @PRWORD
+       MOV  R3,R3              more files in the chain?  Not supported
+       JNE  PRBAD
+       BL   @PRWORD            R3 = the length
+       MOV  R3,R4
+       BL   @PRWORD            R3 = the load address
+       CI   R3,>C000
+       JNE  PRBAD
+       MOV  R3,R5
+       CI   R4,>1600-6         it must fit what was loaded
+       JH   PRBAD
+* the device prefix: the name up to its last '.' (included)
+       MOV  *R10,R6
+       MOVB *R6+,R7
+       SRL  R7,8               the name's length
+       CLR  R8                 the prefix's length: just past the last '.'
+       CLR  R9
+PR1    C    R9,R7
+       JHE  PR2
+       INC  R9
+       CB   *R6+,@PRDOT
+       JNE  PR1
+       MOV  R9,R8
+       JMP  PR1
+PR2    MOV  R8,R8              no '.': no device
+       JEQ  PRBAD
+       CI   R8,20
+       JH   PRBAD
+       LI   R0,>A55A           the handoff block
+       MOV  R0,@>8320
+       MOV  R8,@>8322
+       MOV  *R10,R6
+       INC  R6
+       LI   R9,>8324
+       MOV  R8,R7
+PR3    MOVB *R6+,*R9+
+       DEC  R7
+       JNE  PR3
+       LI   R0,>5AA5
+       MOV  R0,@>833E
+       LI   R0,>0C             the identity pages of slot C
+       BL   @MAPC
+       LI   R0,>0D
+       BL   @MAPD
+       LI   R0,PRBUF+6         its code, to >C000
+       BL   @VRAD
+       MOV  R4,R4
+       JEQ  PR5
+PR4    MOVB @VDPRD,*R5+
+       DEC  R4
+       JNE  PR4
+PR5    LIMI 0
+       B    @>C000            the bootstrap
+PRBAD  LI   R0,>00FE
+PRX    INCT R10               the name's slot
+       .leave
+       RT
+* PRWORD - R3 = the next word of the VRAM data being read
+PRWORD MOVB @VDPRD,R3
+       SWPB R3
+       MOVB @VDPRD,R3
+       SWPB R3
+       RT
+PRDOT  BYTE '.'
+       EVEN
+       .endif
 
 *----------------------------------------------------------------------
 * the clock: TIPI's PI.CLOCK

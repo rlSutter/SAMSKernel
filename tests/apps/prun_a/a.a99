@@ -1,0 +1,37 @@
+*======================================================================
+* a.a99 - the first of two tiny disk-started programs for the PRUN test
+* (group prun): it shows ALPHA; G runs DSK1.BETA with PRUN; X tries a
+* program that is not there and keeps the error in APPRAM.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+ATEXT  EQU  (RTEXT*16+RBG)*256
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       LI   R1,ATEXT
+       BL   @CLS
+       LI   R0,2*COLS+2
+       LI   R1,SMSG
+       LI   R2,ATEXT
+       BL   @PUTS
+       .leave
+       RT
+TICK   .enter
+       CI   R0,'G'*256
+       JNE  T1
+       LI   R2,SBETA
+       BL   @PRUN
+       MOV  R0,@APPRAM+2
+       JMP  T9
+T1     CI   R0,'X'*256
+       JNE  T9
+       LI   R2,SNONE
+       BL   @PRUN
+       MOV  R0,@APPRAM
+T9     .leave
+       RT
+SMSG   STRI 'ALPHA'
+SBETA  STRI 'DSK1.BETA'
+SNONE  STRI 'DSK1.NOSUCH'

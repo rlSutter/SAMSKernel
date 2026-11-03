@@ -46,3 +46,9 @@ archives say nothing about their authors or licence. They are the firmware of co
 trading; whether they may be redistributed I do not know, and **the MIT licence of this project covers the kernel's own code, not these files**. They
 are here at your request so that the tests run out of the box. If a rights holder objects, delete the four files: the tests that use them
 skip themselves when they are absent (`CCFDC_U3`, `CCFDC_U4` and `MYFDC_ROM` may name copies kept elsewhere), and nothing else depends on them.
+
+## Decision (2 November 2026)
+
+The owner has decided that **the ROM files in this directory stay in the repository** (`cf7a+.bin`, `ccdcc_v89.u3`, `ccdcc_v89.u4`, `ddcc1.u3`, `hfdc_dsr.u34`). Their rights holders are
+still not stated in what the owner was given, so the caveat above stands: MIT covers the kernel's own code only, the tests skip when a ROM is removed, and a file is deleted if a
+rights holder asks. TI's console and disk controller ROMs remain out of the tree.

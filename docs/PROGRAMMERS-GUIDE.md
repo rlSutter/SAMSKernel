@@ -767,6 +767,7 @@ disk controller (`DSK1.`), TIPI (`PI.`), a printer port (`PIO`), and so on. It c
 | `FDELETE` | R2 = the name | R0 = 0 or the error |
 | `FLOAD` | R2 = the name of a PROGRAM file, R0 = the VRAM address to load it to, R1 = the most bytes | R0 = 0 or the error |
 | `FSAVE` | R2 = the name, R0 = the VRAM address, R1 = the number of bytes | R0 = 0 or the error |
+| `PRUN` | R2 = the path of a disk-started program's bootstrap (`"prun": true`) | does not return; on failure R0 = the error |
 | `FCNUM` | R1 = a catalog record, R2 = n (0-2) | R0 = number n of the record |
 
 **Flags** are added together, one from each group, and passed in the *high byte* of R0:
@@ -909,6 +910,14 @@ Three files can be open at once, whatever devices they are on; a TIPI's own limi
 
 **[TI]** `programs/clock.a99` on the workbench disk shows the date and time (ENTER reads it). **[PC]** the same code builds with `skbuild.py`. **Tested** against a model of a TIPI in the simulator (a second card with its own power-up, `PI.` files, a clock); **not** against a real TIPI's DSR.
 
+### A program on disk, and `PRUN`
+
+`python3 tools/skbuild.py myapp --disk` also writes `build/myapp/MYAPP.dsk`: the **bootstrap** (`MYAPP`, an Editor/Assembler option 5 image at `>C000`, about 4.3K) and the cartridge's banks as 8K PROGRAM files `MYAPP/B01`,
+`MYAPP/B02` ... (`--geometry sssd` for a stock TI controller's single-density disk). A user selects option 5 and types `DSK1.MYAPP`; the bootstrap does the cartridge loader's checks, reads the banks through the file service
+and starts the kernel. `"disk_name"` in `app.json` sets the name (6 characters at most); `"prun": true` puts **`PRUN`** in the kernel: `PRUN` with R2 = a path such as `DSK2.GAME` replaces the running program with that disk-started one
+(it loads that program's bootstrap, leaves a handoff block naming the device, and does not return; if the file is missing or is not a one-file image for `>C000` it returns the error and the program goes on). Nothing of the old
+program survives but the files it wrote. `docs/DISKSTART.md` has the whole design, what is tested (the simulator, four disk controllers) and what is assumed (a real machine has not been tried).
+
 ## 10. Time
 
 The main loop runs: *wait for the frame, poll the keyboard, take one key, call `TICK`.* One
@@ -985,6 +994,7 @@ there is no exit hook.
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
 - **`common`** (optional): `{"source": "common.a99", "exports": ["NAME", ...]}`, code shared by every module, assembled at `>D000` and mapped there at start-up (see Part 8); every module must then be `"size": 4096`.
+- **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
   bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192

@@ -10,7 +10,7 @@ a text file, SRCNOTES, that says how it differs from the repository.
 
 A TI file name is at most 10 characters, "NAME/A99" for NAME.a99, so a source file whose name is longer than
 six characters does not fit: three kernel files, amsinit, databank and modules, are stored as AMSINI, DATABK and
-MODULE (and the kresident.a99 that the build writes, as KRES), and the COPY lines that name them are changed in the
+MODULE (the kresident.a99 that the build writes, as KRES, and dskboot.a99, as DSKBT), and the COPY lines that name them are changed in the
 copies on the disk to match (the repository's files are not touched).  Not on the disk: appcfg.a99, appname.a99 and appmsg.a99, which tools/skbuild.py writes for each
 application, so the kernel cannot yet be assembled on the TI from this disk; SRCNOTES says what else stands in the way.
 """
@@ -20,15 +20,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import skdisk
 
-RENAMES = {'amsinit': 'amsini', 'databank': 'databk', 'modules': 'module', 'kresident': 'kres'}
+RENAMES = {'amsinit': 'amsini', 'databank': 'databk', 'modules': 'module', 'kresident': 'kres', 'dskboot': 'dskbt'}
 NOTES = """SOURCES - the SAMS Kernel's sources, to read and edit on the TI.
 
 Every file is DIS/VAR 80.  Open one in the workbench: N, the name, then E.
 (NAME/A99 on the disk is NAME.a99 in the repository.)
 
-FOUR FILES HAVE SHORTER NAMES: a TI file name has 10 characters at most.
+FIVE FILES HAVE SHORTER NAMES: a TI file name has 10 characters at most.
    MODULE/A99  is modules.a99      AMSINI/A99  is amsinit.a99
    DATABK/A99  is databank.a99     KRES/A99    is kresident.a99
+   DSKBT/A99   is dskboot.a99
 The COPY lines that name them are changed in the copies here to match.
 
 ALSO HERE: the generated FONT/A99 and KEYTAB/A99 (tools/font.py and keytab.py
