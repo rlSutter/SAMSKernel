@@ -2426,6 +2426,66 @@ def prun():
     err = m.rw(0x2300)                                    # APPRAM: where ALPHA keeps PRUN's answer
     check(ok and err != 0, 'X in ALPHA tries a program that is not on the disk: PRUN returns the error (%d) and ALPHA is still running (%r)' % (err, line))
 
+def arcode():
+    """app.json "appram_code": code the program keeps in its own RAM.  It is assembled at >2300 against the kernel it runs with, copied there from its page at start-up, and the application's
+    data (APPRAM) begins after it; a module calls its routines and reads its data by the names it exports (arcode.equ); the build refuses a source that does not say AORG >2300, an
+    image over 6K and an export it does not define."""
+    import asmharness, shutil, tempfile
+    c = build('tests/apps/arcode')
+    bd = os.path.join(ROOT, 'build', 'arcode')
+    syms = asmharness.symbols(os.path.join(bd, 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(bd, 'ma.equ')))
+    ae = open(os.path.join(bd, 'arcode.equ')).read()
+    code = open(os.path.join(bd, 'arcode.bin'), 'rb').read()
+    check('ARADD' in ae and 'EQU  >2300' in ae and 'ARTAG' in ae and 'ARCLS' in ae, 'the build writes arcode.equ with the exports (ARADD at >2300): %s' % [l.strip() for l in ae.split('\n')[1:4]])
+    check(syms['appram'] == 0x2300 + len(code) and len(code) % 2 == 0, 'APPRAM moves up by the code\'s size: >%04X = >2300 + %d' % (syms['appram'], len(code)))
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m, cpu, halt = sim9900.run(c, frames=80)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    ram = bytes(m.rb(0x2300 + i) for i in range(len(code)))
+    check(halt is None and ram == code, 'at start-up the code is in RAM at >2300, byte for byte the image the build made (%d bytes)' % len(code))
+    ar = syms['appram']
+    scr = [l.strip() for l in sim9900.screen(m).split('\n') if l.strip()]
+    check(m.rw(ar) == 5 and m.rw(ar + 2) == 0xA5A5 and 'ARCODE' in scr,
+          'the module calls ARADD (2 + 3 = %d), reads ARTAG (%04X) and calls ARCLS, which draws through the kernel (screen %r)' % (m.rw(ar), m.rw(ar + 2), scr[:1]))
+    def variant(edit_file=None, edit_json=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'arcode'), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_file:
+            edit_file(d + '/app')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        return r, r.stdout + r.stderr
+    r, out = variant(edit_file=lambda d: open(d + '/ar.a99', 'w').write(open(os.path.join(ROOT, 'tests', 'apps', 'arcode', 'ar.a99')).read().replace('AORG >2300', 'AORG >2400')))
+    check(r.returncode != 0 and 'AORG >2300' in out, 'a source that does not say AORG >2300 is refused: %s' % out.strip().split('\n')[-1][:90])
+    r, out = variant(edit_file=lambda d: open(d + '/ar.a99', 'a').write('       BSS  6200\n'))
+    check(r.returncode != 0 and '6,144' in out, 'an image over 6K is refused: %s' % out.strip().split('\n')[-1][:100])
+    r, out = variant(edit_json=lambda j: j['appram_code'].update(exports=['ARADD', 'NOSUCH']))
+    check(r.returncode != 0 and 'NOSUCH' in out, 'an export the source does not define is refused by name: %s' % out.strip().split('\n')[-1][:90])
+    r, out = variant()
+    check(r.returncode == 0, 'and the unchanged copy builds in a directory of its own (the two passes find their files)')
+    if os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM']):
+        import ea5 as ea, tifdc
+        dd = tempfile.mkdtemp()
+        rd = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', 'arcode'), '--out', dd, '--disk', '--geometry', 'sssd'],
+                            capture_output=True, text=True)
+        img = bytearray(open(glob.glob(dd + '/*.dsk')[0], 'rb').read())
+        md = sim9900.Machine(bytes(8192)); md.tifdc = tifdc.TIFDC(image=img)
+        md.presses, md.toggles, end = sim9900.schedule([])
+        cd = sim9900.CPU(md)
+        cd.pc, cd.wp, cd.limi = ea.load(md, img, 'ARCODE'), 0x83E0, 0
+        for chunk in range(120):
+            for i in range(100000):
+                cd.step()
+            if 'ARCODE' in sim9900.screen(md):
+                break
+        check(rd.returncode == 0 and 'ARCODE' in sim9900.screen(md) and bytes(md.rb(0x2300 + i) for i in range(len(code))) == code,
+              'started from a disk the program has its code in RAM at >2300 as well (the code is one more bank file)')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2573,7 +2633,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

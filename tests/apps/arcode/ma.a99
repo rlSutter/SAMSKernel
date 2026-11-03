@@ -1,0 +1,22 @@
+*======================================================================
+* ma.a99 - a module that calls the code in application RAM (group arcode)
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "arcode.equ"
+
+VSUM   EQU  APPRAM              ARADD(2,3): 5
+VTAG   EQU  APPRAM+2            ARTAG
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       LI   R0,2
+       LI   R1,3
+       BL   @ARADD
+       MOV  R0,@VSUM
+       MOV  @ARTAG,@VTAG
+       BL   @ARCLS
+       .leave
+       RT
+TICK   RT

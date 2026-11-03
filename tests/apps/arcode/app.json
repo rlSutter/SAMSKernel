@@ -1,0 +1,6 @@
+{
+  "name": "ARCODE TEST",
+  "min_pages": 128,
+  "appram_code": {"source": "ar.a99", "exports": ["ARADD", "ARTAG", "ARCLS"]},
+  "modules": [{"name": "ma", "source": "ma.a99"}]
+}

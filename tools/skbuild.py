@@ -15,6 +15,8 @@ app.json:
     "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
     "disk_name": "HELLO",              optional: the name of the program on a disk (--disk): 1-6 capitals and digits
     "module_size": 8192,               optional: 8192 (default) or 4096: the size every module may be
+    "appram_code": {"source": "ar.a99",  optional: code the program keeps in its own RAM, assembled at >2300 (AORG >2300), at most 6K, copied there from
+                "exports": ["NAME"]},   a page at start-up; application RAM (APPRAM) then begins after it; exports in arcode.equ
     "common": {"source": "common.a99",   optional: code shared by every module, assembled at >D000 (the source says AORG >D000),
                 "exports": ["NAME"]},    at most 4K, mapped into window >D000 at start-up and never moved; its exports are
                                        in common.equ for the modules to COPY. Every module must then be "size": 4096
@@ -297,6 +299,7 @@ def write_cfg(app, bdir, banks, pgfree):
     for m in app['modules']:
         L.append('%-6s EQU  >%02X' % ('PG_' + ident(m['name']), m['_page']))
     L.append('PGBOOT EQU  PG_' + ident(app['boot']))
+    L.append('ARSIZE EQU  %d           bytes of the program\'s own code at the start of application RAM' % app.get('_arsize', 0))
     L.append('COMMONPG EQU >%02X           the page of the common code, mapped at >D000 at start (0: none)' %
              next((m['_page'] for m in app['modules'] if m.get('_common')), 0))
     L.append('PGFREE EQU  >%02X' % pgfree + '            first SAMS page the build leaves unassigned')
@@ -372,6 +375,56 @@ def export_public(ksrc, bdir, equ, extra=()):
     return total, len(out) // 2
 
 
+def build_appram_code(app, appdir, bdir, args):
+    """app.json "appram_code": code the program keeps in its own RAM, at the start of application RAM (>2300), copied there from a page at start-up.
+    It is assembled against the kernel it will run with, but the kernel's application RAM address depends on the code's size, so the build runs once
+    first (--kernel-only) with a 2-byte stand-in, assembles the code against that pass's kernel.equ, and then builds for real; check_same_kernel
+    makes sure the kernel did not move between the passes.  The code is also a data file (PD_ARCODE is its page) and its exports go to arcode.equ."""
+    ar = app['appram_code']
+    d = {'file': 'arcode.bin', '_path': os.path.join(bdir, 'arcode.bin')}
+    if '--kernel-only' in args:
+        open(d['_path'], 'wb').write(b'\0\0')
+        app['_arsize'] = 2
+    else:
+        tmp = bdir + '.ar'
+        r = subprocess.run([sys.executable, os.path.abspath(__file__), appdir, '--out', tmp, '--kernel-only'], capture_output=True, text=True)
+        if r.returncode:
+            die('the first pass (the kernel the application RAM code is assembled against) failed:\n' + r.stdout + r.stderr)
+        src = os.path.join(appdir, ar['source'])
+        if not re.search(r'^\s+AORG\s+>2300\b', open(src, encoding='latin-1').read(), re.M | re.I):
+            die('the application RAM code is assembled at >2300: its source must say AORG >2300')
+        code = asm(src, os.path.join(bdir, 'arcode.raw'), [appdir, tmp, os.path.join(ROOT, 'kernel'), os.path.join(ROOT, 'gen'), os.path.join(ROOT, 'lib')],
+                   os.path.join(bdir, 'arcode.lst'), os.path.join(bdir, 'arcodeall.equ'))
+        if len(code) % 2:
+            code += b'\0'
+        if len(code) > 0x1800:
+            die('the application RAM code is %d bytes: at most 6,144 (>2300-3AFF), so that the program keeps at least 1,792 bytes of data' % len(code))
+        open(d['_path'], 'wb').write(code)
+        app['_arsize'] = len(code)
+        syms = {}
+        text = open(os.path.join(bdir, 'arcodeall.equ')).read()
+        for mm in re.finditer(r'(\w+):\s*\n\s+equ\s+(>[0-9A-Fa-f]+)', text):
+            syms[mm.group(1).upper()] = mm.group(2).upper()
+        lines = ['* arcode.equ - made by tools/skbuild.py: what the code in application RAM (>2300) exports']
+        for n in ar.get('exports', []):
+            if n.upper() not in syms:
+                die('the application RAM code exports %s, which its source does not define' % n)
+            lines.append('%-8s EQU  %s' % (n.upper(), syms[n.upper()]))
+        open(os.path.join(bdir, 'arcode.equ'), 'w').write('\n'.join(lines) + '\n')
+    app['data'].append(d)
+
+
+def check_same_kernel(first, second):
+    """the kernel's symbols (but not APPRAM and ARSIZE, which follow the code's size) must be where the first pass put them, or the code assembled against it is wrong"""
+    def read(d):
+        text = open(os.path.join(d, 'kernel.equ')).read()
+        return {m.group(1): m.group(2) for m in re.finditer(r'(\w+):\s*\n\s+equ\s+(>[0-9A-Fa-f]+)', text) if m.group(1) not in ('appram', 'arsize')}
+    a, b = read(first), read(second)
+    moved = sorted(k for k in set(a) | set(b) if a.get(k) != b.get(k))
+    if moved:
+        die('the kernel moved between the two passes (%s ...): the application RAM code was assembled against the wrong addresses' % ', '.join(moved[:4]))
+
+
 def write_disk(app, bdir, images, kincs, ksrc, args):
     """The disk start (docs/DISKSTART.md): the bootstrap, an Editor/Assembler option 5 image of the loader assembled with DISKBOOT and loaded at >C000, and
     every bank after bank 0 as an 8K PROGRAM file NAME/Bnn, on a disk image OUT/NAME.dsk."""
@@ -407,6 +460,8 @@ def main():
     run(sys.executable, os.path.join(ROOT, 'tools', 'font.py'))
     run(sys.executable, os.path.join(ROOT, 'tools', 'keytab.py'))
     prepare_data(app, bdir)
+    if 'appram_code' in app:
+        build_appram_code(app, appdir, bdir, args)
     pgfree = assign_pages(app)
     nopool = 'pool' in app['omit']
     if not nopool and app['pool_max_pages'] <= pgfree:
@@ -452,13 +507,18 @@ def main():
                 die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []))
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) +
+                 (['ARCODE'] if 'appram_code' in app else []))
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']
     for n in (res or {}).get('exports', []):
         if n.lower() not in labels:
             die('resident export %s is not a label in %s' % (n, res['source']))
     export_public(ksrc, bdir, equ, [n for n in (res or {}).get('exports', [])])
+    if '--kernel-only' in args:
+        sys.exit(0)               # the first pass for application RAM code: the kernel's symbols are all that was wanted
+    if 'appram_code' in app:
+        check_same_kernel(bdir + '.ar', bdir)
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
                  os.path.join(bdir, 'loader.lst'))
     ds = os.path.join(appdir, 'databank.a99')

@@ -63,6 +63,18 @@ KST0   BL   @MAPD              (and so the record) until a module says
        CLR  @GOARG
        CLR  @PREVPG
        BL   @T80INI            Text 80, the font, colour scheme 0, display on
+       .ifdef ARCODE
+* the application's code for its own RAM (app.json "appram_code"): from its page
+* to >2300, ARSIZE bytes
+       LI   R0,PD_ARCODE
+       BL   @MAPE
+       LI   R1,>E000
+       LI   R2,>2300
+       LI   R3,ARSIZE/2
+KSAR   MOV  *R1+,*R2+
+       DEC  R3
+       JNE  KSAR
+       .endif
 * the boot module is the first switch: from "no module" (CURCC = 0)
        LI   R0,PGBOOT
        MOV  R0,@NEXTPG

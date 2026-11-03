@@ -631,6 +631,17 @@ written). It measures only: frames and interrupts still come from the instructio
 own delays, the interrupt's context switch and `DIV`'s data-dependent time. Use it for ratios (is this loop twice as fast in the scratchpad? what does a dispatch cost?) more than
 for milliseconds. Test group `cycles`.
 
+### Code in application RAM
+
+A program with a large engine of its own (an interpreter's dispatch loop, a decompressor, a database's search) can keep it **in application RAM**, in slot A, where it is always mapped, instead of
+in a module (which is in slot C and is swapped) or in the kernel's pages (about 800 bytes of room by default, more with `"omit"`). Declare it in `app.json`:
+`"appram_code": {"source": "ar.a99", "exports": ["ARADD", "ARTAG"]}`. The source is an ordinary kernel source that begins **`AORG >2300`** (it `COPY`s `kernel.equ` and `macros.a99` as modules do); the build assembles it
+against the kernel it will run with, stores the image in a page of its own (`PD_ARCODE`, one more bank file on a disk build), and the kernel copies it to `>2300` at start-up, before the first module
+runs. Application RAM (`APPRAM`) then **begins after the code**: `APPRAM` is `>2300` plus the code's size, so a module's variables are where they should be without knowing. The names in `"exports"` go to
+`arcode.equ`, which a module `COPY`s and calls as it calls the kernel (`BL @ARADD`). Limits: at most 6,144 bytes (the program keeps at least 1,792 bytes of data below the stack); the code must not use
+`APPRAM` itself (it is assembled before the final value is known) and has its own data inside its image if it needs any; and it is in 8-bit expansion RAM like a module, not scratchpad. The kernel grows by about
+30 bytes only for a program that uses this. Test group `arcode` (the code in RAM byte for byte, a module calling it and reading its data, `APPRAM` moved, the build's refusals, and the same from a disk).
+
 ## 8. Several modules
 
 **[PC] only.** The TI route has one module: the workbench runs your program as a module and the only switch it offers is back (`LI R0,PG_WB / CLR R1 / BL @GOMOD`). Everything in this part is for programs built with `skbuild.py` from an `app.json` that lists more than one.
@@ -993,6 +1004,7 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`appram_code`** (optional): `{"source": "ar.a99", "exports": ["NAME", ...]}`, code kept in application RAM at `>2300` (see Part 7); `APPRAM` then begins after it.
 - **`common`** (optional): `{"source": "common.a99", "exports": ["NAME", ...]}`, code shared by every module, assembled at `>D000` and mapped there at start-up (see Part 8); every module must then be `"size": 4096`.
 - **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).

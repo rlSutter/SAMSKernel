@@ -248,7 +248,10 @@ FPAB   EQU  >2180            64 bytes: the PAB as built
 
 * 256 bytes of scratch for the running module (not kept across a module switch)
 MODRAM EQU   >2200
-APPRAM EQU  >2300            the application's RAM: >2300 up to APPTOP
+* (>2300 up to APPTOP; app.json "appram_code" puts ARSIZE bytes of the
+* program's own code at its start, copied there at start-up, and the data
+* begins after it)
+APPRAM EQU  >2300+ARSIZE       the application's RAM
 APPTOP EQU  >3F00            ... and the software stack above it
 * R10 starts here: the first push writes >3FFE (256 bytes: 128 words)
 STKTOP EQU   >4000

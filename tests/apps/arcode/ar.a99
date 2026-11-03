@@ -1,0 +1,21 @@
+*======================================================================
+* ar.a99 - code the program keeps in its own RAM: assembled at >2300, copied
+* there from a page at start-up (app.json "appram_code"), for the test group
+* arcode.  ARADD adds R1 to R0; ARTAG is a word of data; ARCLS shows a text.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+ATEXT  EQU  (RTEXT*16+RBG)*256
+
+       AORG >2300
+ARADD  A    R1,R0
+       RT
+ARTAG  DATA >A5A5
+ARCLS  .enter
+       LI   R0,2*COLS+2
+       LI   R1,ARMSG
+       LI   R2,ATEXT
+       BL   @PUTS
+       .leave
+       RT
+ARMSG  STRI 'ARCODE'
