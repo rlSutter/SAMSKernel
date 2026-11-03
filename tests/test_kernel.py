@@ -2124,10 +2124,135 @@ def float():
         if got != want and badC is None:
             badC = (xf, xa, hex(got), hex(want))
     check(badC is None, 'SCOMP: the same result bits as FCOMP, against the number on the stack (%s)' % (badC or 'all as expected'))
+    badI = None
+    for v in ('0', '1', '-1', '7', '-5', '100', '12345', '-12345', '32767', '-32768', '3.7', '-3.7', '2.5', '-2.5', '0.4', '-0.4', '1234.5', '-1234.5'):
+        put(0x834A, enc(v))
+        call(0x12)
+        w = m.rw(0x834A)
+        got = w - 65536 if w >= 32768 else w
+        want = int((Decimal(v) + Decimal('0.5')).to_integral_value(rounding='ROUND_FLOOR'))
+        if got != want and badI is None:
+            badI = (v, got, want)
+    ovf = []
+    for v in ('32768', '40000', '-32769', '1e9'):
+        put(0x834A, enc(v)); m.wb(0x8354, 0)
+        call(0x12)
+        ovf.append(m.rb(0x8354))
+    check(badI is None and ovf == [3, 3, 3, 3], 'CFI (XML >12): float to integer rounds to nearest with halves up on 18 values (%s), and sets the error byte >8354 to 3 outside -32768..32767: %s' % (badI or 'all as expected', ovf))
     check(call(0x20)[0] == 0xFFFF and call(0x00)[0] == 0xFFFF and call(0xF6)[0] == 0xFFFF, 'a code in a table that is not the console\'s, or an empty entry, is refused (>FFFF)')
     overlap = {hex(a): kernel_names[a] for a in changed if a in kernel_names or (a - 1) in kernel_names}
     outside = sorted(hex(a) for a in changed if not (0x834A <= a <= 0x836F or 0x8370 <= a <= 0x837F))
     check(not overlap and not outside, 'every scratchpad byte changed below the GPL workspace is the console float package\'s (%s), none of the kernel\'s (%s)' % (' '.join(sorted(hex(a) for a in changed)), overlap or 'none'))
+
+def common():
+    """app.json "common": code shared by every module, assembled at >D000 and mapped there at start-up: the modules call it by the names it
+    exports (common.equ) after a boot, a GOMOD and a MODCALL without mapping anything, window >D000 stays on its page throughout, and the
+    build refuses an 8K module beside it, a common image over 4K and an export the source does not define."""
+    import asmharness, shutil, tempfile
+    c = build('tests/apps/common')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'common', 'kernel.equ'))
+    for n in ('ma', 'mb'):
+        syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'common', n + '.equ')))
+    ce = open(os.path.join(ROOT, 'build', 'common', 'common.equ')).read()
+    check('CADD' in ce and 'CMAGIC' in ce and 'EQU  >D000' in ce, 'the build writes common.equ with the exports (CADD at >D000): %s' % [l.strip() for l in ce.split('\n')[1:3]])
+    def run_keys(keys):
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)
+        try:
+            return sim9900.run(c, frames=300, keys=keys)
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+    word = lambda m, n: m.rw(syms[n])
+    m, cpu, halt = run_keys('<WAIT 30>')
+    check(halt is None and word(m, 'va') == 5 and word(m, 'vmg') == 0xC0DE and word(m, 'curcd') == syms['pg_common'] and m.rw(0xD000 + 4) == 0xC0DE,
+          'at start-up the common page is in >D000 (CURCD >%02X = PG_COMMON), and the first module calls CADD (2 + 3 = %d) and reads CMAGIC (%04X)' % (word(m, 'curcd'), word(m, 'va'), word(m, 'vmg')))
+    m, cpu, halt = run_keys('<WAIT 20>b<WAIT 30>')
+    check(word(m, 'curcc') == syms['pg_mb'] and word(m, 'vb') == 15 and word(m, 'curcd') == syms['pg_common'],
+          'after GOMOD to the second module it calls CADD too (7 + 8 = %d) and >D000 is still the common page' % word(m, 'vb'))
+    m, cpu, halt = run_keys('<WAIT 20>m<WAIT 40>')
+    check(word(m, 'vmb') == 300 and word(m, 'vaf') == 30 and word(m, 'vcd') == syms['pg_common'] and word(m, 'curcc') == syms['pg_ma'],
+          'a MODCALL into the second module (CADD there: %d), then CADD again in the first: %d; >D000 is the common page throughout (>%02X)' % (word(m, 'vmb'), word(m, 'vaf'), word(m, 'vcd')))
+    def variant(edit_json=None, edit_file=None):
+        d = tempfile.mkdtemp()
+        shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'common'), d + '/app')
+        if edit_json:
+            j = json.load(open(d + '/app/app.json')); edit_json(j); json.dump(j, open(d + '/app/app.json', 'w'))
+        if edit_file:
+            edit_file(d + '/app')
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+        return r, (r.stdout + r.stderr)
+    r, out = variant(lambda j: j['modules'][1].update(size=8192))
+    check(r.returncode != 0 and 'mb' in out and 'single page' in out, 'an 8K module beside the common code is refused by name: %s' % out.strip().split('\n')[-1][:100])
+    r, out = variant(edit_file=lambda d: open(d + '/common.a99', 'a').write('       BSS  4200\n'))
+    check(r.returncode != 0 and 'at most 4,096' in out, 'a common image over 4K is refused: %s' % out.strip().split('\n')[-1][:90])
+    r, out = variant(lambda j: j['common'].update(exports=['CADD', 'NOSUCH']))
+    check(r.returncode != 0 and 'NOSUCH' in out, 'an export the source does not define is refused by name: %s' % out.strip().split('\n')[-1][:90])
+    r, out = variant(lambda j: j.pop('common'), lambda d: None)
+    check(r.returncode != 0, 'without the "common" entry the modules do not assemble (CADD is not defined): the entry is what provides common.equ')
+
+def cycles():
+    """tools/cycles.py, the cycle model: single instructions against the TMS9900 data manual's clock cycles (with the TI's 8 wait cycles
+    for every access outside the console ROM and the scratchpad), and the two well-known loop timings: DEC / JNE counting 65,535 takes
+    0.44 s in the scratchpad and 0.79 s in expansion RAM."""
+    import cycles as cy
+    c = build('hello')
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        m = sim9900.Machine(c)
+        m.presses, m.toggles, end = sim9900.schedule([])
+        boot = sim9900.CPU(m)
+        boot.pc = m.rw(m.rw(0x6006) + 2)
+        while m.insns < 60 * sim9900.VSYNC_INSNS:
+            boot.step()
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    cpu = cy.CycleCPU(m)
+    def place(addr, words):
+        for i, w in enumerate(words):
+            m.ww(addr + 2 * i, w)
+    def one(words, at=0x8380, regs=None, st=0):
+        """run one instruction placed at AT; returns the cycles it cost"""
+        cpu.wp = 0x8300; cpu.limi = 0; cpu.st = st; cpu.pending_op = None
+        place(at, words)
+        for r, v in (regs or {}).items():
+            m.ww(0x8300 + 2 * r, v)
+        cpu.pc = at; cpu.cycles = 0
+        cpu.step()
+        return cpu.cycles
+    got = {}
+    got['MOV R1,R2'] = one([0xC081])
+    got['MOV *R1+,*R2+ (scratchpad)'] = one([0xCCB1], regs={1: 0x8320, 2: 0x8330})
+    got['MOV *R1+,*R2+ (expansion RAM data)'] = one([0xCCB1], regs={1: 0x2400, 2: 0x2410})
+    got['A @>2400,R1'] = one([0xA060, 0x2400])
+    got['SLA R1,4'] = one([0x0A41])
+    got['MPY R1,R2'] = one([0x3881])
+    got['LI R1,>1234'] = one([0x0201, 0x1234])
+    got['JEQ taken'] = one([0x1301], st=0x2000)
+    got['JEQ not taken'] = one([0x1301], st=0)
+    got['MOV R1,R2 (code in expansion RAM)'] = one([0xC081], at=0x2400)
+    want = {'MOV R1,R2': 14, 'MOV *R1+,*R2+ (scratchpad)': 30, 'MOV *R1+,*R2+ (expansion RAM data)': 30 + 3 * 8, 'A @>2400,R1': 14 + 8 + 8,
+            'SLA R1,4': 20, 'MPY R1,R2': 52, 'LI R1,>1234': 12, 'JEQ taken': 10, 'JEQ not taken': 8, 'MOV R1,R2 (code in expansion RAM)': 14 + 8}
+    check(got == want, 'single instructions against the manual: %s' % ('all %d match' % len(want) if got == want else {k: (got[k], want[k]) for k in want if got[k] != want[k]}))
+    def loop(at, n):
+        place(at, [0x0602, 0x16FE, 0x10FF])                 # DEC R2 / JNE $-2 / JMP $
+        cpu.wp = 0x8300; cpu.limi = 0; cpu.pending_op = None
+        m.ww(0x8304, n)
+        cpu.pc = at; cpu.cycles = 0
+        while cpu.pc != at + 4:
+            cpu.step()
+        return cpu.cycles
+    fast, slow = loop(0x8380, 65535), loop(0x2400, 65535)
+    check(fast == 65535 * 20 - 2 and slow == 65535 * 36 - 2,
+          'DEC R2 / JNE counting 65,535: %d cycles in the scratchpad = %.3f s, %d in expansion RAM = %.3f s (known: about 0.44 s and 0.79 s)' % (fast, fast / cy.CLOCK, slow, slow / cy.CLOCK))
+    check(0.43 < fast / cy.CLOCK < 0.45 and 0.77 < slow / cy.CLOCK < 0.80, 'both in the range measured on real machines')
+    place(0x8380, [0x0602, 0x16FE, 0x10FF])
+    cpu.wp = 0x8300; cpu.limi = 0; cpu.pending_op = None; m.ww(0x8304, 1000)
+    cpu.pc = 0x8380
+    before = m.insns
+    for i in range(100):
+        cpu.step()
+    check(m.insns - before == 100, 'the model only measures: the simulator\'s own instruction count (and so its frames and interrupts) advances exactly as without it (100 steps: %d)' % (m.insns - before))
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
@@ -2276,7 +2401,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

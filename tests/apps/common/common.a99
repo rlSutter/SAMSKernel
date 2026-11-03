@@ -1,0 +1,12 @@
+*======================================================================
+* common.a99 - code shared by every module of the application, assembled at
+* >D000 and mapped there at start-up (app.json "common"): for the test group
+* "common".  CADD adds R1 to R0; CMAGIC is a word of data.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >D000
+CADD   A    R1,R0
+       RT
+CMAGIC DATA >C0DE

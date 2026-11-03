@@ -13,6 +13,9 @@ app.json:
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
     "module_size": 8192,               optional: 8192 (default) or 4096: the size every module may be
+    "common": {"source": "common.a99",   optional: code shared by every module, assembled at >D000 (the source says AORG >D000),
+                "exports": ["NAME"]},    at most 4K, mapped into window >D000 at start-up and never moved; its exports are
+                                       in common.equ for the modules to COPY. Every module must then be "size": 4096
     "modules": [                       each an 8K bank of code run in slot C
       {"name": "hello", "source": "hello.a99"},
       {"name": "more",  "source": "more.a99", "page": "0x20"},   (optional page)
@@ -185,6 +188,16 @@ def load_app(appdir):
     app.setdefault('boot', names[0])
     if app['boot'] not in names:
         die('"boot" names no module')
+    if 'common' in app:
+        c = app['common']
+        if not isinstance(c, dict) or 'source' not in c:
+            die('"common" is {"source": "common.a99", "exports": ["NAME", ...]}')
+        if 'common' in [ident(n).lower() for n in names]:
+            die('a module named "common" clashes with the "common" code')
+        for m in app['modules']:
+            if m['size'] != 4096:
+                die('"common" is mapped into window >D000 for every module, so every module must be a single page ("size": 4096): %s is 8K' % m['name'])
+        app['modules'].append({'name': 'common', 'source': c['source'], 'size': 4096, '_common': True})
     app.setdefault('data', [])
     omit = app.setdefault('omit', [])
     if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
@@ -276,6 +289,8 @@ def write_cfg(app, bdir, banks, pgfree):
     for m in app['modules']:
         L.append('%-6s EQU  >%02X' % ('PG_' + ident(m['name']), m['_page']))
     L.append('PGBOOT EQU  PG_' + ident(app['boot']))
+    L.append('COMMONPG EQU >%02X           the page of the common code, mapped at >D000 at start (0: none)' %
+             next((m['_page'] for m in app['modules'] if m.get('_common')), 0))
     L.append('PGFREE EQU  >%02X' % pgfree + '            first SAMS page the build leaves unassigned')
     pm = 0 if 'pool' in app['omit'] else app['pool_max_pages']       # (no pool: no bitmap)
     L.append('POOLMX EQU  %d            pages the pool can manage: pool_max_pages' % pm)
@@ -418,11 +433,27 @@ def main():
     data = asm(ds, os.path.join(bdir, 'databank.bin'), incs, os.path.join(bdir, 'databank.lst'))
     images = [loader, kernel, data]
     sizes = [('loader', len(loader)), ('kernel', len(kernel)), ('data bank', len(data))]
-    for m in app['modules']:
+    built = {}
+    for m in sorted(app['modules'], key=lambda m: not m.get('_common')):      # (the common code first: the modules COPY its exports)
         src = os.path.join(appdir, m['source'])
         out = os.path.join(bdir, m['name'] + '.bin')
-        b = asm(src, out, incs, os.path.join(bdir, m['name'] + '.lst'), os.path.join(bdir, m['name'] + '.equ'))   # (the module's symbols: for tests and debugging)
-        if m['size'] == 4096:
+        b = asm(src, out, incs, os.path.join(bdir, m['name'] + '.lst'),
+                os.path.join(bdir, ('commonall' if m.get('_common') else m['name']) + '.equ'))   # (the module's symbols: for tests and debugging)
+        if m.get('_common'):
+            # the common code: at >D000 (its source says AORG >D000), at most a page; the names it exports go to common.equ
+            if len(b) > 4096:
+                die('the common code is %d bytes: it may be at most 4,096' % len(b))
+            syms = {}
+            text = open(os.path.join(bdir, 'commonall.equ')).read()       # (the assembler's own format: "name:" then "equ >addr")
+            for mm in re.finditer(r'(\w+):\s*\n\s+equ\s+(>[0-9A-Fa-f]+)', text):
+                syms[mm.group(1).upper()] = mm.group(2).upper().replace('>', '>')
+            lines = ['* common.equ - made by tools/skbuild.py: what the common code at >D000 exports']
+            for n in app['common'].get('exports', []):
+                if n.upper() not in syms:
+                    die('the common code exports %s, which its source does not define' % n)
+                lines.append('%-8s EQU  %s' % (n.upper(), syms[n.upper()]))
+            open(os.path.join(bdir, 'common.equ'), 'w').write('\n'.join(lines) + '\n')
+        elif m['size'] == 4096:
             # a single-page module: at most 4K, and a flag in the last word of its header (>C006) tells the kernel
             # not to map a second page into >D000 (the program owns that window)
             if len(b) > 4096:
@@ -430,8 +461,10 @@ def main():
             if len(b) < 8:
                 die('module %s is too short to have the four-word header' % m['name'])
             b = b[:6] + (int.from_bytes(b[6:8], 'big') | 1).to_bytes(2, 'big') + b[8:]
-        images.append(b)
-        sizes.append((m['name'], len(b)))
+        built[m['name']] = b
+    for m in app['modules']:                  # the banks go in the order of the module list, which is the order of the pages
+        images.append(built[m['name']])
+        sizes.append((m['name'], len(built[m['name']])))
     for d in app['data']:
         raw = open(d['_path'], 'rb').read()
         for c in range(d['_chunks']):

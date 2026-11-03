@@ -54,8 +54,14 @@
 *   does not change.  The routine is not a drop-in "round to n places" for a
 *   plain number: it expects the state the BASIC interpreter leaves (the sign
 *   at >8375, a copy of the exponent at >8376), and the test does not cover it.)
-* The second table (>10 and up: the conversions between numbers and strings
-* and integers) is reached the same way; the test does not cover it.
+* The second table (>10 and up) is mostly the GPL interpreter's:
+*   XCFI   >12   float to integer: FAC's first word = FAC rounded to the nearest
+*                integer, halves up (2.5 -> 3, -2.5 -> -2); >8354 (the error
+*                byte) is 3 if it was out of -32768..32767 (the word is then
+*                garbage).  Verified.
+* The others (>10, >11, >14, >15, >1B, >1E, >1F do little or nothing; >13,
+* >16-1A, >1C and >1D never return outside the interpreter) are NOT called.
+* (The conversions of strings to and from numbers want the interpreter's state.)
 * (Operand order checked against the console's own code in the simulator: the
 * routines compute ARG - FAC and ARG / FAC, not FAC / ARG as one page of
 * Nouspikel's TI-99/4A tech pages has it for the divide.)
@@ -79,6 +85,7 @@ XSSUB  EQU  >0C
 XSMUL  EQU  >0D
 XSDIV  EQU  >0E
 XSCOMP EQU  >0F
+XCFI   EQU  >12
 FPSTK  EQU  >836E
 FAC    EQU  >834A
 ARG    EQU  >835C

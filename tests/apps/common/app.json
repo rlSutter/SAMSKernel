@@ -1,0 +1,10 @@
+{
+  "name": "COMMON TEST",
+  "min_pages": 128,
+  "module_size": 4096,
+  "common": {"source": "common.a99", "exports": ["CADD", "CMAGIC"]},
+  "modules": [
+    {"name": "ma", "source": "ma.a99"},
+    {"name": "mb", "source": "mb.a99"}
+  ]
+}

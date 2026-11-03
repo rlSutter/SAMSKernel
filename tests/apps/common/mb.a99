@@ -1,0 +1,26 @@
+*======================================================================
+* mb.a99 - a second single-page module that calls the common code
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "common.equ"
+
+VB     EQU  APPRAM+10           CADD(7,8) from mb's INIT: 15
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0,B4
+INIT   .enter
+       LI   R0,7
+       LI   R1,8
+       BL   @CADD
+       MOV  R0,@VB
+       .leave
+       RT
+TICK   RT
+* entry 4: CADD(100,200) = 300
+B4     .enter
+       LI   R0,100
+       LI   R1,200
+       BL   @CADD
+       .leave
+       RT

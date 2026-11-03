@@ -157,7 +157,7 @@ CPU address space              SAMS page(s)        what lives there
 >6000-7FFF  cartridge          (not mapped)        only the loader looks at it
 >8300-83FF  scratchpad         (not mapped)        fast RAM: workspace, kernel hot variables
 >8400-9FFF  I/O ports          (not RAM)
->A000-BFFF  THE KERNEL         >0A-0B, fixed       3.6K of 8K used
+>A000-BFFF  THE KERNEL         >0A-0B, fixed       6.9K of 7.5K it may use
 >C000-DFFF  SLOT C             your module (2 pages) the running module, 8K
 >E000-FFFF  SLOT B             any 2 pages         your data: window >E000 and window >F000
 ```
@@ -613,12 +613,23 @@ the word at `>836E` (`FPSTK`) and addresses the top number; each of these reads 
 divided by FAC). The caller keeps the stack in VRAM nothing else uses, pushing by writing a number at the pointer + 8 and raising it. `FPCALL` loads the GPL port registers
 R13 and R15 with the console's own `>9800` and `>8C02`, because these routines read the VRAM through R15, which the simulator's boot (and a cartridge started without the title
 screen) leaves zero. Tested against Python on 240 random operations and, for the stack forms, 120 more, through the console's own ROM code in the simulator (relative error under
-1e-12), group `float`; the conversions of the second table (`>10` and up) go through the same call and are not covered. One caution: Nouspikel's tech page on real numbers gives the
+1e-12), group `float`; of the second table (`>10` and up) only **`XCFI` `>12`**, float to 16-bit integer, is verified: it rounds to the nearest integer, half up (2.5 gives 3, -2.5 gives -2), leaves the integer in the first word of FAC, and sets the error byte at `>8354` to 3 when the number is out of range (the word is then meaningless). The rest of that table is the GPL interpreter's: several entries do nothing outside it, and `>13`, `>16-1A`, `>1C` and `>1D` **do not return** when called without it (the simulator runs them forever): do not call them. One caution: Nouspikel's tech page on real numbers gives the
 divide as FAC / ARG; the console's code, run in the simulator, computes ARG / FAC (and so does the subtraction, ARG - FAC).
 
 The routines change scratchpad bytes only in the console's float area, `>834A-836F`, plus `>8375`, `>8377` and the status byte `>837C`: the test records every byte they change
 and checks that none is one of the kernel's (the layout fix of 1.21.0 moved the four that used to be in FAC). The routines need the real console ROM, so the simulator runs them
 only when `TI_CONSOLE_ROM` names your own image of it; a program built without the include has no such need.
+
+### The cycle model (`tools/cycles.py`)
+
+The simulator counts instructions, which is the right clock for the frame and the interrupts but not for how fast a program is. `tools/cycles.py` provides
+`CycleCPU`, a drop-in for `sim9900.CPU` that also counts **clock cycles of the 3 MHz TMS9900**: each instruction's cycles from the data manual (a base number, plus the
+addressing modes, plus two a place for a shift, a jump 10 taken and 8 not) and **8 wait cycles for every memory access outside the console ROM and the scratchpad**, since
+everything else is 8 bits wide behind the multiplexer (instruction fetches, workspace registers, address words and operands all count, and a destination is read and then
+written). It measures only: frames and interrupts still come from the instruction count. Checked against the manual's numbers for ten instructions and the two classic loop timings
+(`DEC R2 / JNE` counting 65,535: 0.44 s in the scratchpad, 0.79 s in expansion RAM); not checked against a real console beyond that, and it omits the video and sound chips'
+own delays, the interrupt's context switch and `DIV`'s data-dependent time. Use it for ratios (is this loop twice as fast in the scratchpad? what does a dispatch cost?) more than
+for milliseconds. Test group `cycles`.
 
 ## 8. Several modules
 
@@ -726,6 +737,18 @@ So a program whose modules are all single pages owns `>D000` outright; a program
 long jobs) can rely on `MODCALL` to restore the window and must map it again after a `GOMOD`. Never use `MAPD` while the running module is an 8K one: the window holds its
 second page. The flag costs 46 bytes of kernel (`MAPD`, `MAPC`, the check in `PAGEC` and the second restore in `MODCALL`). Test group `slotd`
 (`tests/apps/slotd`: two single-page modules and one 8K, every row above, the macro against the call over 600 pages, the build's refusals).
+
+### Common code at `>D000`
+
+With every module a single page, window `>D000` can hold **code shared by all of them**, mapped once and never moved: declare it in `app.json` as
+`"common": {"source": "common.a99", "exports": ["CADD", "CMAGIC"]}`. The source is an ordinary kernel source that begins `AORG >D000` (and `COPY`s `kernel.equ`
+and `macros.a99` as modules do); the build assembles it **first**, refuses it if it is over 4,096 bytes, gives it a page of its own (`PG_COMMON`, and the equate
+`COMMONPG` the kernel reads), and writes the addresses of the names in `"exports"` to `common.equ`, which each module `COPY`s and then calls as it calls
+the kernel (`BL @CADD`). The kernel maps the page into `>D000` at start-up, before the first module, and since `GOMOD` and `MODCALL` leave `>D000` alone for single-page
+modules and `MODCALL` puts it back anyway, it is there for every module, every call and every return. What it costs: **4K of every module's address space** is not available
+to the module (they have `>C000-CFFF`), and **every module must be small** (the build refuses `"common"` beside an 8K module). What it buys: code that appears once in the
+cartridge and once in SAMS instead of once per module (a long-number routine, a decoder, a text layout) and calls with no mapping. Test group `common`
+(`tests/apps/common`: two modules calling the common code after a boot, a switch and a call; the build's refusals). The common code may not itself call into a module.
 
 ## 9. Files
 
@@ -961,6 +984,7 @@ there is no exit hook.
   pairs: a dictionary, a map, a table. The equate `PD_<FILE>` gives the first page. The image
   grows with them (8K per piece), so the cartridge's size is the limit; Press's 512K image has run
   in js99er but, at the time of writing, not on a real FinalGROM 99.
+- **`common`** (optional): `{"source": "common.a99", "exports": ["NAME", ...]}`, code shared by every module, assembled at `>D000` and mapped there at start-up (see Part 8); every module must then be `"size": 4096`.
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
   bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192
@@ -1076,7 +1100,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 17. **Say which registers your own routines keep.** Reversi's square-drawing routine used R9 and ended its caller's loop after one square; a routine of yours that is called in a loop should `.push`/`.pop` what it touches or say it does not.
 18. **Test against a model.** `examples/reversi`'s disc count ran across the board's border cells and passed every rules test; only a whole game compared with a Python model's scores found it (`tests/reversi_model.py`).
 
-## 15. What the kernel does not do (version 1.6)
+## 15. What the kernel does not do
 
 
 **[TI]** adds its own limits (the table above): one module of up to 4,096 bytes at `>C000`; no `data` pages, no music compiled at build (`MUPLAY` needs a song in pages; `SNDTONE` works), no databank of your own, no user macros or forward `EQU`, no cartridge image; variables in `APPRAM+5760` and above, so a program does not

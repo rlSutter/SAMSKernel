@@ -1,0 +1,42 @@
+*======================================================================
+* ma.a99 - a single-page module that calls the common code (group common)
+*   B  GOMOD to mb       M  MODCALL mb's entry 4, then CADD again
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+       COPY "common.equ"
+
+VA     EQU  APPRAM              CADD(2,3) from ma's INIT: 5
+VMG    EQU  APPRAM+2            the word CMAGIC
+VMB    EQU  APPRAM+4            what mb's entry 4 returned: 300
+VAF    EQU  APPRAM+6            CADD(10,20) after the call: 30
+VCD    EQU  APPRAM+8            CURCD after the call
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   .enter
+       LI   R0,2
+       LI   R1,3
+       BL   @CADD
+       MOV  R0,@VA
+       MOV  @CMAGIC,@VMG
+       .leave
+       RT
+TICK   .enter
+       CI   R0,'B'*256
+       JNE  T1
+       LI   R0,PG_MB
+       CLR  R1
+       BL   @GOMOD
+       JMP  T9
+T1     CI   R0,'M'*256
+       JNE  T9
+       .callmod PG_MB,4
+       MOV  R0,@VMB
+       LI   R0,10
+       LI   R1,20
+       BL   @CADD
+       MOV  R0,@VAF
+       MOV  @CURCD,@VCD
+T9     .leave
+       RT
