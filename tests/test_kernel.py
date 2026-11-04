@@ -125,6 +125,29 @@ def files():
     c2 = c
     m, cpu, halt = sim9900.run(c2, keys='<C-t><WAIT 700>', frames=1000, setup=lambda m: setattr(m, 'dsrrom', bytearray(0x2000)))
     check('FAIL' in lines(m)[10] and '1' in lines(m)[10], 'no drive: the file check fails with a step and error (%r)' % lines(m)[10][38:60])
+    # a card at >1000 that lists DSK1 but declines it (a plain return, as a TIPI can for a
+    # device it is not set up for), ahead of the drive at >1100: the search must go on to
+    # the next name and card, as the console's DSRLNK does (it once stopped with an error).
+    # Found on real hardware by the Press session (a TIPI and a TI RS232 card hid PIO).
+    def decoy(m):
+        rom = bytearray(0x2000)
+        rom[0:4] = b'\xAA\x01\x00\x00'
+        rom[8:10] = (0x4010).to_bytes(2, 'big')
+        rom[0x10:0x12] = b'\x00\x00'; rom[0x12:0x14] = (0x4030).to_bytes(2, 'big'); rom[0x14:0x19] = b'\x04DSK1'
+        rom[0x30:0x32] = (0x045B).to_bytes(2, 'big')
+        st = {'on': False}
+        cw, rb = m.cru_write, m.rb
+        def cru_write(bit, v):
+            if bit == 0x800:
+                st['on'] = bool(v); return
+            cw(bit, v)
+        def rb2(addr):
+            if st['on'] and 0x4000 <= addr < 0x6000:
+                return rom[addr - 0x4000]
+            return rb(addr)
+        m.cru_write = cru_write; m.rb = rb2
+    m, cpu, halt = sim9900.run(c, keys='<C-t><WAIT 700>', frames=1000, setup=decoy)
+    check('PASS' in lines(m)[10], 'a card listing DSK1 but declining it, ahead of the drive: the search goes on, the file check passes')
 
 def browser():
     c = build('browser')
@@ -2366,6 +2389,29 @@ def diskboot():
                 shown2 = True
                 break
         check(shown2, '[%s] the same bootstrap reads the banks from a double-density disk and the application runs (after %d instructions)' % (label, mm.insns))
+    # the workbench itself as a disk-started program (no cartridge): its catalog lists the disk, and it assembles a source from the same disk
+    dw = tempfile.mkdtemp()
+    rw = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'workbench'), '--out', dw, '--disk', '--geometry', 'sssd',
+                         '--disk-files', os.path.join(ROOT, 'examples', 'hello', 'hello.a99')], capture_output=True, text=True)
+    check(rw.returncode == 0 and os.path.exists(dw + '/wbench.dsk'), 'the workbench builds as a disk-started program with a source and KERNEL/EQU on the same disk: %s' % [l for l in rw.stdout.split('\n') if 'bank files' in l][:1])
+    wimg = open(dw + '/wbench.dsk', 'rb').read()
+    def wbrun(keys, until, frames_chunks=150):
+        im = bytearray(wimg)
+        mw = sim9900.Machine(bytes(8192)); mw.tifdc = tifdc.TIFDC(image=im)
+        mw.presses, mw.toggles, end = sim9900.schedule(sim9900.parse_keys(keys))
+        cw = sim9900.CPU(mw)
+        cw.pc, cw.wp, cw.limi = ea.load(mw, im, 'WBENCH'), 0x83E0, 0
+        for chunk in range(frames_chunks):
+            for i in range(100000):
+                cw.step()
+            if until in sim9900.screen(mw):
+                break
+        return mw, sim9900.screen(mw)
+    mw, scr = wbrun('<WAIT 600>c<WAIT 150>', 'KERNEL/EQU')
+    check('HELLO/A99' in scr and 'KERNEL/EQU' in scr, 'started from the disk, the workbench shows its menu and its catalog (C) lists HELLO/A99 and KERNEL/EQU from the disk it started from')
+    mw, scr = wbrun('<WAIT 600>nHELLO/A99<ENTER><WAIT 20>a<WAIT 2500>', 'Assembled', 400)
+    check('Assembled:' in scr and '194' in scr, 'and it assembles HELLO/A99 from that disk on the simulated TI: %s' % ' '.join(l.strip() for l in scr.split('\n') if 'Assembled' in l))
+    check(bytes(mw.tifdc.image) == wimg, 'and reading the disk (the bootstrap, the catalog, two passes over two files) left the disk image exactly as it was (the controller model once overwrote a sector with a seek\'s target bytes)')
 
 def prun():
     """PRUN (kernel/files.a99): a disk-started program replaces itself with another.  Two tiny programs, ALPHA and BETA, are built for disk and put on one disk image; ALPHA is
@@ -2553,6 +2599,24 @@ def txm():
     got = [b for i, b in log[4:]]
     check(len(got) > 600 and got == [b for f, b in ev][:len(got)], 'in the simulator the kernel\'s player writes the compiled tune\'s bytes to the chip, exactly (%d bytes of %d)' % (len(got), len(ev)))
 
+def exprcheck():
+    """tools/exprcheck.py (from the Press session): xas99 evaluates expressions strictly left to right, so `X+8*16+14` is ((X+8)*16)+14.  The checker finds those; nothing in the kernel, lib/,
+    the examples or the test applications has one (tests/asm/probe1.a99 does, on purpose, to test the assembler); skbuild warns about one in an application's own sources."""
+    import exprcheck as ec, glob, tempfile, shutil
+    bad = list(ec.hazards(['       MOV  @STGEO+8*16+14,R1', '       LI   R0,2*COLS+2', '       MOV  @X+(8*16)+14,R1', "       TEXT 'A+B*C'", '* A+B*C', '       DATA 1-2/3']))
+    check([n for n, t in bad] == [1, 6], 'the checker reports X+8*16+14 and 1-2/3, and not 2*COLS+2, a parenthesised product, TEXT or a comment: lines %s' % [n for n, t in bad])
+    files = [f for pat in ('kernel/*.a99', 'lib/*.a99', 'examples/**/*.a99', 'tests/apps/**/*.a99') for f in glob.glob(os.path.join(ROOT, pat), recursive=True)]
+    found = [(os.path.relpath(f, ROOT), n) for f in files for n, t in ec.hazards(open(f, encoding='latin-1').read().split('\n'))]
+    check(not found, 'no expression hazard in the %d sources of kernel/, lib/, examples/ and tests/apps/: %s' % (len(files), found or 'none'))
+    probe = [n for n, t in ec.hazards(open(os.path.join(ROOT, 'tests', 'asm', 'probe1.a99'), encoding='latin-1').read().split('\n'))]
+    check(probe == [13], 'and tests/asm/probe1.a99 line 13 (DATA 2+3*4), which tests the assembler on purpose, is the only one in the tree: %s' % probe)
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'examples', 'hello'), d + '/app')
+    src = open(d + '/app/hello.a99', encoding='latin-1').read()
+    open(d + '/app/hello.a99', 'w', encoding='latin-1').write(src + '\n       LI   R0,APPRAM+8*16+14\n')
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
+    check('warning' in r.stderr and 'APPRAM+8*16+14' in r.stderr, 'skbuild warns about it in an application: %s' % [l for l in r.stderr.split('\n') if 'warning' in l][:1])
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2615,6 +2679,16 @@ def workbenchfull():
     check(rec and rec[0] == b'       COPY "KERNEL.EQU"' and len(rec) == 13, 'typed in the editor and saved to the disk as NEW1 (13 lines)')
     check(m.rw(0x2300 + 526) == 0 and m.rw(0x2300 + 524) == 50, 'CTRL A saved and assembled it on the TI: no errors, 50 bytes')
     check(ln[2].strip() == 'BUILT ON THE TI', 'R ran it, in SAMS pages, as a module: its screen says %r' % ln[2].strip())
+    # the error list on the screen: each error with its own message (found while writing the manual: the list read the code from a register DECW had changed)
+    import tempfile
+    bad = os.path.join(tempfile.mkdtemp(), 'bad.a99')
+    open(bad, 'w').write('       COPY "kernel.equ"\n       AORG >C000\n       DATA INIT,TICK,INIT,0\nINIT   LI   R0,2*COLS+2\n       FROB R1,R2\n'
+                         '       BL   @NOSUCH\n       JMP  FAR\nTICK   RT\nINIT   RT\n')
+    m2, img2 = asmharness.workbench_ui('<WAIT 10>nBAD/A99<ENTER><WAIT 10>a<WAIT 1500>', 4000, [bad])
+    rows = [l.strip() for l in sim9900.screen(m2).split('\n') if l.strip()]
+    want = ['9     label defined twice', '5     unknown operation', '6     undefined symbol', '7     jump out of range', '7     undefined symbol', '9     label changed between passes']
+    norm = [' '.join(r.split()) for r in rows]
+    check(all(' '.join(w.split()) in norm for w in want), 'the error list shows each error with its own message and line: %s' % [r for r in norm if r[:1].isdigit()][:6])
 
 def modes():
     """Every display mode: the modes demo application (examples/modes) run in the
@@ -2700,7 +2774,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -184,6 +184,7 @@ RS3    C    R9,@NERR
        AI   R1,ERRTAB
        MOV  *R1+,R6            the line
        MOV  *R1,R7             depth << 8 | code
+       MOV  R7,@TMPC           (DECW and PUTS change R6 and R7)
        MOV  R9,R0
        AI   R0,10
        MPY  @C80,R0            R1 = the row's first cell
@@ -195,7 +196,7 @@ RS3    C    R9,@NERR
        BL   @DECW
        MOV  @TMPW,R0
        AI   R0,8
-       MOV  R7,R2
+       MOV  @TMPC,R2
        ANDI R2,>00FF
        CI   R2,13
        JLE  RS4
@@ -204,7 +205,7 @@ RS4    SLA  R2,1
        MOV  @MSGTAB-2(R2),R1
        LI   R2,ANORM
        BL   @PUTS
-       MOV  R7,R2
+       MOV  @TMPC,R2
        SRL  R2,8
        JEQ  RS5
        MOV  @TMPW,R0           (in a COPYed file)
@@ -217,6 +218,7 @@ RS5    INC  R9
 RS9    .leave
        RT
 TMPW   EQU  APPRAM+48
+TMPC   EQU  APPRAM+50
 C80    DATA 80
 
 *----------------------------------------------------------------------

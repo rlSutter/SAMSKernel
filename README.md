@@ -46,7 +46,9 @@ The full comparison is in [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md)
 | [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md) ([PDF](docs/PROGRAMMERS-GUIDE.pdf)) | **start here**: write an application. The PDF is built by `tools/guide_pdf.py` (pandoc, wkhtmltopdf, pypdf, reportlab) |
 | [docs/ROUTINES.md](docs/ROUTINES.md) | every kernel routine: inputs, outputs, registers used (generated from the source) |
 | [docs/VIDEO-MODES.md](docs/VIDEO-MODES.md) | every F18A display mode `VMODE` sets, with pictures: Text 80/40, Graphics I/II, Multicolor, enhanced colour, sprites, tile layer 2, the bitmap layer |
-| [docs/WORKBENCH.md](docs/WORKBENCH.md) | the workbench: an editor, a native assembler and a launcher that run on the TI itself |
+| [docs/WORKBENCH-MANUAL.md](docs/WORKBENCH-MANUAL.md) ([PDF](docs/WORKBENCH-MANUAL.pdf)) | **the workbench user manual**: starting it, the editor's keys, the assembler's syntax and errors, tutorials, troubleshooting |
+| [docs/WORKBENCH.md](docs/WORKBENCH.md) | the workbench: an editor, a native assembler and a launcher that run on the TI itself: how it is built and what it costs |
+| [docs/RATIONALE.md](docs/RATIONALE.md) ([PDF](docs/RATIONALE.pdf)) | **why the kernel is the way it is**: the problem, the lineage, the design decisions and their alternatives, the use cases |
 | [docs/MUSIC.md](docs/MUSIC.md) | music and sound: the player, the compiler (MIDI or a text score to songs), the song format |
 | [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md) | **what has and has not been run on real hardware**, and how to try each thing on a real TI (or js99er): the list to work through next |
 | [docs/DEVELOPING-ON-A-TI.md](docs/DEVELOPING-ON-A-TI.md) | working with a real TI: the first-run ladder, refusal messages, debugging, editing on the TI, and what is not possible yet |
@@ -99,7 +101,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.27.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.28.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

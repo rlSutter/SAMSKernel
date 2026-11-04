@@ -17,7 +17,7 @@ change when it must change. Application authors need only the [programmer's guid
 | `macros.a99` | (included everywhere) | `.enter .leave .push .pop .intsvc .callmod` |
 | `build/.../appcfg.a99`, `appname.a99`, `appmsg.a99` | (generated) | the application's numbers, name, refusal screens and bank table |
 
-The kernel is about 5.0K of its 8K bank: there is room for roughly 3.2K more services before the bank is full.
+The kernel is 6,898 bytes of the 7,680 it may use (the page-pool bitmap takes the end of its 8K bank): about 780 bytes of room by default, and the `"omit"` options give back up to about 3.3K.
 
 ## 2. The cartridge image
 

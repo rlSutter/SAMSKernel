@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """skbuild.py - build a SAMS Kernel application into a cartridge image.
 
-    python3 tools/skbuild.py APPDIR [--out DIR] [--disk [--geometry sssd|dsdd]]
+    python3 tools/skbuild.py APPDIR [--out DIR] [--disk [--geometry sssd|dsdd] [--disk-files FILE...]]
 
 APPDIR holds app.json and the application's sources.  The result is
 OUT/APPNAME8.bin (default OUT: build/APPDIR-name): a FinalGROM 99 "8"
@@ -375,6 +375,21 @@ def export_public(ksrc, bdir, equ, extra=()):
     return total, len(out) // 2
 
 
+def warn_hazards(app, appdir):
+    """A warning (not an error) for an expression xas99 evaluates left to right where arithmetic would not (tools/exprcheck.py: `X+8*16` is (X+8)*16)."""
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import exprcheck
+    srcs = [m['source'] for m in app['modules']]
+    for key in ('common', 'appram_code'):
+        if key in app:
+            srcs.append(app[key]['source'])
+    for src in srcs:
+        path = os.path.join(appdir, src)
+        if os.path.exists(path):
+            for n, text in exprcheck.hazards(open(path, encoding='latin-1').read().split('\n')):
+                print('skbuild: warning: %s:%d: xas99 evaluates this left to right, without precedence: %s' % (src, n, text), file=sys.stderr)
+
+
 def build_appram_code(app, appdir, bdir, args):
     """app.json "appram_code": code the program keeps in its own RAM, at the start of application RAM (>2300), copied there from a page at start-up.
     It is assembled against the kernel it will run with, but the kernel's application RAM address depends on the code's size, so the build runs once
@@ -439,7 +454,13 @@ def write_disk(app, bdir, images, kincs, ksrc, args):
         progs.append(('%s/B%02d' % (name, i), images[i].ljust(BANK, b'\0')))
     geo = args[args.index('--geometry') + 1] if '--geometry' in args else 'dsdd'
     path = os.path.join(bdir, name.lower() + '.dsk')
-    skdisk.make_disk(path, [], None, name, geo, programs=progs)
+    files = []
+    if '--disk-files' in args:      # source files for the disk too (and this build's KERNEL/EQU, which a program assembled on the TI needs)
+        for a in args[args.index('--disk-files') + 1:]:
+            if a.startswith('--'):
+                break
+            files.append(a)
+    skdisk.make_disk(path, files, os.path.join(bdir, 'kernel.equ') if files else None, name, geo, programs=progs)
     print('wrote %s: %s disk, the bootstrap %s (%d bytes at >C000) and %d bank files %s/B01-B%02d' %
           (path, geo, name, len(boot), len(progs) - 1, name, len(images) - 1))
 
@@ -460,6 +481,7 @@ def main():
     run(sys.executable, os.path.join(ROOT, 'tools', 'font.py'))
     run(sys.executable, os.path.join(ROOT, 'tools', 'keytab.py'))
     prepare_data(app, bdir)
+    warn_hazards(app, appdir)
     if 'appram_code' in app:
         build_appram_code(app, appdir, bdir, args)
     pgfree = assign_pages(app)

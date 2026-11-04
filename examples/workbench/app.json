@@ -15,5 +15,6 @@
       "source": "ed.a99"
     }
   ],
-  "boot": "wb"
+  "boot": "wb",
+  "disk_name": "WBENCH"
 }

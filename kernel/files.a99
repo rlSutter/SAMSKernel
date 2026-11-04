@@ -374,6 +374,7 @@ DLN1   AI   R12,>0100          the next card's CRU base
 DLGO2  MOV  *R2,R2             the next entry
        JEQ  DLNEXT             the list's end?
        MOV  R2,@>83D2          (kept, for the DSR)
+       MOV  R2,R8              (and here: a DSR may change >83D2)
        INCT R2
        MOV  *R2+,R9            its routine's address
        MOVB *R2+,R6            the name's length
@@ -390,12 +391,13 @@ DLNM1  CB   *R6+,*R2+
 DLCALL MOV  R9,@FDENT          the device's routine
        LWPI GPLWS              the GPL workspace
        BL   @DLGPL             call it
-       JMP  DLER0              (no return: an error)
+       JMP  DLER0              (a plain return: not its device)
        LWPI WS                 a return past the JMP: found and run
        SETO R5                 R5: it ran
        JMP  DLRD
-DLER0  LWPI WS
-       JMP  DLERR
+DLER0  LWPI WS                 not this DSR's device after all (it returned
+       MOV  R8,R2              without skipping): on to the next name, then the
+       JMP  DLGO2              next card, as the console's DSRLNK does
 DLGO1  MOV  @>83D2,R2          the next entry
        JMP  DLGO2
 DLERR  CLR  R5                 R5: not run

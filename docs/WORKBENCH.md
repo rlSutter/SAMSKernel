@@ -1,5 +1,7 @@
 # SAMS Kernel: the workbench
 
+**This is the technical guide** (how the editor and assembler are built, what they cost, how they are checked). For using the workbench, with the keys, the screens, tutorials and troubleshooting, read [WORKBENCH-MANUAL.md](WORKBENCH-MANUAL.md).
+
 The workbench is a program for the TI itself: an **editor**, an **assembler** and a **launcher** in one application, built on the kernel. With it you write a SAMS Kernel program, assemble it and run it
 on the TI, with no PC in the loop once the workbench is installed.
 

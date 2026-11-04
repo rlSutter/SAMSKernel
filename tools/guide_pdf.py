@@ -48,6 +48,8 @@ DOCS = {
     'workbench': ('WORKBENCH', "# SAMS Kernel: the workbench", "The workbench: editing, assembling and running on the TI", "SAMS Kernel workbench"),
     'checklist': ('HARDWARE-CHECKLIST', "# SAMS Kernel: what has been run on real hardware, and how to try the rest", "What has run on real hardware, and how to try the rest", "SAMS Kernel hardware checklist"),
     'ti': ('DEVELOPING-ON-A-TI', "# SAMS Kernel: developing with a real TI", "Developing with a real TI: running, debugging, editing", "SAMS Kernel on a real TI"),
+    'manual': ('WORKBENCH-MANUAL', "# The SAMS Kernel Workbench: user manual", "The workbench user manual: editing, assembling and running on the TI", "SAMS Kernel workbench manual"),
+    'rationale': ('RATIONALE', "# Why the SAMS Kernel: rationale, architecture and use cases", "Why the kernel exists: rationale, architecture and use cases", "SAMS Kernel rationale"),
     'video': ('VIDEO-MODES', "# SAMS Kernel: the F18A's display modes", "The F18A's display modes: every mode and option, with pictures", "SAMS Kernel video modes"),
 }
 
@@ -105,7 +107,7 @@ def build(key):
     print('wrote %s: %d pages, %d headings not found for bookmarks' % (out, len(src.pages), miss))
 
 def main():
-    which = sys.argv[1:] or ['guide', 'video', 'music', 'workbench', 'checklist', 'ti']
+    which = sys.argv[1:] or ['guide', 'video', 'music', 'workbench', 'manual', 'rationale', 'checklist', 'ti']
     for k in which:
         build(k)
 

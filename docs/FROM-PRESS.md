@@ -76,5 +76,9 @@ None of these is hard, but together they are a milestone's worth of work and a f
 - **`LDSCHM` restored slot B as a consecutive pair** from the first page of `CURPB` (one packed word; since 1.4.0 the pager keeps `CURBE`/`CURBF`, a page each, and `GETPB`/`SETPB` save and restore both). Press maps `>F000` to unrelated pages (the header/footer page, the journal), so a
   colour-scheme change made while `>F000` held a non-neighbouring page would remap it wrongly. I did not check whether Press can reach that state; the kernel's
   version restores each window separately and cannot.
+- **Press adopted these on 4 November 2026** (its note of that date; each with a test there): the SAMS register's page in the high byte (`AMSINI`, `MAPPG`) and a simulator that models it as the kernel's does; start-up powering every card in CRU order
+  but not a TIPI at `>1000`/`>1200`; the PAB's error bits cleared before every DSR call; catalogs opened with record length 0 (the HFDC refuses an explicit 38); `LDSCHM` restoring each slot B window's register; `>83FC`'s high byte set to 1. **One
+  finding went the other way:** the `DSRLNK` decline fix (a DSR that returns plainly is not its device: go on to the next name and card) came *from* Press, found on a real TI, and is in the kernel from 1.28.0
+  (`docs/HARDWARE.md`). Press also found, and the kernel now checks for, an expression hazard: xas99 evaluates `X+8*16+14` left to right (`tools/exprcheck.py`, group `exprcheck`).
 - **The console's frame counter advances by `>83FC`'s high byte.** Seen by running TI's real interrupt routine in the simulator. The console normally leaves it
   non-zero; the kernel sets it anyway.

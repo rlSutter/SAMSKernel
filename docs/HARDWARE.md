@@ -204,6 +204,16 @@ The simulated CPU gained the `X` instruction for this (the CorComp ROM uses it) 
 The kernel finds a device by name in the DSR header of every card (CRU `>1000` to `>1F00`), runs every card's power-up routine once, **except a TIPI's** (the VRAM buffers of a TI controller are made by its power-up, at the top of VRAM, below `>3FFF`; a TIPI at `>1000` or `>1200` has a power-up that only pulses the Pi's reset line, which the console did at start-up, so the kernel skips it: the real TIPI DSR, read in js99er's copy, shows this), and calls the device's routine through the PAB as the console's DSRLNK would.
 What I rely on about a TIPI: it has the devices `PI` (`PI.dir.name` for files, `PI.CLOCK`, `PI.PIO`) and may map `DSK1.` to a directory; `PI.CLOCK` answers one record `w,mm/dd/yy,HH:MM:SS` (from the TIPI wiki, as noted in Press's design); `PI.PIO` emulates an Epson ESC/P printer and makes a PDF. All of that is Press's knowledge, from the TIPI wiki: Press was designed to print through `PI.PIO` and to read `PI.CLOCK`, and its load and save speed was measured on a TIPI; I do not know whether its printing and clock reading have been run on a real TIPI. **What I have not seen:** a real TIPI's DSR under this kernel since 1.6.0 (the simulator has a *model* of a TIPI: a card at `>1000` with its own power-up, `PI.` files and a clock), how many files it can hold open, and how it answers a catalog request.
 
+A device that a card lists is not a promise that it will handle it. A DSR says "handled" by returning to R11+2 and "not my device" by returning to R11 (a plain `B *R11`), and the console's own DSRLNK
+treats a plain return as "keep looking": the next name in the card's list, then the next card. The kernel's `DSRLNK` once took a plain return for an error and stopped, so a card at a lower CRU address that listed `PIO` (or
+any device) and declined it hid the real one. **Found on real hardware by the Press session**: a TI with a TIPI and a TI RS232 card at CRU `>1300` with a dot-matrix printer on its PIO port could not print to `PIO`
+(js99er never showed it, because it prints through its own emulation). A TIPI can list devices it is not set up for. Fixed in 1.28.0 (group `files` has a decoy card that lists `DSK1` and declines it).
+
+### The machine the real-hardware facts come from
+
+The owner's TI: console, FinalGROM 99, F18A, SAMS, a TIPI, and a TI RS232 card at CRU `>1300` with a printer on its PIO port. It is tested mainly in js99er (Generic Disk controller, SAMS up to 16M) and on this machine. Press 2.0 also runs
+in Classic99 with its built-in PICO9918 (a tester's report, 26 October 2026). **The SAMS Kernel itself, as packaged, has not been run on this machine**: see `HARDWARE-CHECKLIST.md`.
+
 ## Joysticks
 
 The TI reads both joysticks through the keyboard matrix: with the column select (CRU outputs 18-20) at 6 the row lines (inputs 3-10) show joystick 1, at 7 joystick 2: row 0 fire, 1 left, 2 right, 3 down,

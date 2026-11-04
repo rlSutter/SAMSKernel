@@ -77,7 +77,30 @@ DB1    MOV  @DKTBP,R1
        LI   R2,>E000
        BL   @DKBANK
        JMP  DB1
-DB9    .leave
+DB9    BL   @DKHOME
+       .leave
+       RT
+
+* DKHOME - read the disk's catalog header, which is on track 0, so that the
+* last thing the drive did leaves its head at track 0.  A precaution, not a
+* cure for anything seen: the kernel is about to wipe VRAM, where the disk
+* controller's DSR keeps where it thinks each head is, and to power the cards
+* up again, which starts that record again at track 0; leaving the head there
+* makes the DSR's idea right.  (The simulator's stuck assembly that led here
+* was a bug in its controller model, tools/fdc.py; whether a real DSR needs
+* this is not known.)  A device without a catalog fails to open and nothing
+* is done.
+DKHOME .enter
+       LI   R2,DKPFX
+       LI   R0,FIN+FINTL
+       CLR  R1
+       BL   @FOPEN
+       MOV  R0,R0
+       JNE  DKH9
+       LI   R1,>2100           the record goes here (HFDC: up to 146 bytes)
+       BL   @FREAD
+       BL   @FCLOSE
+DKH9   .leave
        RT
 
 * DKBANK - read bank R1 (1-99) from its disk file into the 8K at R2.

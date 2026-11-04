@@ -58,6 +58,10 @@ class WD177x:
 
     def set_data(self, b):
         self.data = b
+        if (self.command & 0xF0) not in (0xA0, 0xB0):
+            return                  # only a write-sector command takes bytes for the disk: a seek's target, written here too,
+                                    # used to pile up and, at 256 of them, overwrite a sector of the image (found with the
+                                    # disk-started workbench, which reads enough to reach 256 before its assembly is done)
         self.write_buffer.append(b)
         if len(self.write_buffer) == 256:
             self.write_sector_out()
