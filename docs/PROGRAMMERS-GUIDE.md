@@ -711,7 +711,7 @@ the kernel's own pages, which are always mapped, and reached with a plain `BL @N
 
 `resident.a99` is an ordinary source with no `AORG` and no `END`; it may `COPY "linein.a99"` to carry the line editor
 once for the whole program. The listed labels join `kernel.equ`; nothing else in it is visible to the modules. There is
-room for about 840 bytes (the kernel is 6,842 of the 7,680 it may be; the line editor, about 1,050, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
+room for about 780 bytes (the kernel is 6,898 of the 7,680 it may be; the line editor, about 1,090, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
 a kernel that runs into the pool bitmap. **[PC] only.** The design, the options it was chosen over, how to write the
 routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/resident` is a worked two-module example.
 
@@ -1009,10 +1009,10 @@ there is no exit hook.
 - **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
-  bytes), `"files"` (the DSR file code: 1,962 bytes) and `"pool"` (the page pool: 172 bytes, and its bitmap's 512, so the kernel may be 8,192
+  bytes), `"files"` (the DSR file code: 2,026 bytes) and `"pool"` (the page pool: 220 bytes, and its bitmap's 512, so the kernel may be 8,192
   bytes; not together with `pool_max_pages`). The room goes to resident code; a module that uses a routine that is left out is refused by
-  name. All three: a 4,038-byte kernel, 4,154 bytes free. Two more cut inside `VMODE`: `"graphics"` (Graphics I and II and Multicolor: 308
-  bytes) and `"enhanced"` (enhanced colour and sprites: 164 bytes), for a program that is all text; all five together make a 3,622-byte
+  name. All three: a 4,146-byte kernel, 4,046 bytes free. Two more cut inside `VMODE`: `"graphics"` (Graphics I and II and Multicolor: 308
+  bytes) and `"enhanced"` (enhanced colour and sprites: 164 bytes), for a program that is all text; all five together make a 3,674-byte
   kernel. Asking such a kernel for a mode it lacks, with a mode number worked out at run time, is undefined. See `docs/RESIDENT.md`.
 - **`pool_max_pages`** (optional, a multiple of 64 from 64 to 4096; default 4096) is the most pages your program's pool will ever
   manage. The pool's bitmap has a bit for each: pages/8 bytes (512 for the default), kept at the top of the kernel's pages, so a

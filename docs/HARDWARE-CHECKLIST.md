@@ -65,6 +65,7 @@ Build with `python3 tools/skbuild.py examples/hello --disk --geometry sssd` and 
 | D3 | a program with `"prun": true` (`tests/apps/prun_a`, `prun_b` on one disk): run ALPHA, press G | BETA's screen | `PRUN` and the handoff block |
 | D4 | D3 with the programs on `DSK2.` and ALPHA started from `DSK2.` | the same | the device probing and the handoff's device |
 | D5 | note the time from the return key to the application's screen | a number | how long a disk start takes on a floppy (not known) |
+| D6 | the workbench from disk: `images/workbench-diskstart-360k.dsk` (360K: a double-density controller, a CF7+ or a TIPI), option 5, `DSK1.WBENCH`; then `C`, pick `HELLO/A99`, `A`, `R` | the menu, the catalog, `Assembled: 194 bytes at >C000`, the program | the disk-started workbench reads and assembles from its own disk |
 
 ## How to report
 

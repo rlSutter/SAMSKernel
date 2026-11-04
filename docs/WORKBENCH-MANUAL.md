@@ -46,7 +46,7 @@ source is the same either way, and the guide's part 0 compares the routes.
 | a **disk** in DSK1 | a floppy, a CF7+ or a TIPI: it holds `KERNEL/EQU`, your sources and anything you save |
 
 All of these are in the distribution's `images/` directory: `workbench8.bin` (the cartridge), `workbench.dsk` (90K single density, for TI's own controller), `workbench-360k.dsk` (360K double density, for the CorComp, Myarc
-and HFDC cards, a CF7+ or a TIPI: everything in one place) and `workbench-diskstart-360k.dsk` (the workbench as a disk-started program). A PC is needed once, to put these on your drive or card; how they get there
+and HFDC cards, a CF7+ or a TIPI: everything in one place) and `workbench-diskstart-360k.dsk` (the workbench as a disk-started program, with its sources: 360K, so a double-density controller, a CF7+ or a TIPI; TI's own controller needs a single-density build, part 3). A PC is needed once, to put these on your drive or card; how they get there
 depends on your hardware, and none of the ways has been tried here.
 
 **`KERNEL/EQU` must come from the same build as the workbench.** It holds the addresses of the kernel's routines and equates in that build, and a program assembled against another build's addresses will not run. Every disk
@@ -306,7 +306,7 @@ Operand forms: `Rn` (a register), `*Rn` (indirect), `*Rn+` (indirect, then add),
 | `LIST UNL TITL IDT PAGE` | accepted and ignored |
 | `.enter .leave .push R .pop R .intsvc .callmod page,entry` | the kernel's macros, **built in**; `COPY "macros.a99"` is accepted and ignored |
 
-Not supported: your own macros (`.defm`), `DEF`, `REF`, relocatable output, listings.
+Not supported: your own macros (`.defm`), `DEF`, `REF`, relocatable output, listings. **The `.mape`, `.mapf` and `.mapd` macros of `macros.a99` (1.20 and 1.22) are not built in**: in a source for the workbench call the routines instead (`LI R0,page` / `BL @MAPE`).
 
 Quote a string with single quotes; a quote inside is doubled (`'it''s'`). `STRI ''` (empty) is not accepted.
 

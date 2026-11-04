@@ -21,7 +21,7 @@ Each row is a fact about the machine and what it costs a program that ignores it
 | The machine | What it costs | What the kernel does |
 | --- | --- | --- |
 | The CPU addresses **64K**; the only fast RAM is **256 bytes** of scratchpad; the 32K expansion RAM is 8 bits wide with wait states | A program that grows past 32K must manage memory by hand; scratchpad is scarce and shared with the console | Puts the kernel and the program in **SAMS** pages, keeps **windows** fixed or mapped on request, gives the program about 7K of data RAM (`APPRAM`) and a software stack in RAM |
-| A **SAMS** card holds up to 16 MB in 4K pages seen through the CPU's windows | Every page switch is an I/O write that must not be interrupted; a window remapped under running code crashes it | `PAGEB`/`PAGEC`, `MAPE`/`MAPF`/`MAPD`, a **page pool** (`PALLOC`/`PRELS`), `MODCALL`/`GOMOD`, and the rule that code never remaps the window it runs in |
+| A **SAMS** card holds up to 16 MB in 4K pages seen through the CPU's windows | Every page switch is an I/O write that must not be interrupted; a window remapped under running code crashes it | `PAGEB`, `MAPE`/`MAPF`/`MAPD`, a **page pool** (`PALLOC`/`PRELS`), `MODCALL`/`GOMOD`, and the rule that code never remaps the window it runs in |
 | A cartridge ROM is **8K** at a time, switched by bank | Code that is switched out from under itself, and no room for a real program | The **loader copies every bank into SAMS at start-up**, once; after that nothing is banked |
 | The VDP is behind **two ports**; an **interrupt** between the two bytes of an address write corrupts the address | Hard-to-find screen corruption | Interrupts are masked everywhere except inside the frame wait (`VSYNC`); the main loop is built round it |
 | The stock VDP is 40 columns, 16 colours, one colour per 8 cells | A text program looks like 1981 | Requires an **F18A** (or PICO9918): **80 x 30 text, a colour per cell**, every F18A mode through `VMODE`, a colour *scheme* of named roles |
@@ -116,7 +116,7 @@ window `>D000`, a float-package interface (`FPCALL`), common code at `>D000`, co
 | slot C | `>C000-DFFF` | **the running module**: 8K, or 4K in the single-page form; remapped only by `PAGEC`, called only from the main loop and `MODCALL` |
 | slot B | `>E000-FFFF` | two 4K **windows**, E and F, which a program points at any page with `MAPE`/`MAPF` |
 | SAMS | pages `>10` upward | the data pages, the module pages, the **page pool** |
-| VRAM | 16K (64K on an F18A) | the screen, the pattern table, the colours, the file service's buffers at the top |
+| VRAM | 16K, as the console sees it | the screen, the pattern table, the colours, the file service's buffers at `>3600-37D7`, the disk controller's above them |
 
 ### The main loop in one paragraph
 

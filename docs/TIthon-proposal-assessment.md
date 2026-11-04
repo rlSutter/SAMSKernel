@@ -162,3 +162,5 @@ TIthon's defaults, with my answers:
 - There is no TIthon code to check: I read the proposal and, afterwards, the specification. The cost figures are TIthon's estimates except where I say otherwise.
 - That FAC and ARG are all the console's float package touches: that needs the test.
 - Any timing claim (the 5x target, the 90-instruction call): none has been measured against a real machine.
+
+*Release 1.28.0 (4 November 2026): nothing in this table changed; see `CHANGES.md` for what was added since (the workbench manual, the rationale document, Press's `DSRLNK` fix and expression checker).*

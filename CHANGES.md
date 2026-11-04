@@ -1,5 +1,15 @@
 # Changes
 
+## 1.28.1 (4 November 2026)
+
+An audit of 1.28.0 for errors. No code changed; the tests are as in 1.28.0 (all 56 groups passed).
+
+- **Stale figures corrected**: `docs/PROGRAMMERS-GUIDE.md` and `docs/RESIDENT.md` gave the kernel as 6,842 bytes with about 840 bytes of room (it is 6,898 and about 780 since Press's `DSRLNK` fix and the features of 1.23-1.25), `LINEIN` as about 930 or 1,050 bytes (it is 1,088 alone; 1,132 as the resident test's code with `RSUM` and `RCALL`), and the kernel with music, files and the pool left out as 4,038 bytes (it is 4,146; all five `"omit"` words: 3,674, not 3,622); what `"files"` and `"pool"` save was given as 1,962 and 172 bytes (they save 2,026 and 220 now; `"music"` 506, `"graphics"` 308 and `"enhanced"` 164 are as stated). Each figure was measured by building `examples/hello` with each word. `docs/WORKBENCH.md` said `KERNEL/EQU` has 274 symbols (it has 341). `docs/ARCHITECTURE.md`'s new line said the `"omit"` options give back about 3.3K (3.2K).
+- **`docs/RATIONALE.md`**: the memory table said VRAM is 64K on an F18A, which nothing in this project shows (it now says 16K as the console sees it, with the buffers' places); it listed `PAGEC` among the routines a program calls (it is internal; `PAGEB` is public).
+- **`docs/WORKBENCH-MANUAL.md`**: says that the native assembler does not have the `.mape`, `.mapf` and `.mapd` macros (it builds in `.enter .leave .push .pop .intsvc .callmod` only).
+- `docs/HARDWARE-CHECKLIST.md` gains step D6, the disk-started workbench; the manual says that its 360K disk needs a double-density controller, a CF7+ or a TIPI. The skill's notes now point to the manual, the rationale document, the disk build options and the expression checker, and give the corrected `"omit"` figures.
+- **Release contents**: the TXA and TIthon assessments in `docs/` now match the copies delivered beside the zip (1.28.0's zip had them without their closing note).
+
 ## 1.28.0 (3 November 2026; 4 November: Press's update taken in)
 
 - **From the Press session's note of 4 November 2026** (it numbered its fix 1.27.1; here it is part of 1.28.0, applied by hand because its bundle was not among the uploads): **`DSRLNK` goes on past a card that lists a device and declines it.** A DSR returns to R11 for "not my device" and to R11+2 for "handled"; the kernel took a plain return for an error and ended the search, so a card at a lower CRU address that listed `PIO` hid the real one. Found on real hardware: a TIPI and a TI RS232 card at CRU `>1300` with a printer on PIO. The device-list entry is kept in R8 across the call and a plain return resumes at the next entry (the list's end moves to the next card): three instructions, kernel 6,894 to **6,898** bytes. Test in group `files`: a decoy card at `>1000` that lists `DSK1` and declines, ahead of the simulator's drive; it fails without the fix and passes with it.

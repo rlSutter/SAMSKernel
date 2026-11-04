@@ -130,7 +130,7 @@ Instructions and `DATA` are placed on even addresses (a padding byte is added), 
 
 | | |
 | --- | --- |
-| symbol names | up to 12 characters, upper and lower case the same; at most about 580 symbols (the kernel's 274 included) |
+| symbol names | up to 12 characters, upper and lower case the same; at most about 580 symbols (the 341 of `KERNEL/EQU` included) |
 | image | up to 4,096 bytes, in one run from the first `AORG` (gaps between `AORG`s are zero-filled) |
 | `EQU` | its value must be defined already (xas99 has the same rule) |
 | strings | `TEXT` and `STRI` take one quoted string, `''` for a quote; no empty `STRI ''` |
@@ -176,7 +176,7 @@ INIT   ...
 at `>E000`; the image is built in a 4K buffer in slot A. A `COPY` closes the file, assembles the included file, and reopens the first file, reading on to where it was (it could keep both open now that the file service has handles; it still closes and reopens, which is simpler and was tested first). Pass 2 does not read KERNEL/EQU again: its symbols stay in the table.
 The editor (`ed.a99`, 2.7K) keeps lines in SAMS pages taken from the page pool as the file grows (51 lines of 80 bytes a page, up to 40 pages) in the order of a table of slot numbers on a page of its own: PROGRAMMERS-GUIDE.md appendix C explains it, and the source is commented for it. The shell is `wb.a99` (2.2K).
 
-Instructions executed, in the simulator, including reading the disk through TI's disk controller ROM and the 274-line KERNEL/EQU:
+Instructions executed, in the simulator, including reading the disk through TI's disk controller ROM and the 341-line KERNEL/EQU:
 
 | Source | Lines | Image | Instructions |
 | --- | --- | --- | --- |

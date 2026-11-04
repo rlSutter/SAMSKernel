@@ -91,3 +91,5 @@ enhanced colour (`app.json` `"omit"`).
 - TXA's "23 to about 10 instructions" figure I could confirm only as plausible (see 2.3), not measure.
 - Nothing in either side's list has run on a real TI, F18A or SAMS card; TXA says the same of Part 1.
 - 1.2's register values are as TXA reports for js99er; I have not run them.
+
+*Release 1.28.0 (4 November 2026): nothing in this table changed; see `CHANGES.md` for what was added since (the workbench manual, the rationale document, Press's `DSRLNK` fix and expression checker).*
