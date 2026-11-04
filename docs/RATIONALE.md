@@ -197,7 +197,7 @@ lines with 7K of RAM. The same pattern (a table that says where things are, a wi
 
 **An interpreter.** An interpreter spends its life in a dispatch loop. Put the loop in application RAM (`"appram_code"`), where it is always mapped and never swapped; keep the program it interprets in pages; call the float package through `FPCALL`
 (which runs a console ROM routine in the GPL workspace and reads its status); let the pool hand out heap pages. The cycle model (`tools/cycles.py`) counts a loop's cost in real clock cycles, with the wait states of expansion RAM, so a design that looks fast in
-instruction counts can be seen to be twice as slow in memory that has wait states (the same `DEC`/`JNE` loop: 0.437 s in the scratchpad and 0.786 s in expansion RAM).
+instruction counts can be seen to be slower in memory that has wait states (the same `DEC`/`JNE` loop counting 65,535: 0.437 s in the scratchpad, 0.612 s with the code in expansion RAM, 0.786 s with the workspace there too).
 
 **A game with music.** Compile the tunes at build time (`.txm` is the default notation; MML and MIDI also work) into pages; `MUPLAY` starts one and the frame loop steps it. The player writes the same bytes to the chip that the compiler's model says it should, frame by frame, and a test
 compares them.

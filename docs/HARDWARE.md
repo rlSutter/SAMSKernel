@@ -214,6 +214,25 @@ any device) and declined it hid the real one. **Found on real hardware by the Pr
 The owner's TI: console, FinalGROM 99, F18A, SAMS, a TIPI, and a TI RS232 card at CRU `>1300` with a printer on its PIO port. It is tested mainly in js99er (Generic Disk controller, SAMS up to 16M) and on this machine. Press 2.0 also runs
 in Classic99 with its built-in PICO9918 (a tester's report, 26 October 2026). **The SAMS Kernel itself, as packaged, has not been run on this machine**: see `HARDWARE-CHECKLIST.md`.
 
+## From TI's own technical documents (added 4 November 2026)
+
+Facts taken from three TI documents the owner supplied: *TI Home Computer Technical Data* (1982), the *TI-99/4A Console and Peripheral Expansion System Technical Data* (1983) and the *Functional Specification for the 99/4 Disk Peripheral* (version 3.0, 28 March 1983). A fact here is TI's; whether this project's code agrees was checked where it says so.
+
+- **Wait states.** The console reaches everything but its own ROM (`>0000-1FFF`) and the 256-byte scratchpad through an 8-bit multiplexer: an external 16-bit read is two 8-bit cycles, and the CPU samples the data in clock cycle 6 where an access without wait states takes 2, so **4 wait cycles per access**
+  (a 16-bit write holds `MBE` for 1.8 microseconds). `tools/cycles.py` charged 8 until 1.29.0; it is 4 now.
+- **Disallowed instructions.** `LREX`, `CKOF`, `CKON`, `RSET` and `IDLE` must not be executed: `CRUCLK` is decoded without the top three address bits, so the logic behind it takes them for CRU operations. Nothing in the kernel, `lib/` or the examples executes them (the assembler's probe source only assembles them).
+- **Read before write.** The TMS9900 reads the destination before writing it, byte or word, and several memory-mapped devices have separate read and write addresses for that reason (VDP read data `>8800`, write data `>8C00`; GROM read `>9800`, write `>9C00`).
+  The devices answer anywhere in their 1K block, and the scratchpad repeats at `>8000`, `>8100`, `>8200` and `>8300`; software uses `>8300`.
+- **Memory map.** `>0000-1FFF` console ROM; `>2000-3FFF` expansion; `>4000-5FFF` peripheral DSR ROMs; `>6000-7FFF` the cartridge ("command module"); `>8000-9FFF` scratchpad, sound `>8400`, VDP `>8800/8C00`, speech `>9000/9400`, GROM `>9800/9C00`; `>A000-FFFF` expansion.
+- **CRU.** `>0000-07FE` internal to the console, `>0800-0FFE` reserved, `>1000-1FFE` peripherals, 128 bits (a `>100` step) each. TI's assignments: `>1000` hard disk, **`>1100` disk controller**, `>1200` modems, **`>1300` RS232 (I)**, `>1500` RS232 (II), `>1800` thermal printer, `>1B00` debugger, `>1C00` VCR, `>1D00` IEEE 488, `>1F00` P-code
+  (`>1E00`, which SAMS uses, is marked reserved). The console polls from `>1000` in steps of `>100` to `>1F00` and runs each card's power-up routine if its DSR header asks for one (the kernel's `DSRPWR` does the same). A card's base bit pages its DSR ROM in at `>4000`, and it must stay silent until that bit is set.
+- **Interrupts.** One level reaches the CPU from the 9901 (level 1: the VDP's vertical sync on `INT2`, the 9901 timer, the I/O bus); `LOAD` is level 0 and `RESET` the highest.
+- **Console power-up** (TI's Q&A): the console clears scratchpad, enables the keyboard and the VDP and external interrupts, then searches DSRs and GROMs for power-up headers and runs them, then builds the menu from the cartridge programs it finds. So a program started from the console's menu, an Editor/Assembler option 5 program among them, starts with every card already powered up.
+- **The disk's VRAM buffers.** The disk peripheral takes 534 bytes of overhead and 518 bytes for each file that can be open: three files (the default) are 534 + 3 x 518 = 2,088 bytes, which is **`>4000 - >0828 = >37D8`**, the boundary the file service's buffers (`>3600-37D7`) sit below. This agrees with what the kernel assumes.
+- **Disk files.** A name is `DSKx.file` (x = 1 to 3) or `DSK.volume.file` (the drives are searched in order for the volume); the parts are up to 10 characters, any but `.` and space. A catalog is `DSKx.` read as INTERNAL FIXED records of 38: **128 records** (0 to 127), record 0 the volume (name, total AUs, which is 358 on a standard 40-track disk,
+  free AUs), 1 to 127 the files: name, a type (1 DISPLAY/FIXED, 2 DISPLAY/VARIABLE, 3 INTERNAL/FIXED, 4 INTERNAL/VARIABLE, **5 memory image, a program file**, negative if protected), AUs, bytes per record. Fixed records are at most 255 bytes, variable at most 254. Program files can be read only with LOAD and written with SAVE. A protected file refuses SAVE and any open but INPUT.
+  The error codes are in the programmer's guide, "The disk's error codes".
+
 ## Joysticks
 
 The TI reads both joysticks through the keyboard matrix: with the column select (CRU outputs 18-20) at 6 the row lines (inputs 3-10) show joystick 1, at 7 joystick 2: row 0 fire, 1 left, 2 right, 3 down,

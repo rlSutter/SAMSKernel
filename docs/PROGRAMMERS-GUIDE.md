@@ -624,8 +624,8 @@ only when `TI_CONSOLE_ROM` names your own image of it; a program built without t
 
 The simulator counts instructions, which is the right clock for the frame and the interrupts but not for how fast a program is. `tools/cycles.py` provides
 `CycleCPU`, a drop-in for `sim9900.CPU` that also counts **clock cycles of the 3 MHz TMS9900**: each instruction's cycles from the data manual (a base number, plus the
-addressing modes, plus two a place for a shift, a jump 10 taken and 8 not) and **8 wait cycles for every memory access outside the console ROM and the scratchpad**, since
-everything else is 8 bits wide behind the multiplexer (instruction fetches, workspace registers, address words and operands all count, and a destination is read and then
+addressing modes, plus two a place for a shift, a jump 10 taken and 8 not) and **4 wait cycles for every memory access outside the console ROM and the scratchpad**, since
+everything else is 8 bits wide behind the multiplexer (TI's technical data: an external 16-bit read ends in clock cycle 6, not 2) (instruction fetches, workspace registers, address words and operands all count, and a destination is read and then
 written). It measures only: frames and interrupts still come from the instruction count. Checked against the manual's numbers for ten instructions and the two classic loop timings
 (`DEC R2 / JNE` counting 65,535: 0.44 s in the scratchpad, 0.79 s in expansion RAM); not checked against a real console beyond that, and it omits the video and sound chips'
 own delays, the interrupt's context switch and `DIV`'s data-dependent time. Use it for ratios (is this loop twice as fast in the scratchpad? what does a dispatch cost?) more than
@@ -921,9 +921,17 @@ Three files can be open at once, whatever devices they are on; a TIPI's own limi
 
 **[TI]** `programs/clock.a99` on the workbench disk shows the date and time (ENTER reads it). **[PC]** the same code builds with `skbuild.py`. **Tested** against a model of a TIPI in the simulator (a second card with its own power-up, `PI.` files, a clock); **not** against a real TIPI's DSR.
 
+### The disk's error codes
+
+A file call returns R0 = 0 or the DSR's error, the `y` of TI's `xy` codes (the disk peripheral's functional specification; `x` is the routine that failed: 0 OPEN, 1 CLOSE, 2 READ, 3 WRITE,
+4 RESTORE, 5 LOAD, 6 SAVE, 7 DELETE, 9 STATUS): **0** bad device name (the device could not be found); **1** device write protected; **2** bad open attribute (an option was illegal or did not match the file:
+record type, length, file type); **3** illegal operation; **4** out of space; **5** attempt to read past the end of the file; **6** device error (a hard or soft error: the disk is not initialised or is damaged, power failed
+during a write, the unit did not answer); **7** file error (the file or volume does not exist, or the file type does not match the access: a program file opened as data, or the other way round). The kernel adds **`>FF`**: no card
+has the device. `FENOFI` is 7: it means "not there" for an `FOPEN` or `FEXIST` and "not that kind of file" for the same call on a program file, so check what you opened.
+
 ### A program on disk, and `PRUN`
 
-`python3 tools/skbuild.py myapp --disk` also writes `build/myapp/MYAPP.dsk`: the **bootstrap** (`MYAPP`, an Editor/Assembler option 5 image at `>C000`, about 4.3K) and the cartridge's banks as 8K PROGRAM files `MYAPP/B01`,
+`python3 tools/skbuild.py myapp --disk` also writes `build/myapp/MYAPP.dsk`: the **bootstrap** (`MYAPP`, an Editor/Assembler option 5 image at `>C000`, about 4.3K) and the cartridge's banks as PROGRAM files of at most 8K, trailing zeros trimmed (hello's whole disk is 14K, not 29K), `MYAPP/B01`,
 `MYAPP/B02` ... (`--geometry sssd` for a stock TI controller's single-density disk). A user selects option 5 and types `DSK1.MYAPP`; the bootstrap does the cartridge loader's checks, reads the banks through the file service
 and starts the kernel. `"disk_name"` in `app.json` sets the name (6 characters at most); `"prun": true` puts **`PRUN`** in the kernel: `PRUN` with R2 = a path such as `DSK2.GAME` replaces the running program with that disk-started one
 (it loads that program's bootstrap, leaves a handoff block naming the device, and does not return; if the file is missing or is not a one-file image for `>C000` it returns the error and the program goes on). Nothing of the old

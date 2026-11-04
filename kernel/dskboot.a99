@@ -138,6 +138,16 @@ DK2A   INCT R7                 and the two digits
        MOVB R3,*R6+
        SWPB R7
        MOVB R7,@DKNMB          the whole length
+* A bank file is trimmed of its trailing zeros (skbuild.py --disk), so the
+* part of the buffer the file does not reach must be zero, as the cartridge's
+* bank would have it, and not what the previous bank left there.
+       LI   R0,DKBUF
+       BL   @VWAD
+       LI   R3,>2000
+       CLR  R0
+DKZ    MOVB R0,@VDPWD
+       DEC  R3
+       JNE  DKZ
        LI   R0,DKBUF
        LI   R1,>2000           8K
        LI   R2,DKNMB

@@ -66,7 +66,7 @@ The disk-started workbench is an Editor/Assembler option 5 program. With the Edi
 DSK1.WBENCH
 ```
 
-The bootstrap checks the machine, reads the workbench's banks (`WBENCH/B01` to `B05`) from the disk into SAMS, and starts it: about the time it takes to read 40K from a floppy, which is not known. Everything must be on
+The bootstrap checks the machine, reads the workbench's banks (`WBENCH/B01` to `B05`) from the disk into SAMS, and starts it: about 24K from the disk (its bank files are trimmed, not padded to 8K each), a time that is not known. Everything must be on
 the one disk or volume (DSK1 to DSK3 are tried): the program, its bank files, `KERNEL/EQU` and your sources. Build it on a PC with
 
 ```
@@ -285,6 +285,8 @@ Every TMS9900 instruction:
 | calls | `B BL BLWP RTWP X XOP` |
 | bits and I/O | `LDCR SBO SBZ STCR TB CKOF CKON IDLE LREX RSET` |
 | pseudo | `NOP` (a `JMP $+2`), `RT` (a `B *R11`) |
+
+**Do not execute `CKOF`, `CKON`, `IDLE`, `LREX` or `RSET` on a TI-99/4A.** They assemble, but TI's technical data forbids them on this machine: the CRU clock is only partly decoded, so the peripherals take these instructions for CRU operations. (`PROBE1/A99` contains them only to test the assembler.)
 
 Operand forms: `Rn` (a register), `*Rn` (indirect), `*Rn+` (indirect, then add), `@expr` (symbolic) and `@expr(Rn)` (indexed); immediate values are the second operand of `LI`, `AI`, `ANDI`, `ORI`, `CI`, `LWPI`, `LIMI`. Instructions and
 `DATA` are placed on **even addresses** (a pad byte is added) and a label on such a line takes the aligned address.

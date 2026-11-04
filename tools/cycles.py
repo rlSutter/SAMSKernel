@@ -11,9 +11,10 @@ change when interrupts or frames happen.
 
 THE MODEL.  Each instruction costs what the TMS9900 data manual gives for it with no wait states: a base number of clock cycles for the
 instruction, plus a number for each operand by addressing mode (register 0; *R 4; *R+ 6 for a byte and 8 for a word; @symbolic and
-@indexed 8); shifts add 2 a place; a jump costs 10 if taken and 8 if not.  Then it adds the TI's wait states: **8 cycles for every
+@indexed 8); shifts add 2 a place; a jump costs 10 if taken and 8 if not.  Then it adds the TI's wait states: **4 cycles for every
 memory access outside the console ROM (>0000-1FFF) and the scratchpad (>8000-83FF)**, because everything else is 8 bits wide behind the
-console's multiplexer, so a 16-bit access is two byte accesses of 4 wait cycles each.  The accesses counted are the CPU's own: the
+console's multiplexer.  (TI's own 99/4A technical data: an external 16-bit read is two 8-bit cycles and the CPU looks at the data in clock cycle 6, against 2
+for an access without wait states: four more.  This file once said 8, reading the 4 as per byte; it is per word, as the manual's cycle formula C + W*M has it.)  The accesses counted are the CPU's own: the
 instruction fetch (one word, and one more for each address word), the workspace registers the instruction reads and writes (so a
 workspace in expansion RAM is slow, which is why programs keep it in the scratchpad), the words an address mode reads, and the operands
 (a destination is read and then written, as the 9900 does even for MOV).
@@ -44,9 +45,9 @@ JUMP_FLAGS = {0x10: None, 0x11: lambda c: not c.get('A') and not c.get('E'), 0x1
 
 
 def wait(addr):
-    """8 wait cycles for an access outside the console ROM and the scratchpad, else 0"""
+    """4 wait cycles for an access outside the console ROM and the scratchpad, else 0"""
     a = addr & 0xFFFF
-    return 0 if a < 0x2000 or 0x8000 <= a < 0x8400 else 8
+    return 0 if a < 0x2000 or 0x8000 <= a < 0x8400 else 4
 
 
 class CycleCPU(sim9900.CPU):

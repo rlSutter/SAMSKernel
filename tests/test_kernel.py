@@ -2214,9 +2214,10 @@ def common():
     check(r.returncode != 0, 'without the "common" entry the modules do not assemble (CADD is not defined): the entry is what provides common.equ')
 
 def cycles():
-    """tools/cycles.py, the cycle model: single instructions against the TMS9900 data manual's clock cycles (with the TI's 8 wait cycles
-    for every access outside the console ROM and the scratchpad), and the two well-known loop timings: DEC / JNE counting 65,535 takes
-    0.44 s in the scratchpad and 0.79 s in expansion RAM."""
+    """tools/cycles.py, the cycle model: single instructions against the TMS9900 data manual's clock cycles (with the TI's 4 wait cycles
+    for every access outside the console ROM and the scratchpad: TI's 99/4A technical data has a 16-bit external read finish in clock cycle 6, where an access
+    without wait states takes 2: see tools/cycles.py), and the DEC / JNE loop counting 65,535: 0.44 s in the scratchpad, 0.61 s with the code in
+    expansion RAM and 0.79 s with the workspace there too."""
     import cycles as cy
     c = build('hello')
     saved = os.environ.pop('TI_CONSOLE_ROM', None)
@@ -2254,8 +2255,8 @@ def cycles():
     got['JEQ taken'] = one([0x1301], st=0x2000)
     got['JEQ not taken'] = one([0x1301], st=0)
     got['MOV R1,R2 (code in expansion RAM)'] = one([0xC081], at=0x2400)
-    want = {'MOV R1,R2': 14, 'MOV *R1+,*R2+ (scratchpad)': 30, 'MOV *R1+,*R2+ (expansion RAM data)': 30 + 3 * 8, 'A @>2400,R1': 14 + 8 + 8,
-            'SLA R1,4': 20, 'MPY R1,R2': 52, 'LI R1,>1234': 12, 'JEQ taken': 10, 'JEQ not taken': 8, 'MOV R1,R2 (code in expansion RAM)': 14 + 8}
+    want = {'MOV R1,R2': 14, 'MOV *R1+,*R2+ (scratchpad)': 30, 'MOV *R1+,*R2+ (expansion RAM data)': 30 + 3 * 4, 'A @>2400,R1': 14 + 8 + 4,
+            'SLA R1,4': 20, 'MPY R1,R2': 52, 'LI R1,>1234': 12, 'JEQ taken': 10, 'JEQ not taken': 8, 'MOV R1,R2 (code in expansion RAM)': 14 + 4}
     check(got == want, 'single instructions against the manual: %s' % ('all %d match' % len(want) if got == want else {k: (got[k], want[k]) for k in want if got[k] != want[k]}))
     def loop(at, n):
         place(at, [0x0602, 0x16FE, 0x10FF])                 # DEC R2 / JNE $-2 / JMP $
@@ -2266,9 +2267,20 @@ def cycles():
             cpu.step()
         return cpu.cycles
     fast, slow = loop(0x8380, 65535), loop(0x2400, 65535)
-    check(fast == 65535 * 20 - 2 and slow == 65535 * 36 - 2,
-          'DEC R2 / JNE counting 65,535: %d cycles in the scratchpad = %.3f s, %d in expansion RAM = %.3f s (known: about 0.44 s and 0.79 s)' % (fast, fast / cy.CLOCK, slow, slow / cy.CLOCK))
-    check(0.43 < fast / cy.CLOCK < 0.45 and 0.77 < slow / cy.CLOCK < 0.80, 'both in the range measured on real machines')
+    def loop_ws(at, wsp, n):
+        place(at, [0x0602, 0x16FE, 0x10FF])
+        cpu.wp = wsp; cpu.limi = 0; cpu.pending_op = None
+        m.ww(wsp + 4, n)
+        cpu.pc = at; cpu.cycles = 0
+        while cpu.pc != at + 4:
+            cpu.step()
+        return cpu.cycles
+    slowest = loop_ws(0x2400, 0x2500, 65535)
+    check(fast == 65535 * 20 - 2 and slow == 65535 * 28 - 2 and slowest == 65535 * 36 - 2,
+          'DEC R2 / JNE counting 65,535: %d cycles in the scratchpad = %.3f s; %d with the code in expansion RAM = %.3f s (two fetches, 4 wait cycles each); %d with the workspace there too = %.3f s (four accesses)'
+          % (fast, fast / cy.CLOCK, slow, slow / cy.CLOCK, slowest, slowest / cy.CLOCK))
+    check(0.43 < fast / cy.CLOCK < 0.45 and 0.60 < slow / cy.CLOCK < 0.62 and 0.78 < slowest / cy.CLOCK < 0.80,
+          'consistent with the TI technical data (6 clock cycles for an external 16-bit access); not measured on a real machine')
     place(0x8380, [0x0602, 0x16FE, 0x10FF])
     cpu.wp = 0x8300; cpu.limi = 0; cpu.pending_op = None; m.ww(0x8304, 1000)
     cpu.pc = 0x8380
@@ -2348,6 +2360,17 @@ def diskboot():
             break
     scr = [l.rstrip() for l in sim9900.screen(m).split('\n') if l.strip()]
     check(shown, 'the bootstrap reads the three bank files from the disk and the kernel runs the application: its screen shows %r after %d instructions' % (scr[:1], m.insns))
+    # the bank files are trimmed of their trailing zeros, and the bootstrap zero-fills what a file does not reach
+    sizes = {n: len(tifdc.read_program(img, n)) for n in names if '/B' in n}
+    check(all(v < 8192 for v in sizes.values()) and sum(sizes.values()) + len(boot) < 16000,
+          'the bank files are trimmed, not padded to 8K: %s, with the bootstrap %d bytes in all (a padded disk was 29,004)' % (sizes, sum(sizes.values()) + len(boot)))
+    import asmharness as ah
+    sy = ah.symbols(d + '/kernel.equ')
+    mod = open(d + '/hello.bin', 'rb').read()
+    pg = sy['pg_hello']
+    ram = bytes(m.ams[pg * 4096:(pg + 2) * 4096])
+    check(ram[:len(mod)] == mod and not any(ram[len(mod):]),
+          'hello\'s module page holds its %d bytes and then zeros: what the shorter file did not reach is zero, not what the earlier banks left in the buffer (page >%02X)' % (len(mod), pg))
     # a disk without the bank files: the refusal screen, not a crash
     only_boot = bytearray(img)
     import skdisk as sk2

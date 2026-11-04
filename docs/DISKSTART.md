@@ -18,11 +18,15 @@ that *builds* programs (TXA's workbench, the kernel's own) could not hand the re
 | File | Type | What |
 | --- | --- | --- |
 | `GAME` | PROGRAM, one option 5 image for `>C000` (about 4.3K) | the **bootstrap**: what you select in option 5 |
-| `GAME/B01` ... `GAME/Bnn` | PROGRAM, 8,192 bytes each | the cartridge's banks after bank 0 (bank 1 is the kernel), in the cartridge's order |
+| `GAME/B01` ... `GAME/Bnn` | PROGRAM, at most 8,192 bytes each, **trailing zeros trimmed** | the cartridge's banks after bank 0 (bank 1 is the kernel), in the cartridge's order |
 
 A program is on one disk or volume: the bootstrap looks for `DSK1.`, `DSK2.` and `DSK3.` in turn for `GAME/B01`, or goes straight to the device it was **handed** by `PRUN`. A stock TI controller
 reads single-density disks only (about 80K of files: a small application), so a real stock TI needs the `sssd` build and a small program; the CorComp, Myarc and HFDC cards, a CF7+ and a TIPI take the
 double-density disk.
+
+**Disk sizes** (1.29.0: bank files are trimmed; before, every bank was a full 8K): hello 13.8K (was 29.0K), diag 18.0K (37.2K), music 15.2K (45.4K), workbench 24.0K (45.4K). A bank file holds its content to the last non-zero byte; the kernel's is 6,898 bytes, the shared data bank 2,208,
+and hello's own module 193. The cost is the bootstrap's zero-fill of the VRAM buffer before each bank: 8K of VRAM writes, about 25,000 instructions a bank, which is little against reading
+the padding it saves (32 sectors a bank); it has not been timed on a real TI.
 
 ## How the bootstrap works (`kernel/loader.a99` assembled with `-D DISKBOOT`, and `kernel/dskboot.a99`)
 
@@ -30,7 +34,7 @@ It is the cartridge loader with the bank source changed, so the checks are the s
 with the same refusal screens. Then, instead of copying banks from the cartridge, `DSKBOOT` reads each bank file with the kernel's own file service (`files.a99` is included in the bootstrap: `FSEL`,
 `FLOAD`, the DSR lookup and the power-up of every card), which puts a PROGRAM file's bytes in VRAM; the 8K is copied to `>A000` (the kernel) or through window `>E000` into the bank table's page pair. Then
 slot B goes back to its default and the bootstrap branches to `>A000`. It loads at **`>C000`** because nothing it needs lives there: the kernel goes to `>A000`, the module pages to `>E000`, and the kernel does not
-need `>C000` once it has started. The 8K bank file is loaded to VRAM `>1000-2FFF`, below the file service's own buffers at `>3600`. A file that cannot be read gives a refusal screen.
+need `>C000` once it has started. A bank file (8K at most) is loaded to VRAM `>1000-2FFF`, below the file service's own buffers at `>3600`; **the bootstrap zeroes that buffer first**, because a file is stored without its trailing zeros (`skbuild.py`) and what it does not reach must arrive as zeros, as it does from a cartridge, and not as what the previous bank left there (a test fails if the fill is removed). A file that cannot be read gives a refusal screen.
 
 The bootstrap powers up every card's DSR itself (the console did so before E/A started; the bootstrap does not rely on it, because the kernel's `DSRPWR` does the same and rebuilds the controller's buffers anyway).
 
@@ -39,7 +43,7 @@ The bootstrap powers up every card's DSR itself (the console did so before E/A s
 `PRUN` (R2 = a path such as `DSK2.GAME`, length-prefixed) loads the target's bootstrap file into VRAM `>2000-35FF` with `FLOAD`, checks that it is a one-file option 5 image for `>C000`, leaves a **handoff block** in the
 scratchpad (`>8320-833F`: `>A55A`, the length of the device prefix (everything up to the last `.`), the prefix, `>5AA5` at `>833E`), maps the identity pages `>0C-0D` into slots C and D, copies the image to `>C000` and
 jumps to it. The target's bootstrap sees the handoff block, takes its device from it instead of probing, and loads its own banks over everything: the old program is gone, the SAMS pool is rebuilt and nothing is shared (a
-program that wants to pass data to its successor writes a file). If the file is not there or is not that kind of image, `PRUN` returns R0 = the DSR's error (7: not found; >FF: no such device) or >FE and the running
+program that wants to pass data to its successor writes a file). If the file is not there or is not that kind of image, `PRUN` returns R0 = the DSR's error (TI's disk specification: 0 bad device name, 7 file error: the file is not there or is not a program file; the kernel adds >FF: no such device) or >FE and the running
 program goes on, its VRAM touched only in `>2000-35FF`.
 
 ## Tested (simulator, with the real DSR ROMs of the TI, CorComp, Myarc DDCC-1 and HFDC controllers)

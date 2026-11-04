@@ -451,7 +451,8 @@ def write_disk(app, bdir, images, kincs, ksrc, args):
     name = app['disk_name']
     progs = [(name, struct.pack('>HHH', 0, len(boot), 0xC000) + boot)]
     for i in range(1, len(images)):
-        progs.append(('%s/B%02d' % (name, i), images[i].ljust(BANK, b'\0')))
+        # trailing zeros are not stored: the bootstrap zero-fills the rest of the 8K (kernel/dskboot.a99), so the bank arrives as it was
+        progs.append(('%s/B%02d' % (name, i), images[i].rstrip(b'\0') or b'\0'))
     geo = args[args.index('--geometry') + 1] if '--geometry' in args else 'dsdd'
     path = os.path.join(bdir, name.lower() + '.dsk')
     files = []
