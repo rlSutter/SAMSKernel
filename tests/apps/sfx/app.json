@@ -1,0 +1,10 @@
+{
+  "name": "SFX TEST",
+  "min_pages": 128,
+  "sfx": true,
+  "modules": [{"name": "sfx", "source": "sfx.a99"}],
+  "data": [
+    {"file": "song.skm", "from": "song.txm", "loop": true},
+    {"file": "fx.skm", "from": "fx.txm"}
+  ]
+}

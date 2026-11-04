@@ -20,16 +20,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import skdisk
 
-RENAMES = {'amsinit': 'amsini', 'databank': 'databk', 'modules': 'module', 'kresident': 'kres', 'dskboot': 'dskbt'}
+RENAMES = {'amsinit': 'amsini', 'databank': 'databk', 'modules': 'module', 'kresident': 'kres', 'dskboot': 'dskbt', 'picture': 'pictur'}
 NOTES = """SOURCES - the SAMS Kernel's sources, to read and edit on the TI.
 
 Every file is DIS/VAR 80.  Open one in the workbench: N, the name, then E.
 (NAME/A99 on the disk is NAME.a99 in the repository.)
 
-FIVE FILES HAVE SHORTER NAMES: a TI file name has 10 characters at most.
+SIX FILES HAVE SHORTER NAMES: a TI file name has 10 characters at most.
    MODULE/A99  is modules.a99      AMSINI/A99  is amsinit.a99
    DATABK/A99  is databank.a99     KRES/A99    is kresident.a99
-   DSKBT/A99   is dskboot.a99
+   DSKBT/A99   is dskboot.a99      PICTUR/A99  is picture.a99
 The COPY lines that name them are changed in the copies here to match.
 
 ALSO HERE: the generated FONT/A99 and KEYTAB/A99 (tools/font.py and keytab.py

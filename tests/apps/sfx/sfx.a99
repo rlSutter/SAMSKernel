@@ -1,0 +1,51 @@
+*======================================================================
+* sfx.a99 - the module of the test application for sound effects (group
+* sfx).  1 plays the song, 2 the effect, 3 stops the effect, 4 pauses the
+* song, 5 resumes it, 6 tries an effect from pages that hold none (the
+* answer, 1, goes to APPRAM+2); 2 keeps SFXPLAY's answer in APPRAM.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   SETO @APPRAM           the answers start as >FFFF, so that 0 and 1 are real
+       SETO @APPRAM+2
+       RT
+TICK   .enter
+       CI   R0,'1'*256
+       JNE  T2
+       LI   R0,PD_SONG
+       BL   @MUPLAY
+       JMP  T9
+T2     CI   R0,'2'*256
+       JNE  T3
+       LI   R0,PD_FX
+       BL   @SFXPLAY
+       MOV  R0,@APPRAM
+       JMP  T9
+T3     CI   R0,'3'*256
+       JNE  T4
+       BL   @SFXSTOP
+       JMP  T9
+T4     CI   R0,'4'*256
+       JNE  T5
+       LI   R0,1
+       BL   @MUPAUSE
+       JMP  T9
+T5     CI   R0,'5'*256
+       JNE  T6
+       CLR  R0
+       BL   @MUPAUSE
+       JMP  T9
+T6     CI   R0,'6'*256
+       JNE  T7
+       LI   R0,2
+       BL   @SFXPLAY
+       MOV  R0,@APPRAM+2
+       JMP  T9
+T7     CI   R0,KQUIT*256
+       JNE  T9
+       SETO @QUITF
+T9     .leave
+       RT

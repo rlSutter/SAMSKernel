@@ -186,6 +186,13 @@ MULAT  EQU  >21CC            the sound register the last latch byte chose (0-7)
 MUSHL  EQU   >21CE
 MUSHD  EQU  >21D6            8 bytes: each frequency register's last data byte
 
+* Sound effects (music.a99, app.json "sfx": true): >20F6->20FF
+SFXST  EQU  >20F6            non-zero: an effect is playing
+SFXPG  EQU  >20F8            the effect's first SAMS page
+SFXPOS EQU  >20FA            the next command's offset in the effect
+SFXWT  EQU  >20FC            frames still to hold the current sound
+SFXOWN EQU  >20FE            channels the effect owns (bit c = channel c)
+
 * The page each window holds, tracked by the pager (a page is 0-4095):
 CURA2  EQU  >21E0            window >2000 (slot A)
 CURA3  EQU  >21E2            window >3000

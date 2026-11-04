@@ -12,6 +12,7 @@ app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
+    "sfx": false,                      optional: true puts SFXPLAY and SFXSTOP (sound effects over the song) in the kernel: 512 bytes
     "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
     "disk_name": "HELLO",              optional: the name of the program on a disk (--disk): 1-6 capitals and digits
     "module_size": 8192,               optional: 8192 (default) or 4096: the size every module may be
@@ -209,6 +210,9 @@ def load_app(appdir):
     omit = app.setdefault('omit', [])
     if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
         die('"omit" lists some of: %s' % ', '.join(sorted(OMITTABLE)))
+    app.setdefault('sfx', False)
+    if app['sfx'] and 'music' in omit:
+        die('\"sfx\": true needs the music player: \"music\" is left out')
     app.setdefault('prun', False)
     if app['prun'] and 'files' in omit:
         die('\"prun\": true needs the file service: \"files\" is left out')
@@ -237,7 +241,15 @@ def prepare_data(app, bdir):
     "fps" are passed on.  Every entry gets "_path", the file whose bytes go into SAMS."""
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     for d in app['data']:
-        if 'from' in d:
+        if 'from' in d and (d['from'].lower().endswith('.png') or d['file'].lower().endswith('.skp')):
+            import skpic                      # a picture: a PNG or a TI Artist picture (NAME_P, NAME_C); "rows" (default 88)
+            src = os.path.join(app['_dir'], d['from'])
+            rec = skpic.record(src, d.get('rows', 88))
+            d['_path'] = os.path.join(bdir, d['file'])
+            open(d['_path'], 'wb').write(rec)
+            fmt, pal, raw, rows = skpic.parse(rec)
+            print('picture %s: format %d, %d colours, %d rows, %d bytes' % (d['file'], fmt, len(pal), rows, len(rec)))
+        elif 'from' in d:
             import skmusic
             src = os.path.join(app['_dir'], d['from'])
             skm, info = skmusic.compile_file(src, d.get('fps', 60), bool(d.get('loop')), d.get('loop_at'),
@@ -515,22 +527,23 @@ def main():
     else:
         text = '* no resident code\nKRESB\nKRESE\n'
     open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
-    if app['omit'] or not app['prun']:
+    if app['omit'] or not app['prun'] or not app['sfx']:
         gone = omitted_routines(app, ksrc)
-        if not app['prun']:
-            gone['PRUN'] = 'prun'
+        for name, flag in (('PRUN', 'prun'), ('SFXPLAY', 'sfx'), ('SFXSTOP', 'sfx')):
+            if not app[flag]:
+                gone[name] = flag
         users = [(m['name'], os.path.join(appdir, m['source'])) for m in app['modules']]
         if res:
             users.append(('the resident code', os.path.join(appdir, res['source'])))
         for who, path in users:
             hit = sorted(gone.keys() & source_words(path, incs))
             if hit:
-                if gone[hit[0]] == 'prun':
-                    die('%s uses %s, which this kernel does not have: app.json needs "prun": true' % (who, hit[0]))
+                if gone[hit[0]] in ('prun', 'sfx'):
+                    die('%s uses %s, which this kernel does not have: app.json needs "%s": true' % (who, hit[0], gone[hit[0]]))
                 die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) +
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) + (['WITHSFX'] if app['sfx'] else []) +
                  (['ARCODE'] if 'appram_code' in app else []))
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']

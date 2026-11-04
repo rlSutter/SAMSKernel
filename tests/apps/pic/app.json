@@ -1,0 +1,9 @@
+{
+  "name": "PIC TEST",
+  "min_pages": 128,
+  "modules": [{"name": "pic", "source": "pic.a99"}],
+  "data": [
+    {"file": "rich.skp", "from": "rich.png"},
+    {"file": "line.skp", "from": "line.png"}
+  ]
+}

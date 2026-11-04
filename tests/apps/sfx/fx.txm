@@ -1,0 +1,3 @@
+! FX - a test effect for SFXPLAY: an arpeggio on voice B and a noise burst
+B: T240 L16 V15 O5 C E G > C < G E C > C E G > C
+N: T240 L16 V12 O2 W8 R W8 R W8 R W8

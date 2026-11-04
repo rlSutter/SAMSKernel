@@ -1,0 +1,143 @@
+*======================================================================
+* picture.a99 - pictures on the F18A's bitmap layer (an optional include, like
+* linein.a99: COPY "picture.a99" into a module that shows pictures).
+*
+* A picture is a record made by tools/skpic.py from a PNG or a TI Artist
+* picture (an app.json data entry whose "file" ends .skp: {"file": "x.skp",
+* "from": "x.png"}; the build names its first SAMS page PD_X).  The record is a
+* header (the magic 'SP', the format 2 = 256 x rows in 4 colours or 4 = 128 x
+* rows "fat" pixels in 16 colours, the colour count, the rows, a pad byte), the
+* palette words and the pixels run-length packed (TXA's format).  PICSHOW
+* decodes the pixels into VRAM for the bitmap layer, loads the palette into
+* F18A entries 32-, sets the layer's registers and turns it on; BMLOFF and
+* BMLON switch it off and on again without touching the pixels.
+*
+* VRAM: the layer needs rows x 64 bytes.  In Text 80 with no enhanced colour
+* tiles and no sprite patterns >2000-35FF is free: 5,632 bytes, 88 rows (the
+* default of skpic.py).  Do not give it the file service's buffers (>3600) or
+* the disk controller's (>37D8): see docs/VIDEO-MODES.md.  Disk calls do not
+* disturb the picture if it stays below >3600.
+*
+* Needs macros.a99 and the kernel's equates.  Not tested on a real F18A: the
+* layer over Text 80 has only been seen to work in js99er (TXA), which draws
+* it doubled horizontally; see docs/VIDEO-MODES.md part 10.
+*======================================================================
+
+* PICSHOW - show the picture whose record starts at SAMS page R0 (its pages
+* are consecutive: the record is under 8K).
+*   R1 = the VRAM address for the layer's pixels (a multiple of 64)
+*   R2 = the scanline of the picture's top (0-255)
+*   R3 = how many bytes of VRAM are free at R1
+* R0 = 0 shown; 1 the pages hold no picture record; 2 it does not fit R3;
+* 3 R1 is not a multiple of 64.  The windows >E000 and >F000 are put back.
+* Uses R0-R7, R12.
+PICSHOW .enter
+       MOV  R1,@PICVAD
+       MOV  R2,@PICVY
+       MOV  R3,@PICVMX
+       MOV  @CURBE,R4
+       .push R4
+       MOV  @CURBF,R4
+       .push R4
+       BL   @MAPE              the record, through windows E and F
+       INC  R0
+       BL   @MAPF
+       LI   R1,3               a bad VRAM address
+       MOV  @PICVAD,R0
+       ANDI R0,>003F
+       JNE  PIC9
+       LI   R1,1               not a picture
+       MOV  @>E000,R0
+       CI   R0,>5350           'S' 'P'
+       JNE  PIC9
+       MOVB @>E004,R6          its rows
+       SRL  R6,8
+       MOV  R6,@PICVRW
+       SLA  R6,6               x 64 bytes
+       LI   R1,2               it does not fit
+       C    R6,@PICVMX
+       JH   PIC9
+       MOVB @>E002,R6          the format
+       SRL  R6,8
+       LI   R7,>00C8           the control byte: on, priority, palette select 8
+       CI   R6,4
+       JNE  PIC1
+       ORI  R7,>0010           fat pixels: 16 colours
+PIC1   MOV  R7,@PICCTL
+       LI   R0,>9F00           the layer off while it changes
+       BL   @VDPWR
+       MOVB @>E003,R2          the colour count
+       SRL  R2,8
+       MOV  R2,R7              (kept: the pixels follow the palette)
+       LI   R0,32              the palette into entries 32-
+       LI   R1,>E006
+       BL   @F18PAL
+       SLA  R7,1
+       AI   R7,>E006           where the packed pixels begin
+       MOV  @PICVAD,R0
+       BL   @VWAD
+       MOV  R7,R1
+PIC2   CLR  R2
+       MOVB *R1+,R2            a control byte
+       CI   R2,>FF00
+       JEQ  PIC5               the end
+       SRL  R2,8
+       CI   R2,>80
+       JHE  PIC4
+       INC  R2                 n+1 literal bytes
+PIC3   MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  PIC3
+       JMP  PIC2
+PIC4   AI   R2,->7D            the next byte, n-7D times
+       MOVB *R1+,R3
+PIC4A  MOVB R3,@VDPWD
+       DEC  R2
+       JNE  PIC4A
+       JMP  PIC2
+PIC5   MOV  @PICVAD,R0         VR32: where the pixels are, in 64-byte units
+       SRL  R0,6
+       ANDI R0,>00FF
+       AI   R0,>A000
+       BL   @VDPWR
+       LI   R0,>A100           VR33: x 0
+       BL   @VDPWR
+       MOV  @PICVY,R0          VR34: the top scanline
+       ANDI R0,>00FF
+       AI   R0,>A200
+       BL   @VDPWR
+       LI   R0,>A300           VR35: 256 pixels wide
+       BL   @VDPWR
+       MOV  @PICVRW,R0         VR36: the rows
+       ANDI R0,>00FF
+       AI   R0,>A400
+       BL   @VDPWR
+       BL   @BMLON             VR31: on
+       CLR  R1
+PIC9   MOV  R1,R5              (the answer, kept across SETPB)
+       .pop R1
+       .pop R0
+       BL   @SETPB
+       MOV  R5,R0
+       .leave
+       RT
+
+* BMLOFF - switch the bitmap layer off (its pixels stay in VRAM).  Leaf.
+* Uses R0.
+BMLOFF LI   R0,>9F00
+       B    @VDPWR
+
+* BMLON - switch the layer on again as PICSHOW last set it (nothing if no
+* picture was shown).  Leaf.  Uses R0.
+BMLON  MOV  @PICCTL,R0
+       JEQ  BML9
+       AI   R0,>9F00
+       B    @VDPWR
+BML9   RT
+
+* the library's variables (in the including module's page, which is RAM)
+PICVAD DATA 0                  the VRAM address of the pixels
+PICVY  DATA 0                  the top scanline
+PICVMX DATA 0                  the bytes free
+PICVRW DATA 0                  the rows
+PICCTL DATA 0                  VR31's value while the layer is on (0: none yet)

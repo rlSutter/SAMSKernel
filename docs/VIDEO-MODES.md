@@ -316,6 +316,15 @@ Without the priority bit the layer shows only where the tile layer is the backgr
 
 This is the way to put real graphics on a screen without giving up the file service (Graphics II uses the controller's VRAM). **The demo uses it over Graphics I.**
 
+**Pictures: `tools/skpic.py` and `lib/picture.a99`** (1.30.0, from TXA's picture format and tools, MIT). `skpic.py` makes a **picture record** from a PNG or a TI Artist picture (`NAME_P` and `NAME_C`, 6,144 bytes each, cropped to 96 rows from row 48 or squeezed
+to half height as TXA does, by `NAME_T` beside it): a PNG of at most 4 colours becomes **format 2** (256 x rows, 2 bits a pixel, 4 colours) and any other **format 4** (128 x rows fat pixels, 4 bits a pixel, 16 colours); the record is a header, the
+palette (`>0RGB` words) and the pixels run-length packed. An `app.json` data entry whose file ends `.skp` is built that way: `{"file": "harbour.skp", "from": "pics/harbour.png"}` (or `"from": "pics/HARBOUR"` for TI Artist's pair; `"rows": 96` for the whole band), and the
+build names its first SAMS page `PD_HARBOUR`. A module that `COPY`s `picture.a99` calls **`PICSHOW`** (R0 = the page, R1 = the VRAM address for the pixels, a multiple of 64, R2 = the top scanline, R3 = the bytes of VRAM free there; R0 = 0 shown, 1 not a picture, 2 does
+not fit, 3 bad address): it decodes the pixels into VRAM, loads the palette into F18A entries 32-, sets VR31-VR36 and turns the layer on; **`BMLOFF`** and **`BMLON`** switch it without touching the pixels. **Rows: a row is 64 bytes in both formats, so `>2000-35FF`
+(the free run in Text 80 with no enhanced colour tiles and no sprite patterns) holds 88 rows exactly**, which is why `skpic.py` defaults to 88 (TXA's 96 rows, 6,144 bytes, reach `>37FF` into the file service's PAB and buffer; a program that uses no files, or redraws
+the picture after each, can give it that). The picture is below `>3600`, so file calls do not disturb it. Test group `pic`: the decoded pixels equal the reference decoder's byte for byte, the palette, the registers, the windows put back, `BMLOFF`/`BMLON`, the three
+failure answers, the TI Artist route and the build. **Not seen on a real F18A, and over Text 80 only on js99er (see below).**
+
 **Over Text 80** (reported by the TXA project, 1 November 2026, tested on js99er only; I have not run it, and no real F18A has been tried). The layer's position test is in
 256-pixel units, but js99er's offset into the bitmap is not halved to match, so js99er draws such a picture **doubled horizontally** (a bug reported to js99er's author); what
 the hardware does is unknown. TXA's working settings for a 16-colour (fat pixel) picture above the 80-column text, with the bitmap at `>2800`:

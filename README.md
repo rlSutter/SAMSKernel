@@ -62,7 +62,7 @@ The full comparison is in [docs/PROGRAMMERS-GUIDE.md](docs/PROGRAMMERS-GUIDE.md)
 ## The sources on a TI disk
 
 `python3 tools/mksources.py sources.dsk` makes a 360K disk (`SOURCES`) of the kernel's sources, `lib/`, the generated font and key table
-and two example programs, to read and edit on the TI; five file names are shortened to fit a TI disk (its `SRCNOTES` file lists them).
+and two example programs, to read and edit on the TI; six file names are shortened to fit a TI disk (its `SRCNOTES` file lists them).
 The kernel cannot be assembled on the TI from it yet.
 
 ## Optional includes (`lib/`)
@@ -101,7 +101,7 @@ disk browser run against TI's own DSR on a WD1771 and a disk image (`tools/tifdc
 
 ## Status
 
-Version 1.29.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
+Version 1.30.0. All test groups pass in the simulator, including with TI's real console interrupt routine and TI's real disk controller DSR (both from your own
 ROM images). **It has not been run on a real TI-99/4A.** The parts it shares with Press and The Lantern Coast have (paging, the keyboard, the F18A text screen, files through the disk controller); everything
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).

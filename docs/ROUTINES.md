@@ -478,6 +478,26 @@ advance the song one frame.  The main loop calls it every frame; call it yoursel
 
 set a tone voice directly (sound effects, or music of your own). R0 = the voice 0-2, R1 = the divider 1-1023 (frequency = 111,861 / divider Hz), R2 = the attenuation 0-15 (0 loudest, 15 off).  While a song plays its voices would overwrite yours: use a voice the song does not.  Leaf. Uses R0-R4.
 
+### `SFXPLAY`
+
+play the effect whose first SAMS page is R0 (its pages must be consecutive), once.  An effect playing is replaced.  R0 = 0 if it began, 1 if the pages do not hold an SKM stream.  Uses R0-R5, R12.
+
+### `SFXSTOP`
+
+end the effect now; its channels go back to the song.  Does nothing if none is playing.  Uses R0-R5.
+
+### `SFXTCK` *(internal)*
+
+advance the effect one frame (MUTICK calls it).  Uses R0-R8, R12.
+
+### `SFXEND` *(internal)*
+
+the effect is over (or stopped): each channel it owned gets the song's last bytes back, or is silenced if no song is playing or it is paused.  Leaf.  Uses R0-R5.
+
+### `MUSILN` *(internal)*
+
+silence the channels the effect does not own (a song paused under an effect).  Leaf.  Uses R0-R4.
+
 ## Optional include: line editing (lib/linein.a99; COPY it into your module)
 
 ### `LINEIN`

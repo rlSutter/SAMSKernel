@@ -175,5 +175,15 @@ frame's time. `--volume` and `--transpose` are for MML and MIDI only (a `.txm` f
 (the same tune with envelopes). Tests, group `txm`: the compiled song, decoded and applied to a model of the chip, is the reference compiler's state at every tick over two loops for both tunes; a bad
 file is an error with its line; the music demo built with a `.txm` tune plays exactly the compiled bytes in the simulator.
 
-**Not built: `SFXPLAY`**, sound effects that borrow voices from the song and give them back (TXA's player does this; the kernel's `MUPLAY` plays one song). It needs the player to keep the song's state
-for the voices an effect takes and restore it when the effect ends; the format and the compiler would not change.
+## Sound effects: `SFXPLAY` (1.30.0, `"sfx": true`)
+
+An **effect** is a short stream in the same SKM format as a song (a `.txm`, `.mml` or MIDI file through `skmusic.py`, a data entry in `app.json` without `"loop"`: `{"file": "fx.skm", "from": "fx.txm"}`), played **once, beside the song**.
+`SFXPLAY` (R0 = the effect's first SAMS page; R0 = 0 back if it began, 1 if the pages hold no SKM stream) starts it; `SFXSTOP` ends it early. It **borrows the sound channels it writes to**: from its first write to a channel until it ends,
+the song's writes to that channel go to the player's shadow of the chip and not to the chip, so an effect on voice B and the noise leaves the song's voices A and C playing; when it ends (or is stopped, or is replaced by another `SFXPLAY`)
+each channel it owned is given the song's last bytes back, or is silenced if no song is playing or it is paused. One effect plays at a time. `MUPAUSE` under an effect silences only the song's own channels, and `MUSTOP` and `SNDOFF` silence the whole chip (an
+effect carries on and is heard again at its next write). This is the behaviour of TXA's player (its effect voices 4-5 over music voices 0-3); the kernel owns whole channels, as TXA does, and does not mix volumes.
+
+Cost: **512 bytes of kernel** (7,410 against 6,898), so it is off unless `app.json` says `"sfx": true` (a program that uses `SFXPLAY` without it is refused by name; so is the flag with `"music"` left out) and five words of slot A (`>20F6-20FF`).
+Test group `sfx`, with a test application (`tests/apps/sfx`) that plays a looping song and an effect on voice B and the noise: compared with the song alone frame by frame, the chip differs only on the effect's channels and only while it plays;
+its own bytes are what the chip is given there; the song's writes to the noise channel in that window (16 bytes) were held back; when it ends, is stopped, or is replaced, the chip is exactly what the song alone has; with no song its channels end
+silent; pages with no effect answer 1; `MUPAUSE` leaves the effect sounding. None of it has run on a real TI.

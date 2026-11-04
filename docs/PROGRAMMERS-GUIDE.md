@@ -921,6 +921,11 @@ Three files can be open at once, whatever devices they are on; a TIPI's own limi
 
 **[TI]** `programs/clock.a99` on the workbench disk shows the date and time (ENTER reads it). **[PC]** the same code builds with `skbuild.py`. **Tested** against a model of a TIPI in the simulator (a second card with its own power-up, `PI.` files, a clock); **not** against a real TIPI's DSR.
 
+### Pictures
+
+`tools/skpic.py` turns a PNG or a TI Artist picture (`NAME_P`, `NAME_C`) into a picture record, the build does it for a data entry whose file ends `.skp` (`{"file": "x.skp", "from": "x.png"}`, optional `"rows"`, default 88), and a module that `COPY`s `lib/picture.a99`
+shows it on the F18A's bitmap layer: `PICSHOW` (R0 = `PD_X`, R1 = VRAM address of the pixels, R2 = the top scanline, R3 = bytes free; answers 0, 1, 2 or 3), `BMLOFF`, `BMLON`. VIDEO-MODES.md part 10 has the record, the layer's registers and what has not been seen on a real F18A.
+
 ### The disk's error codes
 
 A file call returns R0 = 0 or the DSR's error, the `y` of TI's `xy` codes (the disk peripheral's functional specification; `x` is the routine that failed: 0 OPEN, 1 CLOSE, 2 READ, 3 WRITE,
@@ -964,6 +969,7 @@ wait N frames: loop `BL @VSYNC` N times (or `BL @KWAIT` for a key).
 **Sound and music.** `MUPLAY` starts a song held in SAMS pages and the main loop steps it every frame (and `KIDLE`, `KPFR` and `KWAIT` do too, so
 music goes on through long operations that poll the keyboard). `MUSTOP`, `MUPAUSE`, `SNDTONE` and `SNDOFF` stop, pause, make a tone directly, and silence the chip. Songs are compiled
 on the PC from a MIDI file or a text score (`tools/skmusic.py`), and the build puts them in pages (`"from"` in `app.json`'s `data`); MUSIC.md has the whole story, the score language and the song format.
+With `"sfx": true` (512 bytes) `SFXPLAY` plays an **effect**, a short stream in the same format, over the song: it borrows the channels it writes to and gives them back when it ends, `SFXSTOP` ends it early (MUSIC.md, "Sound effects").
 The console's own sound lists (the interrupt routine plays them from VRAM or GROM) still work and share the chip with the player; the two have not been mixed in a test.
 
 **Screen blank.** After about nine idle minutes the console blanks the display (it writes VR1 from
@@ -1015,6 +1021,7 @@ there is no exit hook.
 - **`appram_code`** (optional): `{"source": "ar.a99", "exports": ["NAME", ...]}`, code kept in application RAM at `>2300` (see Part 7); `APPRAM` then begins after it.
 - **`common`** (optional): `{"source": "common.a99", "exports": ["NAME", ...]}`, code shared by every module, assembled at `>D000` and mapped there at start-up (see Part 8); every module must then be `"size": 4096`.
 - **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
+- **`rows`** on a picture data entry (88 by default, 1 to 96): see "Pictures" in Part 5; **`sfx`** (optional, true puts `SFXPLAY` in the kernel).
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
   bytes), `"files"` (the DSR file code: 2,026 bytes) and `"pool"` (the page pool: 220 bytes, and its bitmap's 512, so the kernel may be 8,192

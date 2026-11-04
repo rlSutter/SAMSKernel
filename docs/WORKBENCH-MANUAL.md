@@ -278,7 +278,7 @@ Every TMS9900 instruction:
 | | |
 | --- | --- |
 | arithmetic | `A AB ABS AI C CB CI DEC DECT DIV INC INCT MPY NEG S SB` |
-| logic | `ANDI COC CZC INV ORI SOC SOCB SZC SZCB` |
+| logic | `ANDI COC CZC INV ORI SOC SOCB SZC SZCB XOR` |
 | moves | `CLR LI LWPI LIMI MOV MOVB SETO STST STWP SWPB` |
 | shifts | `SLA SRA SRC SRL` |
 | jumps | `JEQ JGT JH JHE JL JLE JLT JMP JNC JNE JNO JOC JOP` |

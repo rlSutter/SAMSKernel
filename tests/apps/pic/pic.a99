@@ -1,0 +1,78 @@
+*======================================================================
+* pic.a99 - the test application for the picture library (group pic).
+* 1 shows the 16-colour picture, 2 the 4-colour one, 3 BMLOFF, 4 BMLON,
+* 5 tries a picture with too little VRAM (answer 2 to APPRAM+2), 6 tries
+* pages that hold no picture (answer 1 to APPRAM+4), 7 a bad VRAM address
+* (answer 3 to APPRAM+6); 1 and 2 keep their answers at APPRAM.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   SETO @APPRAM
+       SETO @APPRAM+2
+       SETO @APPRAM+4
+       SETO @APPRAM+6
+       RT
+TICK   .enter
+       CI   R0,'1'*256
+       JNE  T2
+       LI   R0,PD_RICH
+       LI   R1,>2000
+       LI   R2,8
+       LI   R3,>1600
+       BL   @PICSHOW
+       MOV  R0,@APPRAM
+       JMP  T9
+T2     CI   R0,'2'*256
+       JNE  T3
+       LI   R0,PD_LINE
+       LI   R1,>2000
+       LI   R2,8
+       LI   R3,>1600
+       BL   @PICSHOW
+       MOV  R0,@APPRAM
+       JMP  T9
+T3     CI   R0,'3'*256
+       JNE  T4
+       BL   @BMLOFF
+       JMP  T9
+T4     CI   R0,'4'*256
+       JNE  T5
+       BL   @BMLON
+       JMP  T9
+T5     CI   R0,'5'*256
+       JNE  T6
+       LI   R0,PD_RICH
+       LI   R1,>2000
+       LI   R2,8
+       LI   R3,>1000
+       BL   @PICSHOW
+       MOV  R0,@APPRAM+2
+       JMP  T9
+T6     CI   R0,'6'*256
+       JNE  T7
+       LI   R0,2
+       LI   R1,>2000
+       LI   R2,8
+       LI   R3,>1600
+       BL   @PICSHOW
+       MOV  R0,@APPRAM+4
+       JMP  T9
+T7     CI   R0,'7'*256
+       JNE  T8
+       LI   R0,PD_RICH
+       LI   R1,>2010
+       LI   R2,8
+       LI   R3,>1600
+       BL   @PICSHOW
+       MOV  R0,@APPRAM+6
+       JMP  T9
+T8     CI   R0,KQUIT*256
+       JNE  T9
+       SETO @QUITF
+T9     .leave
+       RT
+
+       COPY "picture.a99"

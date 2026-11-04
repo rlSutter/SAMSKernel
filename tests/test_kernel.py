@@ -1468,7 +1468,7 @@ def editorapp():
     check(any('needs more after the dot' in l for l in ln) and any(l.startswith('File:') for l in ln), 'ENTER on the bare device is refused with a message, and the prompt stays: %r' % [l for l in ln if 'needs more' in l or l.startswith('File:')])
 
 def sourcesdisk():
-    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the five long names
+    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the six long names
     are shortened with the COPY lines that name them changed to match (and the repository's files are not touched), every file a
     source COPYs is on the disk except the three the build writes for each application, and the disk reads back."""
     import re, tempfile, subprocess, mksources, tifdc
@@ -2640,6 +2640,167 @@ def exprcheck():
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/app', '--out', d + '/out'], capture_output=True, text=True)
     check('warning' in r.stderr and 'APPRAM+8*16+14' in r.stderr, 'skbuild warns about it in an application: %s' % [l for l in r.stderr.split('\n') if 'warning' in l][:1])
 
+def sfx():
+    """SFXPLAY / SFXSTOP (app.json "sfx": true): a sound effect plays over the song and borrows the channels it writes to.  The test app plays a looping song and an effect that writes
+    voice B (channel 1) and the noise (channel 3).  Compared frame by frame with the song alone: before the effect the chip is the same; during it only channels 1 and 3 differ (the song's writes
+    to them do not reach the chip); the effect's own bytes are what the chip hears on them; and when it ends, or is stopped, or is replaced, the chip is exactly what the song alone has.  An
+    effect with no song ends in silence; pages that hold no effect answer 1; the build refuses SFXPLAY without the flag and the flag without the music player."""
+    import skmusic, shutil, tempfile
+    c = build('tests/apps/sfx')
+    fx, info = skmusic.compile_file(os.path.join(ROOT, 'tests', 'apps', 'sfx', 'fx.txm'))
+    fxev, fxframes = skmusic.decode(fx, 1)
+    def run(keys, frames):
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)
+        try:
+            m, cpu, halt = sim9900.run(c, keys=keys, frames=frames)
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+        return m
+    def writes(m):
+        return [(i // sim9900.VSYNC_INSNS, b) for (src, i, b) in m.chip_log if src == 'cpu']
+    def by_frame(m, frames):
+        chip = {ch: [None, None] for ch in range(4)}
+        latch = [None]
+        log = writes(m)
+        k, out = 0, []
+        for f in range(frames):
+            while k < len(log) and log[k][0] <= f:
+                b = log[k][1]; k += 1
+                if b & 0x80:
+                    ch = (b >> 5) & 3
+                    if b & 0x10:
+                        chip[ch][1] = b & 15
+                    elif ch == 3:
+                        chip[3][0] = b & 7; latch[0] = None
+                    else:
+                        chip[ch][0] = (chip[ch][0] or 0) & 0x3F0 | (b & 15); latch[0] = ch
+                elif latch[0] is not None:
+                    chip[latch[0]][0] = ((chip[latch[0]][0] or 0) & 15) | ((b & 0x3F) << 4)
+            out.append({ch: tuple(v) for ch, v in chip.items()})
+        return out
+    N = 1000
+    A = by_frame(run('<WAIT 5>1<WAIT 950>', N + 20), N)
+    B_m = run('<WAIT 5>1<WAIT 200>2<WAIT 750>', N + 20)
+    B = by_frame(B_m, N)
+    diff = [f for f in range(N) if A[f] != B[f]]
+    chans = sorted({ch for f in diff for ch in range(4) if A[f][ch] != B[f][ch]})
+    f0, f1 = min(diff), max(diff)
+    check(f0 > 190 and chans == [1, 3] and f1 - f0 >= fxframes - 8 and f1 - f0 <= fxframes + 8,
+          'song + effect against the song alone: they differ from frame %d to %d (the effect is %d frames) and only on channels %s' % (f0, f1, fxframes, chans))
+    check(all(A[f] == B[f] for f in range(f1 + 2, N)) and f1 + 2 < N - 100,
+          'after the effect ends the chip is exactly what the song alone has, for the %d frames that follow (the channels got their last bytes back)' % (N - f1 - 2))
+    # the effect's own bytes reach the chip on its channels
+    def chan_bytes(seq):
+        latch, out = None, {0: [], 1: [], 2: [], 3: []}
+        for b in seq:
+            if b & 0x80:
+                latch = (b >> 5) & 3
+            if latch is not None:
+                out[latch].append(b)
+        return out
+    fxb = chan_bytes([b for f, b in fxev])
+    got = chan_bytes([b for f, b in writes(B_m) if f0 <= f <= f1 + 1])
+    song_only = chan_bytes([b for f, b in writes(run('<WAIT 5>1<WAIT 950>', N + 20)) if f0 <= f <= f1 + 1])
+    ok = all(got[ch][:len(fxb[ch])] == fxb[ch] for ch in (1, 3))
+    check(ok and len(fxb[1]) > 10 and len(fxb[3]) > 4,
+          'the bytes the chip is given on channels 1 and 3 during the effect begin with the effect\'s own (%d and %d bytes), in order' % (len(fxb[1]), len(fxb[3])))
+    # the song's own writes to the noise channel were held back, not lost: the song alone writes to it in that window
+    check(len(song_only[3]) > 0, 'the song does write to the noise channel in that window (%d bytes): what the effect held back' % len(song_only[3]))
+    # stopped early
+    D = by_frame(run('<WAIT 5>1<WAIT 200>2<WAIT 8>3<WAIT 740>', N + 20), N)
+    dd = [f for f in range(N) if A[f] != D[f]]
+    check(dd and max(dd) - min(dd) < 20 and all(A[f] == D[f] for f in range(max(dd) + 2, N)),
+          'SFXSTOP in the middle: the channels are the song\'s again at once (differences over %d frames, then none)' % (max(dd) - min(dd) + 1))
+    # replaced by a second effect
+    E = by_frame(run('<WAIT 5>1<WAIT 200>2<WAIT 10>2<WAIT 740>', N + 20), N)
+    ee = [f for f in range(N) if A[f] != E[f]]
+    check(ee and all(A[f] == E[f] for f in range(max(ee) + 2, N)) and max(ee) - min(ee) > fxframes,
+          'a second SFXPLAY replaces the first: it plays in full from its own start (differences over %d frames), then the song is intact' % (max(ee) - min(ee) + 1))
+    # no song: the effect's channels end silent, the others are never written
+    M = run('<WAIT 5>2<WAIT 400>', 400)
+    Cst = by_frame(M, 400)
+    check(Cst[-1][1][1] == 15 and Cst[-1][3][1] == 15 and all(s[0] == (None, None) and s[2] == (None, None) for s in Cst),
+          'an effect with no song: channels 1 and 3 end silent (attenuation %s and %s) and channels 0 and 2 are never written' % (Cst[-1][1][1], Cst[-1][3][1]))
+    # answers
+    check(M.rw(0x2300) == 0, 'SFXPLAY answers 0 when the effect began (APPRAM = %d; it started as 65535)' % M.rw(0x2300))
+    Fm = run('<WAIT 5>6<WAIT 100>', 300)
+    check(Fm.rw(0x2302) == 1 and not writes(Fm), 'pages that hold no effect: SFXPLAY answers 1 and nothing reaches the chip (APPRAM+2 = %d, %d writes)' % (Fm.rw(0x2302), len(writes(Fm))))
+    # pause: the song's other channels go quiet, the effect's do not
+    P = by_frame(run('<WAIT 5>1<WAIT 200>2<WAIT 5>4<WAIT 40>5<WAIT 600>', N + 20), N)
+    q = f0 + 20
+    check(P[q][0][1] == 15 and P[q][2][1] == 15 and any(P[g][1][1] not in (None, 15) for g in range(f0 + 5, f0 + 30)),
+          'MUPAUSE under an effect silences the song\'s own channels (0 and 2: attenuation %s, %s at frame %d) and leaves the effect\'s voice sounding' % (P[q][0][1], P[q][2][1], q))
+    # the build
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'sfx'), d + '/a')
+    j = json.load(open(d + '/a/app.json')); j['sfx'] = False; json.dump(j, open(d + '/a/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/a', '--out', d + '/o'], capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    check(r.returncode != 0 and 'SFXPLAY' in out and '"sfx": true' in out, 'SFXPLAY without "sfx": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
+    j['sfx'] = True; j['omit'] = ['music']; json.dump(j, open(d + '/a/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/a', '--out', d + '/o2'], capture_output=True, text=True)
+    check(r.returncode != 0 and 'music' in (r.stdout + r.stderr), '"sfx": true with the music player left out is refused: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:100])
+
+def pic():
+    """Pictures (tools/skpic.py, lib/picture.a99): PICSHOW decodes a picture record from SAMS into VRAM, loads its palette into F18A entries 32-, sets the bitmap layer's registers and turns it on; BMLOFF and
+    BMLON switch it; bad calls answer 1, 2 or 3 and change nothing.  The test application has a 16-colour picture (format 4) and a 4-colour one (format 2), both made from PNGs by the build."""
+    import skpic, shutil, tempfile
+    from PIL import Image
+    d = os.path.join(ROOT, 'tests', 'apps', 'pic')
+    c = build('tests/apps/pic')
+    rich = skpic.record(os.path.join(d, 'rich.png'))
+    line = skpic.record(os.path.join(d, 'line.png'))
+    fr, pr, rawr, rowsr = skpic.parse(rich)
+    fl, pl, rawl, rowsl = skpic.parse(line)
+    check(fr == 4 and len(pr) == 16 and fl == 2 and len(pl) == 4 and rowsr == rowsl == 88 and len(rawr) == len(rawl) == 5632,
+          'the records: a 16-colour picture (format %d, %d bytes packed) and a 4-colour one (format %d, %d bytes), 88 rows of 64 bytes each' % (fr, len(rich), fl, len(line)))
+    def run(keys, frames=420):
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)
+        try:
+            m, cpu, halt = sim9900.run(c, keys=keys, frames=frames)
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+        return m
+    base = run('<WAIT 5>')
+    m = run('<WAIT 5>1<WAIT 150>')
+    check(bytes(m.vram[0x2000:0x2000 + 5632]) == rawr, 'the 16-colour picture is in VRAM at >2000, byte for byte what the reference decoder gives (5,632 bytes)')
+    check([m.palette.get(32 + i) for i in range(16)] == pr, 'its palette is in F18A entries 32-47')
+    check((m.vregs[31], m.vregs[32], m.vregs[33], m.vregs[34], m.vregs[35], m.vregs[36]) == (0xD8, 0x80, 0, 8, 0, 88),
+          'the layer: VR31 = >D8 (on, priority, fat pixels, palette select 8), VR32 = >80 (>2000), x 0, y 8, 256 wide, 88 rows: %s' % [hex(v) for v in (m.vregs[31], m.vregs[32], m.vregs[33], m.vregs[34], m.vregs[35], m.vregs[36])])
+    check(m.rw(0x2300) == 0 and m.rw(0x21E4) == base.rw(0x21E4) and m.rw(0x21E6) == base.rw(0x21E6),
+          'PICSHOW answers 0 and puts windows E and F back where they were (>%04X, >%04X)' % (m.rw(0x21E4), m.rw(0x21E6)))
+    m2 = run('<WAIT 5>2<WAIT 150>')
+    check(bytes(m2.vram[0x2000:0x2000 + 5632]) == rawl and [m2.palette.get(32 + i) for i in range(4)] == pl and m2.vregs[31] == 0xC8,
+          'the 4-colour picture: pixels, palette entries 32-35, VR31 = >C8 (no fat pixels)')
+    m3 = run('<WAIT 5>1<WAIT 100>3<WAIT 40>')
+    check(m3.vregs[31] == 0 and bytes(m3.vram[0x2000:0x2000 + 5632]) == rawr, 'BMLOFF: VR31 = 0, the pixels stay in VRAM')
+    m4 = run('<WAIT 5>1<WAIT 100>3<WAIT 40>4<WAIT 40>')
+    check(m4.vregs[31] == 0xD8, 'BMLON puts the layer back as it was (VR31 = >D8)')
+    m5 = run('<WAIT 5>5<WAIT 40>6<WAIT 40>7<WAIT 40>')
+    check((m5.rw(0x2302), m5.rw(0x2304), m5.rw(0x2306)) == (2, 1, 3) and m5.vregs[31] == base.vregs[31] and bytes(m5.vram[0x2000:0x2040]) == bytes(base.vram[0x2000:0x2040]),
+          'too little VRAM answers 2, pages with no picture 1, a VRAM address that is not a multiple of 64 answers 3: and nothing is drawn (%s)' % [m5.rw(0x2302), m5.rw(0x2304), m5.rw(0x2306)])
+    # the TI Artist route and the build
+    from PIL import Image
+    td = tempfile.mkdtemp()
+    pat = bytearray(6144); col = bytearray(6144)
+    for cell in range(768):
+        for r in range(8):
+            pat[cell * 8 + r] = 0xF0 if (cell + r) % 3 == 0 else 0x3C
+            col[cell * 8 + r] = (((cell % 13) + 2) << 4) | ((cell % 7) + 2)
+    open(td + '/ART_P', 'wb').write(bytes(pat)); open(td + '/ART_C', 'wb').write(bytes(col))
+    rec = skpic.record(td + '/ART')
+    fa, pa, rawa, ra = skpic.parse(rec)
+    check(fa == 4 and len(pa) == 16 and ra == 88 and len(rawa) == 5632, 'a TI Artist picture (ART_P and ART_C, 6,144 bytes each) becomes a format-4 record, cropped as TXA does and cut to 88 rows')
+    r96 = skpic.parse(skpic.record(td + '/ART', 96))
+    check(r96[3] == 96 and len(r96[2]) == 6144 and r96[2][:5632] == rawa, '--rows 96 keeps the whole 96-row band (6,144 bytes), the first 88 rows the same')
+    shutil.copytree(d, td + '/app')
+    shutil.copy(td + '/ART_P', td + '/app/'); shutil.copy(td + '/ART_C', td + '/app/')
+    j = json.load(open(td + '/app/app.json')); j['data'].append({'file': 'art.skp', 'from': 'ART'}); json.dump(j, open(td + '/app/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), td + '/app', '--out', td + '/out'], capture_output=True, text=True)
+    check(r.returncode == 0 and 'picture art.skp: format 4, 16 colours, 88 rows' in r.stdout, 'the build makes a picture from a TI Artist name (data entry "from": "ART"): %s' % [l for l in r.stdout.split('\n') if 'art.skp' in l][:1])
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2797,7 +2958,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

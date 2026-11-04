@@ -101,13 +101,28 @@ MUPAUSE .enter
        MOV  R0,R0
        JEQ  MPA2
        SETO @MUPAUS
+       .ifdef WITHSFX
+       BL   @MUSILN            (not an effect's channels)
+       .else
        BL   @MUSIL
+       .endif
        JMP  MPA9
 MPA2   MOV  @MUPAUS,@MUPAUS    already playing: nothing to put back
        JEQ  MPA9
        CLR  @MUPAUS
        CLR  R1                 each register's last bytes, in order
-MPA3   MOVB @MUSHL(R1),@SOUND  the latch byte
+       .ifdef WITHSFX
+       MOV  @SFXOWN,R5
+       .endif
+MPA3
+       .ifdef WITHSFX
+       MOV  R1,R3
+       ANDI R3,6
+       MOV  @SFXBIT(R3),R4
+       COC  R4,R5              the effect has this channel
+       JEQ  MPA4
+       .endif
+       MOVB @MUSHL(R1),@SOUND  the latch byte
        MOV  R1,R2
        ANDI R2,1
        JNE  MPA4               odd registers are volumes: no data byte
@@ -123,7 +138,17 @@ MPA9   .leave
 * MUTICK - advance the song one frame.  The main loop calls it every
 * frame; call it yourself only if you run your own frame loop.  Uses R0-R8,
 * R12 (and slot B is left as found).
-MUTICK MOV  @MUSTAT,@MUSTAT
+MUTICK
+       .ifdef WITHSFX
+       MOV  @SFXST,@SFXST      an effect playing: it takes its step first
+       JEQ  MUSTEP
+       .enter
+       BL   @SFXTCK
+       BL   @MUSTEP
+       .leave
+       RT
+       .endif
+MUSTEP MOV  @MUSTAT,@MUSTAT
        JNE  MUT0
        RT
 MUT0   MOV  @MUPAUS,@MUPAUS
@@ -164,16 +189,36 @@ MUT3   DEC  R8
        A    R5,@MUPOS
        JMP  MUT9
 MUTDAT ANDI R1,>3F00
-       MOVB R1,@SOUND
        MOV  @MULAT,R2
        MOVB R1,@MUSHD(R2)
+       .ifdef WITHSFX
+       MOV  @SFXOWN,R3
+       JEQ  MUTD1
+       MOV  R2,R7
+       ANDI R7,6               the register's channel, times two
+       MOV  @SFXBIT(R7),R4
+       COC  R4,R3              the effect owns it: the shadow keeps the song's
+       JEQ  MUT3               byte, the chip does not hear it
+MUTD1
+       .endif
+       MOVB R1,@SOUND
        JMP  MUT3
-MUTWR  MOVB R1,@SOUND
-       MOV  R1,R2
+MUTWR  MOV  R1,R2
        SRL  R2,12
        ANDI R2,7
        MOV  R2,@MULAT
        MOVB R1,@MUSHL(R2)
+       .ifdef WITHSFX
+       MOV  @SFXOWN,R3
+       JEQ  MUTW1
+       MOV  R2,R7
+       ANDI R7,6
+       MOV  @SFXBIT(R7),R4
+       COC  R4,R3
+       JEQ  MUT3
+MUTW1
+       .endif
+       MOVB R1,@SOUND
        JMP  MUT3
 MUTEND MOV  @MULOOP,R1
        CI   R1,>FFFF
@@ -217,3 +262,170 @@ SNDTONE MOV R0,R3
        SWPB R4
        MOVB R4,@SOUND          the attenuation
        RT
+
+       .ifdef WITHSFX
+*----------------------------------------------------------------------
+* Sound effects (app.json "sfx": true)
+*----------------------------------------------------------------------
+* An effect is a stream in the same SKM format as a song (tools/skmusic.py
+* makes it from a .txm, .mml or MIDI file: a data entry in app.json), played
+* once beside the song.  It **borrows** the sound channels it writes to: from
+* its first write to a channel until it ends, the song's writes to that channel
+* go to the player's shadow of the chip and not to the chip; when the effect
+* ends the channel gets what the song last said (or is silenced, if no song is
+* playing or it is paused).  So an effect can use one tone voice and the noise,
+* say, and the song's other voices play on.  One effect plays at a time; a new
+* one replaces it (its channels go back first).
+
+SFXBIT DATA >0001,>0002,>0004,>0008   the bit for channel c, indexed by 2c
+
+* SFXPLAY - play the effect whose first SAMS page is R0 (its pages must be
+* consecutive), once.  An effect playing is replaced.  R0 = 0 if it began,
+* 1 if the pages do not hold an SKM stream.  Uses R0-R5, R12.
+SFXPLAY .enter
+       .push R0
+       MOV  @SFXST,@SFXST
+       JEQ  SFP0
+       BL   @SFXEND            an effect is playing: its channels go back first
+SFP0   .pop R0
+       MOV  R0,@SFXPG
+       MOV  @CURBE,R4
+       .push R4
+       MOV  @CURBF,R4
+       .push R4
+       BL   @MAPE              the header, through window >E000
+       MOV  @>E000,R1
+       CI   R1,>534B           'S' 'K'
+       JNE  SFP8
+       LI   R1,8
+       MOV  R1,@SFXPOS
+       CLR  @SFXWT
+       CLR  @SFXOWN
+       SETO @SFXST
+       CLR  R0
+       JMP  SFP9
+SFP8   LI   R0,1
+SFP9   MOV  R0,R5
+       .pop R1
+       .pop R0
+       BL   @SETPB
+       MOV  R5,R0
+       .leave
+       RT
+
+* SFXSTOP - end the effect now; its channels go back to the song.  Does nothing
+* if none is playing.  Uses R0-R5.
+SFXSTOP .enter
+       BL   @SFXEND
+       .leave
+       RT
+
+* SFXTCK - advance the effect one frame (MUTICK calls it).  Uses R0-R8, R12.
+SFXTCK MOV  @SFXWT,@SFXWT
+       JEQ  SFT1
+       DEC  @SFXWT
+       RT
+SFT1   .enter
+       MOV  @CURBE,R0
+       .push R0
+       MOV  @CURBF,R0
+       .push R0
+       LI   R8,256             commands one frame may read
+       MOV  @SFXPOS,R1
+       SRL  R1,12
+       A    @SFXPG,R1
+       MOV  R1,R0
+       BL   @MAPE
+       INC  R0
+       BL   @MAPF
+       MOV  @SFXPOS,R5
+       ANDI R5,>0FFF
+       AI   R5,>E000
+       MOV  R5,R6              where this frame began
+SFT3   DEC  R8
+       JEQ  SFTX
+       MOVB *R5+,R1
+       JEQ  SFTX               >00: the end
+       JLT  SFTWR              >80->FF
+       CB   R1,@MUC40
+       JHE  SFTDAT             >40->7F
+       SRL  R1,8               >01->3F: hold
+       DEC  R1
+       MOV  R1,@SFXWT
+       S    R6,R5
+       A    R5,@SFXPOS
+       JMP  SFT9
+SFTDAT ANDI R1,>3F00
+       MOVB R1,@SOUND
+       JMP  SFT3
+SFTWR  MOVB R1,@SOUND
+       MOV  R1,R2
+       SRL  R2,12
+       ANDI R2,6               the channel, times two
+       MOV  @SFXBIT(R2),R4
+       SOC  R4,@SFXOWN         it is the effect's from now on
+       JMP  SFT3
+SFTX   BL   @SFXEND
+SFT9   .pop R1
+       .pop R0
+       BL   @SETPB
+       .leave
+       RT
+
+* SFXEND - the effect is over (or stopped): each channel it owned gets the
+* song's last bytes back, or is silenced if no song is playing or it is
+* paused.  Leaf.  Uses R0-R5.
+SFXEND MOV  @SFXOWN,R5
+       JEQ  SFE9
+       MOV  @MUSTAT,R0
+       JEQ  SFES
+       MOV  @MUPAUS,R0
+       JNE  SFES
+       CLR  R1                 the song's last bytes, register by register
+SFE1   MOV  R1,R3
+       ANDI R3,6
+       MOV  @SFXBIT(R3),R4
+       COC  R4,R5
+       JNE  SFE4               not the effect's
+       MOVB @MUSHL(R1),@SOUND
+       MOV  R1,R2
+       ANDI R2,1
+       JNE  SFE4               odd registers are volumes: no data byte
+       CI   R1,6
+       JHE  SFE4               nor does the noise register
+       MOVB @MUSHD(R1),@SOUND
+SFE4   INC  R1
+       CI   R1,8
+       JL   SFE1
+       JMP  SFE9
+SFES   LI   R1,1               no song: each channel it owned, silent
+SFE5   MOV  R1,R3
+       ANDI R3,6
+       MOV  @SFXBIT(R3),R4
+       COC  R4,R5
+       JNE  SFE6
+       MOVB @MUINIT(R1),@SOUND
+SFE6   INCT R1
+       CI   R1,9
+       JL   SFE5
+SFE9   CLR  @SFXOWN
+       CLR  @SFXST
+       RT
+
+* MUSILN - silence the channels the effect does not own (a song paused under an
+* effect).  Leaf.  Uses R0-R4.
+MUSILN MOV  @SFXOWN,R3
+       JNE  MSN0
+       B    @MUSIL
+MSN0   LI   R1,1
+MSN1   MOV  R1,R2
+       ANDI R2,6
+       MOV  @SFXBIT(R2),R4
+       COC  R4,R3
+       JEQ  MSN2
+       MOVB @MUINIT(R1),@SOUND
+MSN2   INCT R1
+       CI   R1,9
+       JL   MSN1
+       RT
+       .endif
