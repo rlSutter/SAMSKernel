@@ -558,7 +558,7 @@ def main():
     if 'appram_code' in app:
         check_same_kernel(bdir + '.ar', bdir)
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
-                 os.path.join(bdir, 'loader.lst'), None, ['WITHEA5'] if app['ea5'] else None)
+                 os.path.join(bdir, 'loader.lst'), None, (['WITHEA5'] + (['WITHEA5DIAG'] if app.get('ea5_diag') else [])) if app['ea5'] else None)
     ds = os.path.join(appdir, 'databank.a99')
     ds = ds if os.path.exists(ds) else os.path.join(ksrc, 'databank.a99')
     data = asm(ds, os.path.join(bdir, 'databank.bin'), incs, os.path.join(bdir, 'databank.lst'))

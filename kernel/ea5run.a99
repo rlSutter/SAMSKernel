@@ -19,13 +19,23 @@
 * FCTN = quits (the console restarts).  The screen is the console's own
 * (Graphics I, 32 columns).  Keys are scanned from the keyboard matrix.
 *======================================================================
+* Scratch-pad use (the console's map: Nouspikel's scratch-pad page): the runner
+* keeps to words BASIC owns and an assembly program does not need: >8300->831F
+* its workspace, >8320->8337 the typed name, >8330->8337 the device name for the
+* search (the same bytes: the name is in VRAM by then), >8338->833D the keyboard
+* scan, >8340 the DSR routine, >8348 the entry address (as the module keeps it),
+* and the standard DSR words >8354, >8356, >83D0, >83D2.  It leaves the
+* interrupt words alone: >8379 (timer), >83C2, >83C4 (hook), >83D4, >83D6.
 RNBF   EQU  >8320              the typed name (up to 24 characters)
 RNDV   EQU  >8330              the device name for the DSR search (8 bytes)
 RNDSA  EQU  >8340              the DSR routine to call
+RNCNT  EQU  >8342              how many entries of that name have been called
+RNR2   EQU  >8344              the entry's list pointer, for the DSR's R2
 RNENT  EQU  >8348              the entry address, as the module keeps it
 RNPAB  EQU  >1300              the PAB in VRAM; the name follows at +10
 RNBUF  EQU  >1380              where the LOAD puts the file
 RNKM   EQU  >8338              the six column bytes of the keyboard scan
+RNBLK  EQU  600                scans per half of the cursor's blink
 
 * R14 = the name's length in the main code (RNSCN and RNDSR leave it alone)
 EA5RUN LIMI 0
@@ -93,7 +103,26 @@ RNQ    BLWP @>0000             the console restarts
 * ENTER: the name into the PAB, then the files one after another
 RNGO   MOV  R14,R14
        JEQ  RNK
-       CLR  @RNENT
+       CI   R14,5              DSK1. and nothing more: the module runs UTIL1
+       JNE  RNG0
+       LI   R1,RNBF
+       LI   R2,RNDEF+1
+       LI   R3,5
+RNGA   CB   *R1+,*R2+
+       JNE  RNG0
+       DEC  R3
+       JNE  RNGA
+       LI   R1,RNBF+5
+       LI   R2,RNUT
+       LI   R3,5
+RNGB   MOVB *R2+,*R1+
+       DEC  R3
+       JNE  RNGB
+       LI   R14,10
+RNG0   CLR  @RNENT
+       LI   R0,16*32+2         progress lines, so a stall shows where it is
+       LI   R1,RNLDG
+       BL   @RNPRT
        LI   R0,RNPAB+10
        BL   @RNVW
        LI   R1,RNBF
@@ -115,7 +144,9 @@ RN4    MOVB *R1+,@VDPWD
        MOV  R0,@>8356
        BL   @RNDSR             R0 = 0 or the error
        MOV  R0,R0
-       JNE  RNERR
+       JEQ  RNOK
+       B    @RNERR
+RNOK
        LI   R0,RNBUF           the file's six header bytes
        BL   @RNVR
        MOVB @VDPRD,R2          flag: another file follows?
@@ -133,7 +164,21 @@ RN4    MOVB *R1+,@VDPWD
        MOV  @RNENT,@RNENT      the first file's address is where it starts
        JNE  RN5
        MOV  R4,@RNENT
-RN5    MOV  R3,R3
+RN5
+       .ifdef WITHEA5DIAG
+       LI   R0,18*32+2         ADDR >xxxx LEN >xxxx on the screen
+       LI   R1,RNAD
+       BL   @RNPRT
+       LI   R0,18*32+8
+       MOV  R4,R1
+       BL   @RNHEX
+       LI   R0,18*32+22
+       MOV  R3,R1
+       BL   @RNHEX
+       LI   R0,RNBUF+6         (the data again: the writes moved the address)
+       BL   @RNVR
+       .endif
+       MOV  R3,R3
        JEQ  RN7
        CI   R3,>2000
        JH   RN7
@@ -156,8 +201,41 @@ RN7    MOV  R2,R2
 RNRUN  MOV  @RNENT,@RNENT
        JNE  RN8
        B    @RN0
-RN8    LIMI 2                  as the console has them
-       LWPI >83E0
+RN8    LI   R0,>0380           as the module does before it calls a program: the
+       BL   @RNVW              colour table black on light green, the screen
+       LI   R1,>1300           blank, the backdrop white on light green
+       LI   R2,32
+RN9    MOVB R1,@VDPWD
+       DEC  R2
+       JNE  RN9
+       BL   @RNCLS
+       LI   R0,>87F3
+       BL   @RNVR
+       .ifdef WITHEA5DIAG
+       LI   R0,19*32+2         RUNNING >xxxx: the last line before the program
+       LI   R1,RNRN
+       BL   @RNPRT
+       LI   R0,19*32+11
+       MOV  @RNENT,R1
+       BL   @RNHEX
+       LI   R0,20*32+2         (a diagnostic build: the interrupt hook word and
+       LI   R1,RNHK            a choice of how to start the program)
+       BL   @RNPRT
+       LI   R0,20*32+9
+       MOV  @>83C4,R1
+       BL   @RNHEX
+       LI   R0,21*32+2
+       LI   R1,RNKY
+       BL   @RNPRT
+       BL   @RNGET
+       CI   R0,>3200           2: interrupts stay off
+       JEQ  RN8A
+       CI   R0,>3300           3: clear the hook, interrupts on
+       JNE  RN8B
+       CLR  @>83C4
+       .endif
+RN8B   LIMI 2                  as the console has them
+RN8A   LWPI >83E0
        MOV  @RNENT,R8
        BL   *R8
        LWPI >8300
@@ -180,15 +258,42 @@ RNE1   BL   @RNPRT
        MOVB R7,@VDPWD
 RNE2   BL   @RNGET
        B    @RN0
-* RNGET - wait for a key to go up, then for one to go down: R0 high byte.
+* RNGET - wait for a key to go up, then for one to go down: R0 high byte.  While
+* it waits the cursor (an underscore at the name line's next position) blinks.
 RNGET  MOV  R11,R13
 RNG1   BL   @RNSCN
        CB   R0,@RNFF
        JNE  RNG1
+       CLR  R8                 0: the cursor is not showing
+       LI   R15,1              (so it shows at once)
 RNG2   BL   @RNSCN
        CB   R0,@RNFF
-       JEQ  RNG2
+       JNE  RNG4               a key
+       DEC  R15
+       JNE  RNG2
+       LI   R15,RNBLK
+       MOV  R8,R8
+       JNE  RNG3
+       LI   R1,>5F00           show it
+       SETO R8
+       JMP  RNG5
+RNG3   LI   R1,>2000           hide it
+       CLR  R8
+RNG5   BL   @RNCUR
+       JMP  RNG2
+RNG4   MOV  R0,R7              the key: the cursor off, the key back in R0
+       LI   R1,>2000
+       BL   @RNCUR
+       MOV  R7,R0
        B    *R13
+* RNCUR - the character in the high byte of R1 at the name line's next
+* position (R14 characters in).
+RNCUR  MOV  R11,R9
+       LI   R0,8*32+2
+       A    R14,R0
+       BL   @RNVW
+       MOVB R1,@VDPWD
+       B    *R9
 * RNSCN - the keyboard once, from the matrix itself (as the kernel's keys.a99
 * does it; the console's KSCAN needs the console's GROMs for its tables): R0 =
 * the key's code in the high byte, >FF for none.  Capitals only; SHIFT gives the
@@ -279,7 +384,7 @@ RNVW   SWPB R0
        ANDI R0,>3FFF
        RT
 * RNCLS - the screen blank.  RNPRT - the text at R1 (a length byte, then the
-* characters) at screen position R0.
+* characters) at screen position R0 (uses R0, R1, R6, R9).
 RNCLS  MOV  R11,R9
        CLR  R0
        BL   @RNVW
@@ -291,17 +396,18 @@ RNC1   MOVB R1,@VDPWD
        B    *R9
 RNPRT  MOV  R11,R9
        BL   @RNVW
-       MOVB *R1+,R2
-       SRL  R2,8
+       MOVB *R1+,R6
+       SRL  R6,8
        JEQ  RNP2
 RNP1   MOVB *R1+,@VDPWD
-       DEC  R2
+       DEC  R6
        JNE  RNP1
 RNP2   B    *R9
 * RNDSR - the disk controller's (or any card's) DSR for the PAB: the console's
 * own DSRLNK, as the kernel's files.a99 does it.  R0 = 0, or the PAB's error
 * (1-7), or >FF: no card has the device.  Leaves R14 (the name's length).
 RNDSR  MOV  R11,R13
+       CLR  @RNCNT
        MOV  @>8356,R0
        BL   @RNVR
        MOVB @VDPRD,R3          the full name's length
@@ -314,6 +420,8 @@ RND1   MOVB @VDPRD,R7
        JEQ  RND2
        MOVB R7,*R4+
        INC  R5
+       CI   R5,7               a device name is 7 characters at most (as the
+       JH   RNDNO              module's DSRLNK has it): no overrunning RNDV
        DEC  R3
        JNE  RND1
 RND2   MOV  R5,R5
@@ -354,6 +462,16 @@ RNDM   CB   *R10+,*R2+
        DEC  R7
        JNE  RNDM
        MOV  R9,@RNDSA
+       INC  @RNCNT             a DSR is told which call this is (R1) and where
+       MOV  R2,@RNR2           the entry's list pointer is (R2)
+       .ifdef WITHEA5DIAG
+       LI   R0,17*32+2         CARD >xxxx: whose DSR is called
+       LI   R1,RNCD
+       BL   @RNPRT
+       LI   R0,17*32+8
+       MOV  R12,R1
+       BL   @RNHEX
+       .endif
        LWPI >83E0
        BL   @RNGPL
        JMP  RNDE0              a plain return: not its device
@@ -379,17 +497,45 @@ RNDNO  LI   R0,>00FF
        B    *R13
 * RNGPL - call the DSR with the GPL workspace as the console does
 RNGPL  MOV  @>83D0,R12
+       MOV  @RNCNT,R1          R1 = the number of times a routine of this name
+       MOV  @RNR2,R2           has been called (1 the first time); R2 = link
        LI   R13,>9800
        LI   R15,>8C02
        MOV  @RNDSA,R9
        B    *R9
+* RNHEX - the word in R1 as four hex digits at screen position R0 (uses R1,
+* R6, R7, R9: the main code's R2-R4 stay).
+RNHEX  MOV  R11,R9
+       BL   @RNVW
+       LI   R7,4
+RNH1   MOV  R1,R6
+       SRL  R6,12
+       AI   R6,>0030
+       CI   R6,>003A
+       JL   RNH2
+       AI   R6,7
+RNH2   SWPB R6
+       MOVB R6,@VDPWD
+       SLA  R1,4
+       DEC  R7
+       JNE  RNH1
+       B    *R9
 * the text and the constants
 RNTTL  STRI 'RUN PROGRAM FILE'
+RNLDG  STRI 'LOADING...'
+       .ifdef WITHEA5DIAG
+RNCD   STRI 'CARD >'
+RNRN   STRI 'RUNNING >'
+RNHK   STRI 'HOOK >'
+RNKY   STRI '1 IRQ ON 2 OFF 3 CLR HOOK'
+RNAD   STRI 'ADDR >         LEN >'
+       .endif
 RNASK  STRI 'FILE NAME?'
 RNHLP  STRI 'ENTER RUNS   FCTN = QUITS'
 RNDEF  STRI 'DSK1.'
 RNIO   STRI 'I/O ERROR '
 RNND   STRI 'NO SUCH DEVICE'
+RNUT   TEXT 'UTIL1'
 RNPAT  BYTE >05,>00,>13,>80,>00,>00,>21,>00,>00
 RNFF   BYTE >FF
 RNDOT  BYTE '.'

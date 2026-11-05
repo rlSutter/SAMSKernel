@@ -2829,6 +2829,7 @@ def ea5run():
     open(d + '/q.a99', 'w').write("       AORG >A000\nSTART  LI   R0,>1234\n       MOV  R0,@>3F00\n       MOV  @MORE,R1\n       MOV  R1,@>3F02\n       RT\n       AORG >B000\nMORE   DATA >BEEF\n")
     subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-i', '-q', d + '/q.a99', '-o', d + '/CHAIN'], check=True, capture_output=True)
     programs = [(f.upper(), open(os.path.join(d, f), 'rb').read()) for f in sorted(os.listdir(d)) if f.startswith('CHAI')]
+    programs += [('UTIL1', programs[0][1]), ('UTIL2', programs[1][1])]      # the same image under the module's default name
     rh = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h', '--disk', '--geometry', 'sssd'], capture_output=True, text=True)
     himg = bytearray(open(d + '/h/hello.dsk', 'rb').read())
     programs += [(n, tifdc.read_program(himg, n)) for n in sorted(tifdc.TIFDC(image=himg).files())]
@@ -2873,17 +2874,40 @@ def ea5run():
         except sim9900.Halt as e:
             pass                                  # (after a reset the simulated console starts the kernel with no banks copied: it halts)
         return m, cpu
+    cur = set()
+    m = sim9900.Machine(bank0)
+    # (the cursor: sampled while the prompt waits for a key; it must be seen showing and hidden at the name line's next position: a hidden cursor reads as nothing, the row's end being trimmed)
+    m, cpu = session('<WAIT 30>', lambda m, c: cur.add(row(m, 8)[7:8]) or (len(cur) > 1 and '_' in cur), 80)
+    check('_' in cur and len(cur) > 1, 'a cursor blinks at the name line\'s next position while the prompt waits (seen %s)' % sorted(cur))
     m, cpu = session('<WAIT 30>chainx<F-s><WAIT 20>', lambda m, c: row(m, 8) == '  DSK1.CHAIN', 60)
     check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.CHAIN', 'the prompt shows the title and a name line that starts as DSK1. and takes typing (chainx) and FCTN S (one back): %r' % row(m, 8))
     m, cpu = session('<WAIT 30>chain<ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234 and row(m, 8) == '  DSK1.')
     check(m.rw(0x3F00) == 0x1234 and m.rw(0x3F02) == 0xBEEF,
           'a two-file option 5 image (CHAIN and CHAIO): the first file ran at its load address (marker >%04X) and read what the second put at >B000 (>%04X)' % (m.rw(0x3F00), m.rw(0x3F02)))
+    check(bytes(m.vram[0x380:0x3A0]) == b'\x13' * 32 and m.vregs[7] == 0xF3,
+          'before the program the runner set the screen up as the module does: the colour table >13 (black on light green) and VR7 = >F3 (VR7 = >%02X)' % m.vregs[7])
     for i in range(20):
         for k in range(20000):
             cpu.step()
     check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.', 'the program ended with RT and the prompt came back, the name line reset to DSK1.')
+    m, cpu = session('<WAIT 30><ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234)
+    check(m.rw(0x3F00) == 0x1234 and m.rw(0x3F02) == 0xBEEF, 'ENTER with the name line still DSK1. runs UTIL1 (and UTIL2), as the module\'s option 5 does with an empty name (marker >%04X)' % m.rw(0x3F00))
+    crom = open(os.environ['TIFDC_ROM'], 'rb').read()          # the card's device list: where DSK1's routine is
+    def cw(a): return int.from_bytes(crom[a - 0x4000:a - 0x4000 + 2], 'big')
+    e, dsk1 = cw(0x4008), None
+    while e:
+        n = crom[e + 4 - 0x4000]
+        if crom[e + 5 - 0x4000:e + 5 - 0x4000 + n] == b'DSK1':
+            dsk1 = cw(e + 2)
+        e = cw(e)
+    m, cpu = session('<WAIT 30>chain<ENTER><WAIT 100>', lambda m, c: False, 80, stop_at=dsk1)
+    check(cpu.pc == dsk1 and m.rw(0x83E2) == 1 and m.rw(0x83F8) == 0x1100 and m.rw(0x83D0) == 0x1100 and m.rw(0x83F2) == dsk1 and m.rw(0x8354) == 4 and m.rw(0x8356) == 0x130E,
+          'the disk DSR (DSK1 at >%04X) is called as the console\'s DSRLNK does: R12 = >1100 (and >83D0), R9 = its address, R1 = 1 (the first call), >8354 = 4 (the name DSK1), >8356 at the \'.\' (>%04X)' % (dsk1, m.rw(0x8356))
+          + ' [R1 %04X R12 %04X >83D0 %04X R9 %04X >8354 %04X pc %04X]' % (m.rw(0x83E2), m.rw(0x83F8), m.rw(0x83D0), m.rw(0x83F2), m.rw(0x8354), cpu.pc))
     m, cpu = session('<WAIT 30>nosuch<ENTER><WAIT 100>', lambda m, c: 'I/O ERROR' in row(m, 14))
     check(row(m, 14).strip() == 'I/O ERROR 7', 'a file that is not on the disk: the DSR\'s error on the screen (%r)' % row(m, 14))
+    m, cpu = session('<WAIT 30><F-s><F-s><F-s><F-s><F-s>abcdefghijklmnopqrstu<ENTER><WAIT 100>', lambda m, c: 'NO SUCH' in row(m, 14))
+    check(row(m, 14).strip() == 'NO SUCH DEVICE', 'a name of 21 letters and no device (no \'.\'): NO SUCH DEVICE, not an overrun of the 8-byte device buffer (%r)' % row(m, 14))
     m, cpu = session('<WAIT 30><F-s><F-s><F-s><F-s><F-s>dsk9.x<ENTER><WAIT 100>', lambda m, c: 'NO SUCH' in row(m, 14))
     check(row(m, 14).strip() == 'NO SUCH DEVICE', 'a device no card has: NO SUCH DEVICE (%r)' % row(m, 14))
     if rom:
