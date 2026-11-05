@@ -67,6 +67,17 @@ Build with `python3 tools/skbuild.py examples/hello --disk --geometry sssd` and 
 | D5 | note the time from the return key to the application's screen | a number | how long a disk start takes on a floppy (not known) |
 | D6 | the workbench from disk: `images/workbench-diskstart-360k.dsk` (360K: a double-density controller, a CF7+ or a TIPI), option 5, `DSK1.WBENCH`; then `C`, pick `HELLO/A99`, `A`, `R` | the menu, the catalog, `Assembled: 194 bytes at >C000`, the program | the disk-started workbench reads and assembles from its own disk |
 
+## RUN PROGRAM FILE (1.31.0; nothing of it has run on a real machine)
+
+With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console's menu, choose **RUN PROGRAM FILE** (the second program):
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| R1 | the prompt: a title, `FILE NAME?`, `DSK1.` on the name line; type a name, `FCTN S` to delete | the typing shows and edits | that the console's screen and the matrix scan read the keys on your machine |
+| R2 | a program you know runs under the Editor/Assembler's option 5 (`DSK1.UTIL1` style files): type its name | it runs as under the module | that a real option 5 image runs with the console as the runner leaves it (interrupts on, GPL workspace); **tell me which program and what it does** |
+| R3 | `images/hello-diskstart-sssd.dsk` (the hello program as a kernel disk program): `DSK1.HELLO` | the kernel's hello screen | a kernel disk program through the runner |
+| R4 | a name that is not on the disk; `FCTN =` | `I/O ERROR 7`; the console restarts | the error path and the quit |
+
 ## How to report
 
 A short note per step is enough: the step number, what you saw, the machine (console, F18A or PICO9918 with its firmware, SAMS size and brand, disk controller or TIPI), and for emulators the version and settings. A photograph of a refusal

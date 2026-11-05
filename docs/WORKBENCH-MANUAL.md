@@ -58,6 +58,15 @@ image in the distribution carries the right one; if you build your own disk, use
 
 Put the cartridge in (or load `workbench8.bin` in the emulator), switch on, and choose **WORKBENCH** from the console's title screen. Put the disk in DSK1 first.
 
+### RUN PROGRAM FILE: the same cartridge as an Editor/Assembler option 5
+
+The workbench cartridge (`workbench8.bin`) lists **two programs** on the console's menu: **WORKBENCH** and **RUN PROGRAM FILE**. The second is Editor/Assembler option 5, so the cartridge replaces the Editor/Assembler for running programs. It shows a prompt with `DSK1.` already in
+the name line; type the rest of a file name (`DSK1.GAME`, `DSK2.UTIL1`, a TIPI path), `FCTN S` or `FCTN 1` deletes a character, **ENTER** loads and runs, **`FCTN =`** restarts the console. It loads the file with the disk controller, copies it to its load address, goes on to the next file of the chain
+while the first word of a file says there is one (the next name is the last character plus one, as the Editor/Assembler does), and then calls the first file's load address with the GPL workspace and interrupts on, as option 5 does; a program that ends with `RT` comes back to the prompt.
+**It runs two kinds of program with the one mechanism**: an ordinary option 5 program (a memory image: `xas99 -i` makes them, and the Editor/Assembler's SAVE), and **a kernel disk program**, whose bootstrap file is such an image (`skbuild.py --disk`): type `DSK1.HELLO` and the bootstrap reads its banks and starts the kernel.
+It does not load option 3 object code (the `DF80` files of the Editor/Assembler's loader), and a program that calls the Editor/Assembler's utilities (`VMBW`, `KSCAN`, `DSRLNK`, loaded by that module into low RAM) must carry them, as an image from the Editor/Assembler has to. Errors: `I/O ERROR n` with the disk controller's code (7: the file is not there or is not a program file) or `NO SUCH DEVICE`.
+Tested in the simulator against a two-file image and a kernel disk program; **not tried with any real program or on a real TI** (`docs/HARDWARE-CHECKLIST.md`, steps R1 to R4).
+
 ### From the disk, with no cartridge
 
 The disk-started workbench is an Editor/Assembler option 5 program. With the Editor/Assembler cartridge: choose **option 5, RUN PROGRAM FILE**, and type

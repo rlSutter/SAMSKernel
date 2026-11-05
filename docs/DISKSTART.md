@@ -8,6 +8,8 @@ A kernel application was a cartridge: a FinalGROM image whose bank 0 checks the 
 that *builds* programs (TXA's workbench, the kernel's own) could not hand the result to a user as something to run. A **disk start** lets a kernel application be a disk: Editor/Assembler option 5,
 `DSK1.HELLO`. **`PRUN`** lets a running kernel application replace itself with another disk-started one, which is what a workbench's "run the game" needs.
 
+**Starting it.** A kernel disk program starts like any option 5 program: with the Editor/Assembler cartridge, option 5 and `DSK1.HELLO`; or, with no Editor/Assembler, from a cartridge built with `"ea5": true` (the workbench cartridge is), whose second menu program, **RUN PROGRAM FILE**, loads and calls the program's bootstrap (workbench manual, 1.31.0).
+
 ## Using it
 
     python3 tools/skbuild.py myapp --disk                 # build/myapp/MYAPP.dsk (double density, 360K)

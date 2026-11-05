@@ -1,0 +1,399 @@
+*======================================================================
+* ea5run.a99 - RUN PROGRAM FILE: Editor/Assembler option 5 for a cartridge that
+* is not the Editor/Assembler (loader.a99 includes it when app.json says
+* "ea5": true, and lists it as a second program in the cartridge's header, so
+* the console's own menu offers it beside the application).
+*
+* It runs from the cartridge's bank 0, straight from the console's menu, before
+* the loader touches anything: the console is as it left it (cards powered up,
+* the mapper off).  The kernel is not used.  It does what the module's option 5
+* does (docs/ROADMAP.md, the traced facts): asks for a file name (DSK1. is
+* there to start with), loads the file with the disk controller's LOAD into
+* VRAM, copies it to its load address, goes on to the next file of the chain
+* (the name's last character plus one) while the file's first word is not 0,
+* then, with the GPL workspace (>83E0) and interrupts on as the console has
+* them, calls the first file's load address with BL (so a program may end with
+* RT: it comes back here and the prompt returns).  A kernel disk program's
+* bootstrap is such an image (skbuild --disk), so this runs those too.
+*
+* FCTN = quits (the console restarts).  The screen is the console's own
+* (Graphics I, 32 columns).  Keys are scanned from the keyboard matrix.
+*======================================================================
+RNBF   EQU  >8320              the typed name (up to 24 characters)
+RNDV   EQU  >8330              the device name for the DSR search (8 bytes)
+RNDSA  EQU  >8340              the DSR routine to call
+RNENT  EQU  >8348              the entry address, as the module keeps it
+RNPAB  EQU  >1300              the PAB in VRAM; the name follows at +10
+RNBUF  EQU  >1380              where the LOAD puts the file
+RNKM   EQU  >8338              the six column bytes of the keyboard scan
+
+* R14 = the name's length in the main code (RNSCN and RNDSR leave it alone)
+EA5RUN LIMI 0
+       LWPI >8300
+RN0    BL   @RNCLS
+       LI   R0,2*32+4
+       LI   R1,RNTTL
+       BL   @RNPRT
+       LI   R0,6*32+2
+       LI   R1,RNASK
+       BL   @RNPRT
+       LI   R0,12*32+2
+       LI   R1,RNHLP
+       BL   @RNPRT
+       LI   R0,8*32+2          the name line starts as DSK1.
+       LI   R1,RNDEF
+       BL   @RNPRT
+       LI   R1,RNDEF+1
+       LI   R2,RNBF
+       LI   R14,5
+RN1    MOVB *R1+,*R2+
+       CI   R2,RNBF+5
+       JL   RN1
+RNK    BL   @RNGET             a key, in the high byte of R0
+       CI   R0,>0D00           ENTER
+       JEQ  RNGO
+       CI   R0,>0F00           FCTN =
+       JEQ  RNQ
+       CI   R0,>0800           FCTN S (left) or FCTN 1 (delete): one back
+       JEQ  RNBS
+       CI   R0,>0300
+       JEQ  RNBS
+       CI   R0,>2000
+       JL   RNK
+       CI   R0,>7F00
+       JHE  RNK
+       CI   R0,>6100           lower case to capitals
+       JL   RN2
+       CI   R0,>7A00
+       JH   RN2
+       AI   R0,->2000
+RN2    CI   R14,24
+       JHE  RNK
+       MOV  R14,R1
+       AI   R1,RNBF
+       MOVB R0,*R1
+       INC  R14
+       MOV  R0,R2
+       LI   R0,8*32+1
+       A    R14,R0
+       BL   @RNVW
+       MOVB R2,@VDPWD
+       JMP  RNK
+RNBS   MOV  R14,R14
+       JEQ  RNK
+       LI   R0,8*32+2
+       A    R14,R0
+       DEC  R0
+       DEC  R14
+       BL   @RNVW
+       LI   R2,>2000
+       MOVB R2,@VDPWD
+       JMP  RNK
+RNQ    BLWP @>0000             the console restarts
+* ENTER: the name into the PAB, then the files one after another
+RNGO   MOV  R14,R14
+       JEQ  RNK
+       CLR  @RNENT
+       LI   R0,RNPAB+10
+       BL   @RNVW
+       LI   R1,RNBF
+       MOV  R14,R2
+RN3    MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  RN3
+RNLD   LI   R0,RNPAB           the PAB: LOAD, buffer >1380, up to >2100 bytes
+       BL   @RNVW
+       LI   R1,RNPAT
+       LI   R2,9
+RN4    MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  RN4
+       MOV  R14,R0
+       SWPB R0
+       MOVB R0,@VDPWD          the name's length
+       LI   R0,RNPAB+9
+       MOV  R0,@>8356
+       BL   @RNDSR             R0 = 0 or the error
+       MOV  R0,R0
+       JNE  RNERR
+       LI   R0,RNBUF           the file's six header bytes
+       BL   @RNVR
+       MOVB @VDPRD,R2          flag: another file follows?
+       SWPB R2
+       MOVB @VDPRD,R2
+       SWPB R2
+       MOVB @VDPRD,R3          length
+       SWPB R3
+       MOVB @VDPRD,R3
+       SWPB R3
+       MOVB @VDPRD,R4          load address
+       SWPB R4
+       MOVB @VDPRD,R4
+       SWPB R4
+       MOV  @RNENT,@RNENT      the first file's address is where it starts
+       JNE  RN5
+       MOV  R4,@RNENT
+RN5    MOV  R3,R3
+       JEQ  RN7
+       CI   R3,>2000
+       JH   RN7
+       MOV  R4,R5
+RN6    MOVB @VDPRD,*R5+        the data, VRAM to its address
+       DEC  R3
+       JNE  RN6
+RN7    MOV  R2,R2
+       JEQ  RNRUN              no more files
+       LI   R0,RNPAB+9         the next name: the last character plus one
+       A    R14,R0
+       BL   @RNVR
+       MOVB @VDPRD,R1
+       AI   R1,>0100
+       LI   R0,RNPAB+9
+       A    R14,R0
+       BL   @RNVW
+       MOVB R1,@VDPWD
+       JMP  RNLD
+RNRUN  MOV  @RNENT,@RNENT
+       JNE  RN8
+       B    @RN0
+RN8    LIMI 2                  as the console has them
+       LWPI >83E0
+       MOV  @RNENT,R8
+       BL   *R8
+       LWPI >8300
+       LIMI 0
+       B    @RN0               the program returned: the prompt again
+* an error: the code (0-7, or >FF: no such device) on the screen, a key, again
+RNERR  MOV  R0,R7
+       LI   R0,14*32+2
+       LI   R1,RNIO
+       CI   R7,>00FF
+       JNE  RNE1
+       LI   R1,RNND
+RNE1   BL   @RNPRT
+       CI   R7,>00FF
+       JEQ  RNE2
+       AI   R7,>0030
+       SWPB R7
+       LI   R0,14*32+12
+       BL   @RNVW
+       MOVB R7,@VDPWD
+RNE2   BL   @RNGET
+       B    @RN0
+* RNGET - wait for a key to go up, then for one to go down: R0 high byte.
+RNGET  MOV  R11,R13
+RNG1   BL   @RNSCN
+       CB   R0,@RNFF
+       JNE  RNG1
+RNG2   BL   @RNSCN
+       CB   R0,@RNFF
+       JEQ  RNG2
+       B    *R13
+* RNSCN - the keyboard once, from the matrix itself (as the kernel's keys.a99
+* does it; the console's KSCAN needs the console's GROMs for its tables): R0 =
+* the key's code in the high byte, >FF for none.  Capitals only; SHIFT gives the
+* symbols; FCTN S or FCTN 1 give >08 or >03 (back), FCTN = gives >0F (quit),
+* other FCTN keys give nothing.  Uses R0-R9, R12.
+RNSCN  CLR  R12
+       SBO  21                 ALPHA LOCK off the row lines while scanning
+       LI   R2,RNKM
+       CLR  R1                 column number in the high byte
+       LI   R3,6
+RNS1   LI   R12,>0024          CRU outputs 18-20 select the column
+       LDCR R1,3
+       NOP
+       NOP
+       LI   R12,>0006          CRU inputs 3-10 are the rows
+       CLR  R4
+       STCR R4,8
+       MOVB R4,*R2+            a 0 bit: that key is down
+       AI   R1,>0100
+       DEC  R3
+       JNE  RNS1
+       MOVB @RNKM,R7           column 0: = SPACE ENTER, then FCTN SHIFT CTRL
+       INV  R7
+       ANDI R7,>FF00
+       LI   R3,RNKM
+       CLR  R5                 the column
+RNS2   MOVB *R3+,R6
+       INV  R6
+       ANDI R6,>FF00
+       MOV  R5,R5
+       JNE  RNS3
+       ANDI R6,>0700           column 0's keys are rows 0-2 only
+RNS3   MOV  R6,R6
+       JNE  RNS4               a key in this column
+       INC  R5
+       CI   R5,6
+       JL   RNS2
+RNNO   LI   R0,>FF00
+       RT
+RNS4   CLR  R1                 its row: the lowest bit
+RNS5   MOV  R6,R9
+       ANDI R9,>0100
+       JNE  RNS6
+       SRL  R6,1
+       INC  R1
+       JMP  RNS5
+RNS6   MOV  R5,R2
+       SLA  R2,3
+       A    R1,R2              column x 8 + row
+       MOVB @KTABN(R2),R0      the code with no modifier
+       MOV  R7,R9
+       ANDI R9,>1000           FCTN?
+       JEQ  RNS7
+       CI   R0,>7300           FCTN S: back
+       JEQ  RNFS
+       CI   R0,>3100           FCTN 1: delete
+       JEQ  RNF1
+       CI   R0,>3D00           FCTN =: quit
+       JNE  RNNO
+       LI   R0,>0F00
+       RT
+RNFS   LI   R0,>0800
+       RT
+RNF1   LI   R0,>0300
+       RT
+RNS7   MOV  R7,R9
+       ANDI R9,>2000           SHIFT?
+       JEQ  RNS8
+       MOVB @KTABS(R2),R0
+       RT
+RNS8   CI   R0,>6100           letters to capitals
+       JL   RNS9
+       CI   R0,>7A00
+       JH   RNS9
+       AI   R0,->2000
+RNS9   RT
+* RNVR / RNVW - the VDP read / write address from R0.  Leaf.
+RNVR   SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       RT
+RNVW   SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       ORI  R0,>4000
+       MOVB R0,@VDPWA
+       ANDI R0,>3FFF
+       RT
+* RNCLS - the screen blank.  RNPRT - the text at R1 (a length byte, then the
+* characters) at screen position R0.
+RNCLS  MOV  R11,R9
+       CLR  R0
+       BL   @RNVW
+       LI   R1,>2000
+       LI   R2,768
+RNC1   MOVB R1,@VDPWD
+       DEC  R2
+       JNE  RNC1
+       B    *R9
+RNPRT  MOV  R11,R9
+       BL   @RNVW
+       MOVB *R1+,R2
+       SRL  R2,8
+       JEQ  RNP2
+RNP1   MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  RNP1
+RNP2   B    *R9
+* RNDSR - the disk controller's (or any card's) DSR for the PAB: the console's
+* own DSRLNK, as the kernel's files.a99 does it.  R0 = 0, or the PAB's error
+* (1-7), or >FF: no card has the device.  Leaves R14 (the name's length).
+RNDSR  MOV  R11,R13
+       MOV  @>8356,R0
+       BL   @RNVR
+       MOVB @VDPRD,R3          the full name's length
+       SRL  R3,8
+       JEQ  RNDNO
+       LI   R4,RNDV
+       CLR  R5                 the device name's length
+RND1   MOVB @VDPRD,R7
+       CB   R7,@RNDOT          the '.' ends the device
+       JEQ  RND2
+       MOVB R7,*R4+
+       INC  R5
+       DEC  R3
+       JNE  RND1
+RND2   MOV  R5,R5
+       JEQ  RNDNO
+       MOV  R5,@>8354          its length, for the DSR
+       MOV  R5,R0              past the device and its '.'
+       INC  R0
+       A    R0,@>8356
+       LI   R12,>0F00
+RNDN   MOV  R12,R12
+       JEQ  RND3
+       SBZ  0                  the last card off
+RND3   AI   R12,>0100
+       CLR  @>83D0
+       CI   R12,>2000
+       JNE  RND4
+       JMP  RNDNO
+RND4   MOV  R12,@>83D0
+       SBO  0                  this card's ROM on
+       LI   R2,>4000
+       CB   *R2,@RNAA          a valid header?
+       JNE  RNDN
+       LI   R2,>4008           its device list
+RND5   MOV  *R2,R2
+       JEQ  RNDN
+       MOV  R2,@>83D2
+       MOV  R2,R8
+       INCT R2
+       MOV  *R2+,R9            the routine
+       MOVB *R2+,R1
+       SRL  R1,8
+       C    R1,R5
+       JNE  RNDG
+       LI   R10,RNDV
+       MOV  R5,R7
+RNDM   CB   *R10+,*R2+
+       JNE  RNDG
+       DEC  R7
+       JNE  RNDM
+       MOV  R9,@RNDSA
+       LWPI >83E0
+       BL   @RNGPL
+       JMP  RNDE0              a plain return: not its device
+       LWPI >8300
+       SETO R5
+       JMP  RNDR
+RNDE0  LWPI >8300
+       MOV  R8,R2
+       JMP  RND5
+RNDG   MOV  @>83D2,R2
+       JMP  RND5
+RNDR   SBZ  0                  the card's ROM off
+       LI   R0,RNPAB+1
+       BL   @RNVR
+       MOVB @VDPRD,R0          the PAB's flag byte
+       SRL  R0,13              its error bits
+       JNE  RNDO
+       MOV  R5,R5
+       JNE  RNDO
+       INC  R0
+RNDO   B    *R13
+RNDNO  LI   R0,>00FF
+       B    *R13
+* RNGPL - call the DSR with the GPL workspace as the console does
+RNGPL  MOV  @>83D0,R12
+       LI   R13,>9800
+       LI   R15,>8C02
+       MOV  @RNDSA,R9
+       B    *R9
+* the text and the constants
+RNTTL  STRI 'RUN PROGRAM FILE'
+RNASK  STRI 'FILE NAME?'
+RNHLP  STRI 'ENTER RUNS   FCTN = QUITS'
+RNDEF  STRI 'DSK1.'
+RNIO   STRI 'I/O ERROR '
+RNND   STRI 'NO SUCH DEVICE'
+RNPAT  BYTE >05,>00,>13,>80,>00,>00,>21,>00,>00
+RNFF   BYTE >FF
+RNDOT  BYTE '.'
+RNAA   BYTE >AA
+       EVEN
+* the keyboard tables the kernel generates (tools/keytab.py)
+       COPY "keytab.a99"

@@ -1,0 +1,6 @@
+{
+  "name": "EA5 TEST",
+  "min_pages": 128,
+  "ea5": true,
+  "modules": [{"name": "hello", "source": "../../../examples/hello/hello.a99"}]
+}

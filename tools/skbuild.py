@@ -12,6 +12,7 @@ app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
+    "ea5": false,                      optional: true adds a second program to the cartridge's menu, RUN PROGRAM FILE (Editor/Assembler option 5, for programs and kernel disk programs): kernel/ea5run.a99
     "sfx": false,                      optional: true puts SFXPLAY and SFXSTOP (sound effects over the song) in the kernel: 512 bytes
     "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
     "disk_name": "HELLO",              optional: the name of the program on a disk (--disk): 1-6 capitals and digits
@@ -210,6 +211,7 @@ def load_app(appdir):
     omit = app.setdefault('omit', [])
     if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
         die('"omit" lists some of: %s' % ', '.join(sorted(OMITTABLE)))
+    app.setdefault('ea5', False)
     app.setdefault('sfx', False)
     if app['sfx'] and 'music' in omit:
         die('\"sfx\": true needs the music player: \"music\" is left out')
@@ -556,7 +558,7 @@ def main():
     if 'appram_code' in app:
         check_same_kernel(bdir + '.ar', bdir)
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
-                 os.path.join(bdir, 'loader.lst'))
+                 os.path.join(bdir, 'loader.lst'), None, ['WITHEA5'] if app['ea5'] else None)
     ds = os.path.join(appdir, 'databank.a99')
     ds = ds if os.path.exists(ds) else os.path.join(ksrc, 'databank.a99')
     data = asm(ds, os.path.join(bdir, 'databank.bin'), incs, os.path.join(bdir, 'databank.lst'))

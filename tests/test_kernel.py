@@ -2801,6 +2801,102 @@ def pic():
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), td + '/app', '--out', td + '/out'], capture_output=True, text=True)
     check(r.returncode == 0 and 'picture art.skp: format 4, 16 colours, 88 rows' in r.stdout, 'the build makes a picture from a TI Artist name (data entry "from": "ART"): %s' % [l for l in r.stdout.split('\n') if 'art.skp' in l][:1])
 
+def ea5run():
+    """RUN PROGRAM FILE (kernel/ea5run.a99, app.json "ea5": true): a second program in the cartridge's menu that does what Editor/Assembler option 5 does.  The simulated machine is started at the
+    runner's entry as the console's menu would start it (the cards powered up as the console has done at boot, the GPL registers as it leaves them), with TI's disk controller ROM and a disk image.
+    Checks: the header lists two programs; a two-file option 5 chain (the next name is the last character plus one) loads at its addresses, runs from the first and comes back with RT to the
+    prompt; the name line edits (FCTN S); a missing file shows the DSR's error, a missing device shows NO SUCH DEVICE; FCTN = restarts the console; a kernel disk program (its bootstrap is an
+    option 5 image) starts and runs; a build without the flag lists one program."""
+    import tempfile, ea5 as ea, tifdc, skdisk
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    rom = os.environ.get('TI_CONSOLE_ROM')
+    rom = rom if rom and os.path.exists(rom) else None
+    cart = build('tests/apps/ea5')
+    bank0 = cart[:8192]
+    def word(a):
+        return int.from_bytes(bank0[a - 0x6000:a - 0x6000 + 2], 'big')
+    progs, e = [], word(0x6006)
+    while e:
+        n = bank0[e + 4 - 0x6000]
+        progs.append((word(e + 2), bank0[e + 5 - 0x6000:e + 5 - 0x6000 + n].decode()))
+        e = word(e)
+    check(len(progs) == 2 and progs[1][1] == 'RUN PROGRAM FILE' and 0x6000 <= progs[1][0] < 0x8000,
+          'the cartridge header lists two programs: %s' % [(hex(a), n) for a, n in progs])
+    entry = progs[1][0]
+    d = tempfile.mkdtemp()
+    open(d + '/q.a99', 'w').write("       AORG >A000\nSTART  LI   R0,>1234\n       MOV  R0,@>3F00\n       MOV  @MORE,R1\n       MOV  R1,@>3F02\n       RT\n       AORG >B000\nMORE   DATA >BEEF\n")
+    subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-i', '-q', d + '/q.a99', '-o', d + '/CHAIN'], check=True, capture_output=True)
+    programs = [(f.upper(), open(os.path.join(d, f), 'rb').read()) for f in sorted(os.listdir(d)) if f.startswith('CHAI')]
+    rh = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h', '--disk', '--geometry', 'sssd'], capture_output=True, text=True)
+    himg = bytearray(open(d + '/h/hello.dsk', 'rb').read())
+    programs += [(n, tifdc.read_program(himg, n)) for n in sorted(tifdc.TIFDC(image=himg).files())]
+    skdisk.make_disk(d + '/d.dsk', [], None, 'EA5RUN', 'sssd', programs=programs)
+    disk = open(d + '/d.dsk', 'rb').read()
+    open(d + '/pw.a99', 'w').write("       AORG >3000\nPWSTUB LWPI >83E0\n       LI   R0,>3FFF\n       MOV  R0,@>8370\n       LI   R12,>1100\n       LI   R13,>9800\n       LI   R15,>8C02\n       SBO  0\n"
+                                   "       MOV  @>4004,R9\nPW1    MOV  R9,R9\n       JEQ  PWD\n       MOV  R9,@>3F20\n       INCT R9\n       MOV  *R9,R9\n       LI   R12,>1100\n       LI   R13,>9800\n       LI   R15,>8C02\n"
+                                   "       BL   *R9\n       JMP  PW2\nPW2    LI   R12,>1100\n       SBO  0\n       MOV  @>3F20,R9\n       MOV  *R9,R9\n       JMP  PW1\nPWD    SBZ  0\nPWEND  JMP  PWEND\n")
+    subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-b', '-q', d + '/pw.a99', '-o', d + '/pw.bin'], check=True, capture_output=True)
+    pw = open(d + '/pw.bin', 'rb').read()
+    def row(m, n):
+        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').rstrip()
+    def session(keys, until, limit=200, stop_at=None):
+        m = sim9900.Machine(bank0)
+        if rom:
+            m.console_rom = sim9900.load_console_rom(rom)
+        m.tifdc = tifdc.TIFDC(image=bytearray(disk))
+        m.presses, m.toggles, end = sim9900.schedule(sim9900.parse_keys(keys))
+        cpu = sim9900.CPU(m)
+        for i, b in enumerate(pw):
+            m.wb(0x3000 + i, b)
+        cpu.pc, cpu.wp, cpu.limi = 0x3000, 0x83E0, 0
+        for k in range(400000):                      # the console's power-up of the cards
+            cpu.step()
+            if cpu.pc == 0x3000 + len(pw) - 2:
+                break
+        m.ww(0x3F00, 0); m.ww(0x3F02, 0)
+        cpu.pc, cpu.wp, cpu.limi = entry, 0x83E0, 2   # as the menu starts a program
+        m.ww(0x83E0 + 26, 0x9800); m.ww(0x83E0 + 28, 0x0100); m.ww(0x83E0 + 30, 0x8C02)
+        trail = []
+        try:
+            for i in range(limit):
+                for k in range(20000):
+                    cpu.step()
+                    if stop_at is not None:
+                        trail.append(cpu.pc)
+                        del trail[:-12]
+                        if cpu.pc == stop_at:
+                            return m, cpu
+                if until(m, cpu):
+                    break
+        except sim9900.Halt as e:
+            pass                                  # (after a reset the simulated console starts the kernel with no banks copied: it halts)
+        return m, cpu
+    m, cpu = session('<WAIT 30>chainx<F-s><WAIT 20>', lambda m, c: row(m, 8) == '  DSK1.CHAIN', 60)
+    check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.CHAIN', 'the prompt shows the title and a name line that starts as DSK1. and takes typing (chainx) and FCTN S (one back): %r' % row(m, 8))
+    m, cpu = session('<WAIT 30>chain<ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234 and row(m, 8) == '  DSK1.')
+    check(m.rw(0x3F00) == 0x1234 and m.rw(0x3F02) == 0xBEEF,
+          'a two-file option 5 image (CHAIN and CHAIO): the first file ran at its load address (marker >%04X) and read what the second put at >B000 (>%04X)' % (m.rw(0x3F00), m.rw(0x3F02)))
+    for i in range(20):
+        for k in range(20000):
+            cpu.step()
+    check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.', 'the program ended with RT and the prompt came back, the name line reset to DSK1.')
+    m, cpu = session('<WAIT 30>nosuch<ENTER><WAIT 100>', lambda m, c: 'I/O ERROR' in row(m, 14))
+    check(row(m, 14).strip() == 'I/O ERROR 7', 'a file that is not on the disk: the DSR\'s error on the screen (%r)' % row(m, 14))
+    m, cpu = session('<WAIT 30><F-s><F-s><F-s><F-s><F-s>dsk9.x<ENTER><WAIT 100>', lambda m, c: 'NO SUCH' in row(m, 14))
+    check(row(m, 14).strip() == 'NO SUCH DEVICE', 'a device no card has: NO SUCH DEVICE (%r)' % row(m, 14))
+    if rom:
+        m, cpu = session('<WAIT 30><F-=><WAIT 20>', lambda m, c: getattr(m, 'console_resets', 0) > 0, 80, stop_at=None)
+        check(getattr(m, 'console_resets', 0) == 1, 'FCTN = restarts the console: the runner did BLWP @>0000, the console\'s reset (the simulator counts it: %d)' % getattr(m, 'console_resets', 0))
+    m, cpu = session('<WAIT 30>hello<ENTER>', lambda m, c: 'Hello' in ' '.join(sim9900.screen(m).split('\n')[:3]), 400)
+    check('Hello' in ' '.join(sim9900.screen(m).split('\n')[:3]),
+          'a kernel disk program (HELLO and its banks): its bootstrap is an option 5 image, loaded and called by the runner, which reads the banks and starts the kernel: the application\'s screen shows %r' % ' '.join(sim9900.screen(m).split('\n')[:1]).strip())
+    plain = build('hello')
+    pb = plain[:8192]
+    check(int.from_bytes(pb[6:8], 'big') != 0 and int.from_bytes(pb[int.from_bytes(pb[6:8], 'big') - 0x6000:][:2], 'big') == 0,
+          'without "ea5" the cartridge lists one program, as before')
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -2958,7 +3054,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

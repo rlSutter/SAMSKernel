@@ -16,5 +16,6 @@
     }
   ],
   "boot": "wb",
-  "disk_name": "WBENCH"
+  "disk_name": "WBENCH",
+  "ea5": true
 }

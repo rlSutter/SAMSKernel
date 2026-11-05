@@ -59,11 +59,21 @@
        DATA >0000              DSR list
        DATA >0000              subprogram list
        DATA >0000,>0000
+       .ifdef WITHEA5
+PRGLST DATA PRGL2              next program: RUN PROGRAM FILE
+       .else
 PRGLST DATA >0000              next program: none
+       .endif
        DATA START
 * BYTE n, TEXT '...' : the name the console's menu shows
        COPY  "appname.a99"
        EVEN
+       .ifdef WITHEA5
+PRGL2  DATA >0000              (app.json "ea5": true; kernel/ea5run.a99)
+       DATA EA5RUN
+       STRI 'RUN PROGRAM FILE'
+       EVEN
+       .endif
        .endif
 
 * START - the cartridge's program: the four checks, then the copy.  Never
@@ -294,5 +304,8 @@ BADPG  EQU  >8370              the failing page, for the message (scratchpad)
        COPY "f18det.a99"
        .ifdef DISKBOOT
        COPY "dskboot.a99"
+       .endif
+       .ifdef WITHEA5
+       COPY "ea5run.a99"
        .endif
        END
