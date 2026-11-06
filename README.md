@@ -106,4 +106,4 @@ ROM images). **It has not been run on a real TI-99/4A.** The parts it shares wit
 else is new since: the module system, the page pool, every other F18A mode, the music player, joysticks, several open files, cards above 1M, the workbench. js99er with a 16M SAMS has run the kernel (it found the QUIT bug fixed in 1.3.1). Run `examples/diag` and press
 CTRL T on the first real machine, then work through [docs/HARDWARE-CHECKLIST.md](docs/HARDWARE-CHECKLIST.md).
 
-MIT License, (c) 2026 Rebecca Sutter. Code from the owner's other projects (TXA, TIthon) that is taken into this tree is MIT too, and each such file says so.
+MIT License, (c) 2026 Rebecca Sutter. Code from the owner's other projects (TXA, Press) that is taken into this tree is MIT too, and each such file says so.
