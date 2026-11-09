@@ -1487,7 +1487,7 @@ def sourcesdisk():
     check(missing == {'appcfg', 'appname', 'appmsg', 'modid'}, 'every COPY target is on the disk except the files the build writes for each application (modid only for a module-program host): %s' % sorted(missing))
     info = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.environ['XAS99']), 'xdm99.py'), out], capture_output=True, text=True).stdout.split('\n')[0]
     used = int(re.search(r':\s+(\d+) used\s+(\d+) free', info).group(1))
-    check('SOURCES' in info and '2S/2D' in info and used < 1300, 'a double-density disk named SOURCES with room to spare: %s' % info.strip())
+    check('SOURCES' in info and '2S/2D' in info and used < 1380, 'a double-density disk named SOURCES with room to spare (under 1,380 of 1,440 sectors used): %s' % info.strip())
     back = tifdc.read_file(bytearray(open(out, 'rb').read()), 'SRCNOTES')
     check(b'\n'.join(back).decode('latin-1').rstrip() == mksources.NOTES.rstrip(), 'SRCNOTES reads back from the image record for record')
 
@@ -3290,7 +3290,196 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+def fixed():
+    """lib/fixed.a99: the 8.8 fixed-point routines called with chosen registers in the simulator and compared with Python: FXMUL and FXDIV on
+    random and extreme operands (the rounding and the saturation as documented), FXSIN and FXCOS on every angle, FXPOL, FXATN2 against
+    atan2 (within one unit, exact on the axes), FXSQRT and ISQRT exactly against the integer square root."""
+    import asmharness, random, math
+    c = build('tests/apps/fixed')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'fixed', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'fixed', 'fx.equ')))
+    m = sim9900.Machine(c)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    n = 0
+    while not (0xA000 <= cpu.pc < 0xE000 and cpu.wp == 0x8300) and n < 200000:
+        cpu.step(); n += 1
+    call = lambda name, **r: asmharness.call(m, cpu, syms[name], {int(k[1:]): v & 0xFFFF for k, v in r.items()})
+    sg = lambda v: v - 0x10000 if v & 0x8000 else v
+    rnd = random.Random(2026)
+    edge = [0, 1, -1, 0x7FFF, -0x8000, 0x100, -0x100, 0x80, 0x7F, 0x4000, -0x4000, 0x0101, -0x0101, 255, -255]
+    pairs = [(a, b) for a in edge for b in edge] + [(rnd.randint(-0x8000, 0x7FFF), rnd.randint(-0x8000, 0x7FFF)) for _ in range(1500)] + [(rnd.randint(-0x900, 0x900), rnd.randint(-0x900, 0x900)) for _ in range(500)]
+    bad = None
+    for a, b in pairs:
+        got = sg(call('fxmul', r0=a, r1=b)[0])
+        want = sg(((a * b) >> 8) & 0xFFFF)
+        if got != want and bad is None:
+            bad = (a, b, got, want)
+    check(bad is None, 'FXMUL: %d signed products (extremes, random, small) equal (a x b) >> 8 wrapped to 16 bits%s' % (len(pairs), '' if bad is None else ' (first miss %s)' % (bad,)))
+    bad = None
+    for a, b in pairs:
+        got = sg(call('fxdiv', r0=a, r1=b)[0])
+        neg = (a < 0) != (b < 0)
+        if b == 0:
+            want = -0x7FFF if a < 0 else 0x7FFF
+        else:
+            q = (abs(a) << 8) // abs(b)
+            want = (-0x7FFF if neg else 0x7FFF) if q > 0x7FFF else (-q if neg else q)
+        if got != want and bad is None:
+            bad = (a, b, got, want)
+    check(bad is None, 'FXDIV: %d quotients equal |a| x 256 / |b| rounded toward zero with the sign, and >7FFF (>8001) when it does not fit or b is 0%s' % (len(pairs), '' if bad is None else ' (first miss %s)' % (bad,)))
+    tab = [round(256 * math.sin(i * math.pi / 128)) for i in range(65)]
+    def sine(a):
+        a &= 255
+        q, i = a >> 6, a & 63
+        v = tab[i] if q % 2 == 0 else tab[64 - i]
+        return v if q < 2 else -v
+    bad = None
+    for a in range(256):
+        for hi in (0, 0x1200):
+            s = sg(call('fxsin', r0=a | hi)[0]); cc = sg(call('fxcos', r0=a | hi)[0])
+            if (s, cc) != (sine(a), sine(a + 64)) and bad is None:
+                bad = (a, s, cc, sine(a), sine(a + 64))
+    worst = max(abs(sine(a) - 256 * math.sin(a * 2 * math.pi / 256)) for a in range(256))
+    check(bad is None and sine(0) == 0 and sine(64) == 256 and sine(128) == 0 and sine(192) == -256 and worst <= 0.5,
+          'FXSIN and FXCOS: all 256 angles (the high byte ignored) equal the quarter-wave table\'s values, the true sine to within %.2f of a unit%s' % (worst, '' if bad is None else ' (first miss %s)' % (bad,)))
+    kept = True
+    for name in ('fxmul', 'fxdiv', 'fxsin', 'fxcos', 'fxpol', 'fxatn2', 'fxsqrt', 'isqrt'):
+        r = asmharness.call(m, cpu, syms[name], {0: 0x0123, 1: 0x0045, 10: 0xBEE0, 12: 0xC0DE, 13: 0xD00D, 14: 0xE00E, 15: 0xF00F})
+        kept = kept and [r[10], r[12], r[13], r[14], r[15]] == [0xBEE0, 0xC0DE, 0xD00D, 0xE00E, 0xF00F]
+    check(kept, 'every routine leaves R10 and R12-R15 as it found them')
+    bad = None
+    for _ in range(300):
+        a, s = rnd.randint(0, 255), rnd.randint(-0x800, 0x800)
+        r = call('fxpol', r0=a, r1=s)
+        want = (sg(((s * sine(a)) >> 8) & 0xFFFF), sg(((s * sine(a + 64)) >> 8) & 0xFFFF))
+        if (sg(r[0]), sg(r[1])) != want and bad is None:
+            bad = (a, s, sg(r[0]), sg(r[1]), want)
+    check(bad is None, 'FXPOL: 300 (angle, speed) pairs give (speed x sine, speed x cosine) as FXMUL rounds them%s' % ('' if bad is None else ' (first miss %s)' % (bad,)))
+    vec = [(0, 0), (0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1), (0x7FFF, 1), (1, 0x7FFF), (-0x8000, -0x8000), (-0x8000, 0), (0, -0x8000), (100, 100), (100, -100), (3, 400), (400, 3)]
+    vec += [(rnd.randint(-0x8000, 0x7FFF), rnd.randint(-0x8000, 0x7FFF)) for _ in range(400)] + [(rnd.randint(-40, 40), rnd.randint(-40, 40)) for _ in range(600)]
+    worst, bad, axes = 0.0, None, True
+    for dy, dx in vec:
+        got = call('fxatn2', r0=dy, r1=dx)[0]
+        if (dy, dx) == (0, 0):
+            if got != 0 and bad is None:
+                bad = (dy, dx, got)
+            continue
+        true = (math.atan2(dy, dx) * 256 / (2 * math.pi)) % 256
+        err = min(abs(got - true), 256 - abs(got - true))
+        worst = max(worst, err)
+        if err > 1.0 and bad is None:
+            bad = (dy, dx, got, true)
+    for (dy, dx), want in (((0, 5), 0), ((5, 0), 64), ((0, -5), 128), ((-5, 0), 192), ((0, 0x7FFF), 0), ((-0x8000, 0), 192)):
+        axes = axes and call('fxatn2', r0=dy, r1=dx)[0] == want
+    check(bad is None and axes, 'FXATN2: %d directions (axes, extremes, random) are within one unit of atan2 (the worst %.2f), (0,0) gives 0 and the four axes are exact%s' % (len(vec), worst, '' if bad is None else ' (first miss %s)' % (bad,)))
+    xs = [0, 1, 2, 3, 4, 255, 256, 257, 0x7FFF, 0x8000, 0xFFFF, 0xFFFE] + [rnd.randint(0, 0xFFFF) for _ in range(1200)]
+    bad = None
+    for x in xs:
+        a = call('fxsqrt', r0=x)[0]; b = call('isqrt', r0=x)[0]
+        if (a, b) != (math.isqrt(x << 8), math.isqrt(x)) and bad is None:
+            bad = (x, a, b, math.isqrt(x << 8), math.isqrt(x))
+    sq = all(call('isqrt', r0=k * k)[0] == k and call('isqrt', r0=k * k - 1)[0] == k - 1 for k in (1, 2, 17, 100, 254, 255))
+    check(bad is None and sq, 'FXSQRT and ISQRT: %d values equal the integer square root of x x 256 and of x, and the perfect squares and their predecessors come out right%s' % (len(xs), '' if bad is None else ' (first miss %s)' % (bad,)))
+
+
+def pixel():
+    """lib/spmpix.a99: SPMPIX, the pixel-exact test of two sprites, against a Python model of the same ring-shaped field: random 8 x 8 and
+    16 x 16 patterns (read from the video memory, as the chip would draw them) at random offsets near and across the wrap, directed cases
+    at the corners and edges, a sprite the table does not hold, and the registers it must keep."""
+    import asmharness, random
+    c = build('tests/apps/pixtest')
+    syms = asmharness.symbols(os.path.join(ROOT, 'build', 'pixtest', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(ROOT, 'build', 'pixtest', 'px.equ')))
+    m = sim9900.Machine(c)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = sim9900.CPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    n = 0
+    while not (0xA000 <= cpu.pc < 0xE000 and cpu.wp == 0x8300) and n < 200000:
+        cpu.step(); n += 1
+    call = lambda name, **r: asmharness.call(m, cpu, syms[name], {int(k[1:]): v & 0xFFFF for k, v in r.items()})
+    TAB, BUF, SAT, PT = syms['appram'], syms['appram'] + 64, 0x1000, 0x1800
+    call('spmini', r0=TAB, r1=2, r2=SAT)
+    def pixels(raw, size):
+        s = set()
+        for r in range(size):
+            for cc in range(8):
+                if raw[r] >> (7 - cc) & 1:
+                    s.add((r, cc))
+                if size == 16 and raw[16 + r] >> (7 - cc) & 1:
+                    s.add((r, 8 + cc))
+        return s
+    def model(ra, rb, size, ya, xa, yb, xb):
+        A = {((ya + r) & 255, (xa + cc) & 255) for r, cc in pixels(ra, size)}
+        B = {((yb + r) & 255, (xb + cc) & 255) for r, cc in pixels(rb, size)}
+        return 1 if A & B else 0
+    def run(ra, rb, size, ya, xa, yb, xb, na, nb):
+        for i, b in enumerate(ra):
+            m.vram[PT + na * 8 + i] = b
+        for i, b in enumerate(rb):
+            m.vram[PT + nb * 8 + i] = b
+        m.vram[SAT + 2] = na
+        m.vram[SAT + 6] = nb
+        call('spmput', r0=0, r1=ya, r2=xa)
+        call('spmput', r0=1, r1=yb, r2=xb)
+        return call('spmpix', r0=0, r1=1, r2=1 if size == 16 else 0, r3=PT, r4=BUF)[0]
+    rnd = random.Random(7)
+    def sparse(k):
+        return bytes(rnd.getrandbits(8) & rnd.getrandbits(8) for _ in range(k))
+    for size in (8, 16):
+        bad, hits, k = None, 0, 0
+        for i in range(260):
+            ra, rb = sparse(size * size // 8), sparse(size * size // 8)
+            step = 1 if size == 8 else 4
+            na, nb = rnd.sample(range(0, 28, step), 2)
+            ya = rnd.choice([rnd.randint(0, 255), rnd.randint(244, 255), rnd.randint(0, 12)])
+            xa = rnd.choice([rnd.randint(0, 255), rnd.randint(244, 255), rnd.randint(0, 12)])
+            if i % 10 == 9:
+                dy, dx = rnd.randint(-100, 100), rnd.randint(-100, 100)
+            else:
+                dy, dx = rnd.randint(-size, size), rnd.randint(-size, size)
+            yb, xb = (ya - dy) & 255, (xa - dx) & 255
+            want = model(ra, rb, size, ya, xa, yb, xb)
+            got = run(ra, rb, size, ya, xa, yb, xb, na, nb)
+            hits += want
+            k += 1
+            if got != want and bad is None:
+                bad = (size, ya, xa, yb, xb, got, want)
+        check(bad is None and 40 <= hits <= k - 40, 'SPMPIX, %d x %d: %d random pairs of sparse patterns near each other and across the wrap agree with the model (%d touch, %d do not)%s' % (size, size, k, hits, k - hits, '' if bad is None else ' (first miss %s)' % (bad,)))
+    full8, full16, empty8 = bytes([255]) * 8, bytes([255]) * 32, bytes(8)
+    one_br, one_tl = bytes([0] * 7 + [1]), bytes([0x80] + [0] * 7)
+    cases = [((full8, full8, 8, 50, 50, 50 + d1, 50 + d2), w) for d1, d2, w in ((7, 7, 1), (8, 7, 0), (7, 8, 0), (-7, -7, 1), (-8, 0, 0), (0, -8, 0), (0, 0, 1))]
+    cases += [((one_br, one_tl, 8, 100, 100, 107, 107), 1), ((one_br, one_tl, 8, 100, 100, 107, 106), 0), ((one_br, one_tl, 8, 100, 100, 106, 107), 0), ((full8, empty8, 8, 20, 20, 20, 20), 0), ((full16, full16, 16, 250, 250, 2, 3), 1), ((full16, full16, 16, 0, 0, 16, 16), 0), ((full16, full16, 16, 0, 0, 15, 15), 1)]
+    ok = True
+    for (ra, rb, size, ya, xa, yb, xb), want in cases:
+        got = run(ra, rb, size, ya, xa, yb, xb, 0, 4)
+        ok = ok and got == want == model(ra, rb, size, ya, xa, yb, xb)
+    check(ok, 'SPMPIX: %d directed cases (full squares 7 and 8 apart on each side, a single pixel at the far corners, an empty pattern, across the wrap, 16 x 16 at 15 and 16 apart) give the expected answers' % len(cases))
+    check(call('spmpix', r0=0, r1=5, r2=0, r3=PT, r4=BUF)[0] == 0 and call('spmpix', r0=7, r1=1, r2=0, r3=PT, r4=BUF)[0] == 0, 'a sprite number the table does not hold gives 0')
+    # the demo that uses it with the fixed-point library: a turret aims at a ring and fires; a bullet through the hollow centre is a miss
+    ca = build('aim')
+    sa = asmharness.symbols(os.path.join(ROOT, 'build', 'aim', 'aim.equ'))
+    ma = sim9900.Machine(ca)
+    ma.presses, ma.toggles, end = sim9900.schedule([])
+    cpa = sim9900.CPU(ma)
+    cpa.pc = ma.rw(ma.rw(0x6006) + 2)
+    while ma.insns < 600 * sim9900.VSYNC_INSNS:
+        cpa.step()
+    shots, hits = ma.rw(sa['shots']), ma.rw(sa['hits'])
+    ry, rx = ma.rw(sa['tab']) >> 8, ma.rw(sa['tab'] + 2) >> 8
+    check(shots >= 8 and 1 <= hits < shots and 8 <= ry <= 176 and 8 <= rx <= 240 and bytes(ma.vram).find(b'SHOTS') >= 0,
+          'examples/aim after 600 frames: the turret has fired %d times (FXATN2 and FXPOL), %d bullets hit the ring (SPMPIX: the rest missed or went through its hollow centre), the ring is inside its box (%d, %d) and the counts are on screen' % (shots, hits, ry, rx))
+    r = asmharness.call(m, cpu, syms['spmpix'], {0: 0, 1: 1, 2: 0, 3: PT, 4: BUF, 10: m.rw(0x8314), 12: 0xC0DE, 13: 0xD00D, 14: 0xE00E, 15: 0xF00F})
+    check([r[12], r[13], r[14], r[15]] == [0xC0DE, 0xD00D, 0xE00E, 0xF00F] and r[10] == m.rw(0x8314), 'SPMPIX leaves R10 (the stack pointer) and R12-R15 as it found them')
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

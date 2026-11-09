@@ -1,0 +1,211 @@
+*======================================================================
+* aim.a99 - a turret that aims at a ring: lib/fixed.a99 (FXATN2 for the
+* direction, FXPOL for the velocity) and lib/spmpix.a99 (SPMPIX, the
+* pixel-exact test) on top of sprite motion (app.json "motion" and
+* "motion_helpers").
+*
+* The ring (sprite 0) drifts about and bounces off the edges of a box
+* (SPMBOX).  Every 64 frames the turret in the middle (sprite 2) fires a bullet
+* (sprite 1) at where the ring is NOW, so it often arrives where the ring
+* has left; a bullet that reaches the ring is a hit if one of its pixels is
+* on one of the ring's: one that comes through the ring's hollow centre
+* is not.  SHOTS and HITS are counted on the top line.  FCTN = quits.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+TURRY  EQU  88                         the turret's corner: the middle of
+TURRX  EQU  124                        the screen
+TAB    EQU  APPRAM                     the motion table: 3 sprites x 8 bytes
+BUF    EQU  APPRAM+32                  SPMPIX's work space, 72 bytes
+BOXR   EQU  APPRAM+104                 the ring's box: Ymin, Ymax, Xmin, Xmax
+SHOTS  EQU  APPRAM+112
+HITS   EQU  APPRAM+114
+LIFE   EQU  APPRAM+116                 frames the bullet has left (0: none)
+FLASH  EQU  APPRAM+118                 frames the ring stays white after a hit
+CBUF   EQU  APPRAM+120
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R0,VMGM1                   Graphics I, sprites on
+       LI   R1,VOSPR
+       BL   @VMODE
+       LI   R0,SPTAB                   patterns: a ring, a dot, a turret
+       LI   R1,PATS
+       LI   R2,24
+       BL   @VMBW
+       LI   R0,TAB
+       LI   R1,3
+       LI   R2,SATAB
+       BL   @SPMINI
+       LI   R5,BOXD                    the ring's box, into RAM for the kernel
+       LI   R6,BOXR
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       CLR  R0                         sprite 0 only bounces in it
+       CLR  R1
+       LI   R2,BOXR
+       BL   @SPMBOX
+       CLR  R0                         the ring: here, going this way
+       LI   R1,30
+       LI   R2,40
+       BL   @SPMPUT
+       CLR  R0
+       LI   R1,>00C0
+       LI   R2,>0140
+       BL   @SPMVEL
+       LI   R0,2                       the turret
+       LI   R1,TURRY
+       LI   R2,TURRX
+       BL   @SPMPUT
+       CLR  @SHOTS
+       CLR  @HITS
+       CLR  @FLASH
+       BL   @PARK
+       CLR  R5                         patterns and colours: sprite n
+IN1    MOV  R5,R0
+       SLA  R0,2
+       AI   R0,SATAB+2
+       MOV  R5,R1
+       SLA  R1,8                       the pattern number n
+       MOV  R1,@CBUF
+       LI   R2,>0800                   colours: red, white, yellow
+       CI   R5,1
+       JNE  IN2
+       LI   R2,>0F00
+IN2    CI   R5,2
+       JNE  IN3
+       LI   R2,>0A00
+IN3    MOVB R2,@CBUF+1
+       LI   R1,CBUF
+       LI   R2,2
+       BL   @VMBW
+       INC  R5
+       CI   R5,3
+       JL   IN1
+       .leave
+       RT
+
+* The bullet, out of sight below the screen and standing still.
+PARK   .enter
+       LI   R0,1
+       LI   R1,200
+       CLR  R2
+       BL   @SPMPUT
+       LI   R0,1
+       CLR  R1
+       CLR  R2
+       BL   @SPMVEL
+       CLR  @LIFE
+       .leave
+       RT
+
+* Fire: the angle from the turret to the ring (FXATN2), a velocity of 3 dots
+* a frame at that angle (FXPOL), the bullet put on the turret and sent.
+FIRE   .enter
+       INC  @SHOTS
+       MOV  @TAB,R0                    the ring's Y, in dots, minus the turret's
+       SRL  R0,8
+       AI   R0,-TURRY
+       MOV  @TAB+2,R1                  and X
+       SRL  R1,8
+       AI   R1,-TURRX
+       BL   @FXATN2
+       LI   R1,>0300
+       BL   @FXPOL                     R0 = the Y part, R1 = the X part
+       MOV  R1,R2
+       MOV  R0,R1
+       LI   R0,1
+       BL   @SPMVEL
+       LI   R0,1
+       LI   R1,TURRY
+       LI   R2,TURRX
+       BL   @SPMPUT
+       LI   R0,55
+       MOV  R0,@LIFE
+       .leave
+       RT
+
+* The colour of the ring: R1 in the high byte.
+RINGC  .enter
+       LI   R0,SATAB+3
+       MOVB R1,@CBUF
+       LI   R1,CBUF
+       LI   R2,1
+       BL   @VMBW
+       .leave
+       RT
+
+TICK   .enter
+       CI   R0,KQUIT*256
+       JNE  TK0
+       SETO @QUITF
+       JMP  TK9
+TK0    MOV  @LIFE,R0                   a bullet in flight?
+       JEQ  TK2
+       DEC  @LIFE
+       JNE  TK1
+       BL   @PARK                      it has gone far enough
+       JMP  TK2
+TK1    CLR  R0                         does it touch the ring, pixel for pixel?
+       LI   R1,1
+       CLR  R2                         8 x 8 sprites
+       LI   R3,SPTAB
+       LI   R4,BUF
+       BL   @SPMPIX
+       MOV  R0,R0
+       JEQ  TK2
+       INC  @HITS                      a hit: the bullet is spent
+       BL   @PARK
+       LI   R0,10                      and the ring flashes
+       MOV  R0,@FLASH
+       LI   R1,>0F00
+       BL   @RINGC
+TK2    MOV  @FLASH,R0
+       JEQ  TK3
+       DEC  @FLASH
+       JNE  TK3
+       LI   R1,>0800                   the flash is over
+       BL   @RINGC
+TK3    MOV  @LIFE,R0                   every 64 frames, no bullet out: fire
+       JNE  TK4
+       MOV  @FRAME,R0
+       ANDI R0,>003F
+       JNE  TK4
+       BL   @FIRE
+TK4    LI   R0,1                       SHOTS n   HITS n
+       LI   R1,TSHOT
+       CLR  R2
+       BL   @PUTS
+       LI   R0,8
+       MOV  @SHOTS,R1
+       CLR  R2
+       BL   @DECW
+       LI   R0,14
+       LI   R1,THITS
+       CLR  R2
+       BL   @PUTS
+       LI   R0,19
+       MOV  @HITS,R1
+       CLR  R2
+       BL   @DECW
+TK9    .leave
+       RT
+
+TSHOT  STRI 'SHOTS'
+THITS  STRI 'HITS'
+
+* the ring (a hollow centre 4 x 4), the bullet (2 x 2) and the turret
+PATS   BYTE >3C,>7E,>C3,>C3,>C3,>C3,>7E,>3C
+       BYTE >00,>00,>00,>18,>18,>00,>00,>00
+       BYTE >18,>3C,>7E,>FF,>FF,>7E,>3C,>18
+
+* Ymin, Ymax, Xmin, Xmax: where the ring's corner may be
+BOXD   DATA 8,176,8,240
+
+       COPY "fixed.a99"
+       COPY "spmpix.a99"

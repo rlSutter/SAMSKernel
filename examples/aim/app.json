@@ -1,0 +1,12 @@
+{
+  "name": "AIM",
+  "min_pages": 128,
+  "motion": true,
+  "motion_helpers": true,
+  "modules": [
+    {
+      "name": "aim",
+      "source": "aim.a99"
+    }
+  ]
+}

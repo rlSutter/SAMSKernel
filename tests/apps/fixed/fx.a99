@@ -1,0 +1,13 @@
+*======================================================================
+* fx.a99 - a module for tests/test_kernel.py (group fixed): only the
+* fixed-point include, so that the test can call its routines.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+       COPY "fixed.a99"

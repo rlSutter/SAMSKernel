@@ -1,0 +1,149 @@
+*======================================================================
+* spmpix.a99 - do two sprites touch, pixel for pixel?  An optional include:
+* COPY "spmpix.a99" after a module's code, in a program built with
+* app.json "motion": true.  About 330 bytes; nothing in the kernel changes.
+*
+*   SPMPIX  R0, R1 = two sprites of the motion table (SPMHIT's numbers)
+*           R2 = 0 for 8 x 8 sprites, 1 for 16 x 16 (the size VMODE's
+*                sprite option set; magnified sprites are not handled: use
+*                SPMHIT with the size 16 or 32 for those)
+*           R3 = the VRAM address of the sprite pattern table
+*           R4 = the address of 72 bytes of the program's RAM to work in
+*           R0 = 1 if a set pixel of one is on a set pixel of the other, else 0
+*           (also for a sprite number the table does not hold).
+*           Uses R0-R9; keeps R10 and up (R11 is saved on the stack).
+*
+* The positions are the motion table's (the high bytes: the attribute
+* table's own Y and X) and the playing field wraps at 256 in both directions
+* as the motion table does, so that two sprites either side of the wrap, as
+* SPMHIT counts them, are tested as they would be on a field that is a
+* ring.  The patterns are read from the video memory, so it is what the chip
+* draws that is tested: the sprite pattern numbers from the attribute table
+* (SPMSAT + 4 x sprite + 2; a 16 x 16 sprite uses the number with its low
+* two bits cleared) and the pattern bytes (8, or 32 in the chip's order:
+* upper left, lower left, upper right, lower right).  A sprite's colour
+* does not matter, not even a transparent one; the chip's coincidence flag
+* is the same.  The corner test of SPMHIT is done first, so that sprites
+* that are not near each other cost no video memory reads.
+*======================================================================
+
+SPMPIX .enter
+       LI   R9,8                the size, 8 or 16
+       MOV  R2,R2
+       JEQ  PX0
+       LI   R9,16
+       JMP  PX0
+PXZ    B    @PXNO               (a jump that is out of reach of PXNO)
+PX0    MOV  @SPMTAB,R5
+       JEQ  PXZ
+       C    R0,@SPMCNT
+       JHE  PXZ
+       C    R1,@SPMCNT
+       JHE  PXZ
+       MOV  R0,R6
+       SLA  R6,3
+       A    R5,R6               sprite A's entry
+       MOV  R1,R7
+       SLA  R7,3
+       A    R5,R7               sprite B's entry
+       MOVB *R6,R8
+       SB   *R7,R8
+       SRA  R8,8                R8 = dY, A minus B (a byte's wrap, signed)
+       MOV  R8,R2
+       ABS  R2
+       C    R2,R9
+       JHE  PXZ                too far apart in Y
+       MOVB @2(R6),R6
+       SB   @2(R7),R6
+       SRA  R6,8                R6 = dX
+       MOV  R6,R2
+       ABS  R2
+       C    R2,R9
+       JHE  PXZ                too far apart in X
+       SLA  R0,2                near: the pattern numbers (attribute table)
+       A    @SPMSAT,R0
+       AI   R0,2
+       MOV  R4,R1
+       AI   R1,64
+       LI   R2,1
+       BL   @VMBR
+       MOV  R7,R0               B's entry: eight bytes a sprite in the table,
+       S    @SPMTAB,R0          four in the attribute table
+       SRL  R0,1
+       A    @SPMSAT,R0
+       AI   R0,2
+       MOV  R4,R1
+       AI   R1,65
+       LI   R2,1
+       BL   @VMBR
+       MOV  R4,R5               clear the 64 bytes the patterns go in
+       LI   R2,32
+PX1    CLR  *R5+
+       DEC  R2
+       JNE  PX1
+       LI   R5,8                the bytes of a pattern
+       CI   R9,16
+       JNE  PX2
+       LI   R5,32
+PX2    MOVB @64(R4),R0          sprite A's pattern number
+       SRL  R0,8
+       CI   R9,16
+       JNE  PX3
+       ANDI R0,>00FC
+PX3    SLA  R0,3
+       A    R3,R0
+       MOV  R4,R1
+       MOV  R5,R2
+       BL   @VMBR
+       MOVB @65(R4),R0          sprite B's
+       SRL  R0,8
+       CI   R9,16
+       JNE  PX4
+       ANDI R0,>00FC
+PX4    SLA  R0,3
+       A    R3,R0
+       MOV  R4,R1
+       AI   R1,32
+       MOV  R5,R2
+       BL   @VMBR
+       CLR  R7                  A's row, 0 up
+PXL    MOV  R7,R5
+       A    R8,R5               the row of B on the same line
+       C    R5,R9
+       JHE  PXN                 none (negative is a large number here)
+       MOV  R4,R1
+       A    R7,R1
+       CLR  R2
+       MOVB *R1,R2              A's row as a word: the left byte ...
+       MOVB @16(R1),R0
+       SRL  R0,8
+       SOC  R0,R2               ... and the right
+       MOV  R4,R1
+       AI   R1,32
+       A    R5,R1
+       CLR  R3
+       MOVB *R1,R3              B's row
+       MOVB @16(R1),R0
+       SRL  R0,8
+       SOC  R0,R3
+       MOV  R6,R6               A's pixels in B's columns: shifted by dX
+       JEQ  PXS
+       JLT  PXR
+       MOV  R6,R0
+       SRL  R2,0                (the count is in R0: 1-15 here)
+       JMP  PXS
+PXR    MOV  R6,R0
+       NEG  R0
+       SLA  R2,0
+PXS    INV  R2
+       SZC  R2,R3               R3 = B's row and A's
+       JNE  PXYES
+PXN    INC  R7
+       C    R7,R9
+       JL   PXL
+PXNO   CLR  R0
+       .leave
+       RT
+PXYES  LI   R0,1
+       .leave
+       RT

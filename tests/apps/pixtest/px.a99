@@ -1,0 +1,13 @@
+*======================================================================
+* px.a99 - a module for tests/test_kernel.py (group pixel): only the
+* pixel-collision include, so that the test can call SPMPIX.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+       COPY "spmpix.a99"

@@ -1,0 +1,212 @@
+*======================================================================
+* fixed.a99 - fixed-point arithmetic.  An optional include: COPY "fixed.a99"
+* after a module's code (or in resident code).  About 400 bytes; nothing else
+* of the kernel is needed, and nothing in it changes a kernel variable.
+*
+* The numbers are 16-bit signed words in 8.8 form, as the motion table's are:
+* >0100 is 1.0, >0080 is 0.5, >FF00 is -1.0 (range -128.0 to 127.996, steps of
+* 1/256).  Angles are a byte, 256 to a turn: 0 is east (+X), 64 is south
+* (+Y: on the screen Y grows downward, so angles run clockwise), 128 west,
+* 192 north.  All of these are leaf routines; they use R0-R9 as stated and
+* keep the rest (R10 and up are never touched, except R11 as BL leaves it).
+*
+*   FXMUL   R0 * R1 -> R0, signed 8.8: the product's bits 8-23, that is
+*           rounded down (toward minus infinity); wraps if it does not fit.
+*           Uses R0-R3.
+*   FXDIV   R0 / R1 -> R0, signed 8.8, rounded toward zero; a quotient that
+*           does not fit, and a division by zero, give >7FFF (>8001 for a
+*           negative one: the sign of R0 and R1 as for a quotient).  Uses R0-R4.
+*   FXSIN   R0 = an angle (the low byte; the high byte is ignored) -> R0 = its
+*           sine in 8.8, -256 to 256, from a table of a quarter wave (65
+*           words, each rounded to 1/256).  Uses R0-R3.
+*   FXCOS   the same for the cosine.  Uses R0-R3.
+*   FXPOL   R0 = an angle, R1 = a speed (8.8) -> R0 = the speed's Y part
+*           (speed x sine), R1 = its X part (speed x cosine), each as FXMUL
+*           gives it: what SPMVEL takes.  Uses R0-R9.
+*   FXATN2  R0 = dY, R1 = dX (signed words, any scale) -> R0 = the angle of the
+*           direction (0-255), within one unit (1.4 degrees) of the true one;
+*           (0,0) gives 0.  A table of 65 bytes of arctangents.  Uses R0-R9.
+*   FXSQRT  R0 = an 8.8 number, unsigned (0 to 255.996) -> R0 = its square
+*           root in 8.8 (the integer square root of R0 x 256: exact, rounded
+*           down).  Uses R0-R9.
+*   ISQRT   R0 = an unsigned word -> R0 = its square root, an integer 0-255,
+*           rounded down.  Uses R0-R9.
+*======================================================================
+
+FXMUL  MOV  R0,R2
+       MPY  R1,R2              R2:R3 = the unsigned product
+       MOV  R0,R0
+       JLT  FXM1               a negative: the high word loses b
+FXM0   MOV  R1,R1
+       JLT  FXM2               b negative: the high word loses a
+FXM3   SLA  R2,8               bits 8-23 of the product
+       SRL  R3,8
+       SOC  R3,R2
+       MOV  R2,R0
+       RT
+FXM1   S    R1,R2
+       JMP  FXM0
+FXM2   S    R0,R2
+       JMP  FXM3
+
+FXDIV  MOV  R0,R4
+       XOR  R1,R4              the sign of the quotient: R4's top bit
+       ABS  R0
+       ABS  R1
+       JEQ  FXD8               division by zero
+       MOV  R0,R2
+       SRL  R2,8               |a| x 256 as the 32 bits R2:R3
+       MOV  R0,R3
+       SLA  R3,8
+       DIV  R1,R2              quotient R2, remainder R3
+       JNO  FXD1
+FXD8   LI   R0,>7FFF           too big, or no divisor
+       JMP  FXD3
+FXD1   CI   R2,>7FFF
+       JH   FXD8
+       MOV  R2,R0
+FXD3   MOV  R4,R4
+       JLT  FXD2
+       RT
+FXD2   NEG  R0
+       RT
+
+FXCOS  AI   R0,64
+FXSIN  ANDI R0,>00FF
+       MOV  R0,R3
+       SRL  R3,6               the quadrant, 0-3
+       ANDI R0,>003F           the place in it, 0-63
+       MOV  R3,R2
+       ANDI R2,1
+       JEQ  FXS1
+       NEG  R0
+       AI   R0,64              the odd quadrants run backward: 64 - place
+FXS1   SLA  R0,1
+       MOV  R0,R2
+       MOV  @FXTAB(R2),R0
+       CI   R3,2
+       JL   FXS2               the first two quadrants are above zero
+       NEG  R0
+FXS2   RT
+
+FXPOL  MOV  R11,R9
+       MOV  R1,R5              the speed
+       MOV  R0,R6              the angle
+       BL   @FXSIN
+       MOV  R5,R1
+       BL   @FXMUL
+       MOV  R0,R7              Y part
+       MOV  R6,R0
+       BL   @FXCOS
+       MOV  R5,R1
+       BL   @FXMUL
+       MOV  R0,R1              X part
+       MOV  R7,R0
+       B    *R9
+
+FXATN2 MOV  R0,R8              the signs of dY and dX
+       MOV  R1,R9
+       ABS  R0
+       ABS  R1
+       MOV  R0,R2
+       SOC  R1,R2
+       JNE  FXA0
+       CLR  R0                 (0,0): no direction, 0
+       RT
+FXA0   MOV  R0,R6              the smaller over the larger
+       MOV  R1,R7
+       CLR  R0                 R0 = 0: not turned round
+       C    R6,R7
+       JLE  FXA1
+       MOV  R6,R2              |dY| is the larger: swap, and the angle
+       MOV  R7,R6              will be 64 less the table's
+       MOV  R2,R7
+       SETO R0
+FXA1   MOV  R6,R3
+       LI   R5,64
+       MPY  R5,R3              R3:R4 = small x 64
+       MOV  R7,R2
+       SRL  R2,1
+       A    R2,R4              + large/2, to round
+       JNC  FXA2
+       INC  R3
+FXA2   DIV  R7,R3              R3 = the ratio in 64ths, 0-64
+       MOVB @FXATB(R3),R2
+       SRL  R2,8
+       MOV  R0,R0
+       JEQ  FXA3
+       NEG  R2
+       AI   R2,64
+FXA3   MOV  R9,R9
+       JLT  FXA4               dX < 0
+       MOV  R8,R8
+       JLT  FXA5               dX >= 0, dY < 0: 256 - angle
+       MOV  R2,R0
+       RT
+FXA5   NEG  R2
+       ANDI R2,>00FF
+       MOV  R2,R0
+       RT
+FXA4   MOV  R8,R8
+       JLT  FXA6               dX < 0, dY < 0: 128 + angle
+       NEG  R2
+       AI   R2,128             dX < 0, dY >= 0: 128 - angle
+       MOV  R2,R0
+       RT
+FXA6   AI   R2,128
+       MOV  R2,R0
+       RT
+
+FXSQRT MOV  R0,R4
+       MOV  R4,R5
+       SRL  R5,8               the 24 bits of R0 x 256 as R5:R4
+       SLA  R4,8
+       LI   R6,>0800           the root's bits, the highest first
+       CLR  R0
+FXQ1   MOV  R0,R7
+       A    R6,R7              try with this bit set
+       MOV  R7,R8
+       MPY  R7,R8              R8:R9 = the square
+       C    R8,R5
+       JH   FXQ2               too big: leave the bit out
+       JL   FXQ3
+       C    R9,R4
+       JH   FXQ2
+FXQ3   MOV  R7,R0              fits: keep it
+FXQ2   SRL  R6,1
+       JNE  FXQ1
+       RT
+
+ISQRT  MOV  R0,R4
+       LI   R6,>0080
+       CLR  R0
+ISQ1   MOV  R0,R7
+       A    R6,R7
+       MOV  R7,R8
+       MPY  R7,R8              R9 = the square (never over 65025)
+       C    R9,R4
+       JH   ISQ2
+       MOV  R7,R0
+ISQ2   SRL  R6,1
+       JNE  ISQ1
+       RT
+
+* round(256 x sin(i x 90 degrees / 64)), i = 0 to 64
+FXTAB
+       DATA 0,6,13,19,25,31,38,44
+       DATA 50,56,62,68,74,80,86,92
+       DATA 98,104,109,115,121,126,132,137
+       DATA 142,147,152,157,162,167,172,177
+       DATA 181,185,190,194,198,202,206,209
+       DATA 213,216,220,223,226,229,231,234
+       DATA 237,239,241,243,245,247,248,250
+       DATA 251,252,253,254,255,255,256,256
+       DATA 256
+* round(256 / 2 pi x arctan(i / 64)), i = 0 to 64: the angle in 256ths of a turn
+FXATB
+       BYTE 0,1,1,2,3,3,4,4,5,6,6,7,8
+       BYTE 8,9,9,10,11,11,12,12,13,13,14,15,15
+       BYTE 16,16,17,17,18,18,19,19,20,20,21,21,22
+       BYTE 22,23,23,24,24,25,25,25,26,26,27,27,27
+       BYTE 28,28,29,29,29,30,30,30,31,31,31,32,32
+       EVEN

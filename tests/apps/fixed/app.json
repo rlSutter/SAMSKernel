@@ -1,0 +1,7 @@
+{
+  "name": "FIXED TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "fx", "source": "fx.a99"}
+  ]
+}

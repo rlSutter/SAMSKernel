@@ -1,0 +1,8 @@
+{
+  "name": "PIXEL TEST",
+  "min_pages": 128,
+  "motion": true,
+  "modules": [
+    {"name": "px", "source": "px.a99"}
+  ]
+}

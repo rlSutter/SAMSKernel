@@ -620,6 +620,28 @@ The routines change scratchpad bytes only in the console's float area, `>834A-83
 and checks that none is one of the kernel's (the layout fix of 1.21.0 moved the four that used to be in FAC). The routines need the real console ROM, so the simulator runs them
 only when `TI_CONSOLE_ROM` names your own image of it; a program built without the include has no such need.
 
+### Fixed-point arithmetic (`lib/fixed.a99`)
+
+The floating-point package is exact but slow, and a game wants sines, directions and distances every frame. `lib/fixed.a99` (an optional include like `float.a99`: `COPY "fixed.a99"` in a module or in resident code; about 550 bytes, of which 195 are tables) works on **8.8 fixed-point words**, the motion table's own form: `>0100` is 1.0, `>0080` 0.5, `>FF00` -1.0, range -128 to 127.996 in steps of 1/256. **Angles are a byte, 256 to a turn**: 0 is east (+X), 64 south (+Y; the screen's Y grows downward, so angles run clockwise), 128 west, 192 north. All are leaf routines that use R0-R9 (as stated) and leave R10 and R12-R15 alone.
+
+| Call | In | Out |
+|---|---|---|
+| `FXMUL` | R0, R1 signed 8.8 | R0 = R0 x R1: bits 8-23 of the product, rounded toward minus infinity, wrapping if it does not fit (R0-R3) |
+| `FXDIV` | R0 / R1 | R0 = the quotient, rounded toward zero; a quotient that does not fit, or a zero divisor, gives `>7FFF` (`>8001` if the signs make it negative) (R0-R4) |
+| `FXSIN` / `FXCOS` | R0 = an angle (low byte) | R0 = the sine or cosine, -256 to 256, from a table of one quarter wave (65 words), each within half a unit of the true value (R0-R3) |
+| `FXPOL` | R0 = an angle, R1 = a speed | R0 = the speed's Y part (speed x sine), R1 = its X part: exactly what `SPMVEL` takes (R0-R9) |
+| `FXATN2` | R0 = dY, R1 = dX (signed words, any scale) | R0 = the direction as an angle, within one unit (1.4 degrees) of the true one; (0,0) gives 0; the four axes are exact (R0-R9) |
+| `FXSQRT` | R0 = an 8.8 number, unsigned | R0 = its square root in 8.8: the integer square root of R0 x 256, so exact and rounded down (R0-R9) |
+| `ISQRT` | R0 = an unsigned word | R0 = its integer square root, 0-255, rounded down (R0-R9) |
+
+A bullet that flies at an aimed target is `FXATN2` to find the angle, then `FXPOL` for the velocity, then `SPMVEL` (`examples/aim`: a turret fires at a drifting ring every 64 frames, the ring bounces in a box with `SPMBOX`, and `SPMPIX` decides whether a bullet touched it: one that comes through the ring's hollow centre is a miss, which a corner test would have counted as a hit). A distance without a square root of a big number is `ISQRT` of dX squared plus dY squared when they are small, or `FXSQRT` on 8.8 values. Test group `fixed`: 2,225 multiplications and as many divisions (extremes and random) against Python, every angle, 300 `FXPOL`, 1,018 directions against `atan2` (the worst error 0.77 of a unit), 1,212 square roots exactly, and the registers kept; simulator only (it is pure arithmetic, so it needs no hardware to be believed).
+
+### Pixel-exact sprite collision (`lib/spmpix.a99`)
+
+`SPMHIT` (with `"motion_helpers"`) tests the sprites' squares by their corners. For two sprites whose shapes matter, `lib/spmpix.a99` (about 330 bytes, a module include, in a program built with `"motion": true`; nothing in the kernel changes) provides **`SPMPIX`**: R0, R1 = two sprites of the motion table; R2 = 0 for 8 x 8 sprites, 1 for 16 x 16; R3 = the VRAM address of the sprite pattern table; R4 = the address of **72 bytes of the program's RAM** to work in; it returns R0 = 1 if a set pixel of one is on a set pixel of the other, else 0 (also for a sprite the table does not hold). It uses R0-R9 and keeps R10 and up.
+
+It tests what the chip would draw: the pattern numbers come from the attribute table (`SPMSAT` + 4 x sprite + 2; a 16 x 16 sprite uses the number with its low two bits cleared) and the pattern bytes (8, or 32 in the chip's order) from the video memory. The corner test of `SPMHIT` goes first, so sprites that are not near each other cost no reads. The positions are the motion table's, and **the field wraps at 256 in both directions, as the motion table does** (two sprites either side of the wrap are tested as touching, as `SPMHIT` counts them: on the real chip a sprite does not reappear on the far side of the screen, but a motion table's does). Magnified sprites are not handled (use `SPMHIT` with the size doubled); the colour, even a transparent one, does not matter, as with the chip's coincidence flag; the F18A's extra sprite planes are ignored. Test group `pixel`: 520 random pairs of sparse patterns, near each other and across the wrap, against a model in Python (about half of them touching), 14 directed cases at the corners and edges, a sprite not in the table, and the registers kept; a deliberate fault in the shift direction was seen to fail it.
+
 ### The cycle model (`tools/cycles.py`)
 
 The simulator counts instructions, which is the right clock for the frame and the interrupts but not for how fast a program is. `tools/cycles.py` provides
