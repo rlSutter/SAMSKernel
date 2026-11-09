@@ -290,8 +290,8 @@ with the attribute's bit 4 set, colour 0) layer 1 shows. The demo is Graphics I 
        BL   @VREG
 ```
 
-**Scrolling.** Each layer scrolls by pixel, independently: VR27 / VR28 (layer 1 horizontal / vertical), VR25 / VR26 (layer 2). In Text 80 the horizontal value counts the 256-pixel scale, so each unit moves 2 pixels of the 512-pixel-wide screen. The scrolling wraps at the edge of the screen (of the margin-less area, in the text modes). The **page size** bits of VR29 (bits 1 and 0 for layer 1,
-bits 5 and 4 for layer 2) make the name table two pages wide and/or two high (the wrap then goes to the next page: `>400`/`>800` further for a horizontal/vertical page) so that a
+**Scrolling.** Each layer scrolls by pixel, independently: VR27 / VR28 (layer 1 horizontal / vertical), VR25 / VR26 (layer 2). In Text 80 the horizontal value counts the 256-pixel scale, so each unit moves 2 pixels of the 512-pixel-wide screen. The scrolling wraps at the edge of the screen (of the margin-less area, in the text modes). The **page size** bits of VR29 (layer 1: bit 1 = two pages wide, bit 0 = two high;
+layer 2: bit 5 wide, bit 4 high) make the name table two pages wide and/or two high (the wrap then goes to the next page: `>400`/`>800` further for a horizontal/vertical page) so that a
 map larger than the screen can scroll; set the layer's name table at the first of the pages.
 VR50 bit 4 turns layer 1 off entirely.
 

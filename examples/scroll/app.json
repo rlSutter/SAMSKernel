@@ -1,0 +1,10 @@
+{
+  "name": "SCROLL",
+  "min_pages": 128,
+  "modules": [
+    {
+      "name": "world",
+      "source": "world.a99"
+    }
+  ]
+}

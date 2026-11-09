@@ -1,5 +1,16 @@
 # Changes
 
+## 1.35.0 (7 November 2026)
+
+Second of the owner's accepted list. **No kernel change**: every cartridge built without the new includes is byte for byte what 1.34.0 built.
+
+- **`lib/scroll.a99`: a scrolling tile map on the F18A's second tile layer** (`SCRINI`, `SCRTO`, `SCRBY`; about 1,100 bytes). The map is bytes in memory; the layer is a ring of 64 x 24, 32 x 48 or 64 x 48 tiles (the F18A's two-page name tables); the library writes the tiles that come into view and follows the window with VR10 (the base swaps pages as the window crosses one), VR25 and VR26. An optional attribute table (a table of 256 or one value). **Cost by the cycle model** (not compared with a console): a pixel 0.94 ms, a tile's step 6.1 ms sideways and 2.8 ms up or down, a jump 42 ms; the writers were rewritten once for speed (row by block write per page, column with one address per tile: 414 ms became 42 for a jump). Test group `scroll` (10 checks): random 100 x 60 maps in the three ring shapes, every tile of the window and the registers against a model of the ring, and the picture the renderer draws (js99er's rules) against the picture drawn from the map, pixel for pixel; four deliberate faults were each caught. VR29's page bits are documented now (layer 2: bit 5 wide, bit 4 high; layer 1: bit 1 wide, bit 0 high).
+- **`examples/scroll`** (`scroll8.bin`): a 112 x 56 world (sea, sand, grass, forest, rock, roads, houses, flowers; `mkmap.py` makes it) with a hero sprite above the layer at the middle of the screen; the arrow keys move the view 8 pixels a press, joystick 1 two a frame, and left alone it walks round the edge of the world by itself (the test follows it for 900 frames and compares the picture with the map's at five moments, over page flips both ways). The example's module file is `world.a99` because a file called `scroll.a99` in an application's own directory is found before the library's.
+- **`tools/sktiles.py`: a Tiled map and a PNG tile sheet to the scroller's data** (CSV or TMX map, `--layer`, `--subtract 1`; 8 x 8 tiles; `--first`, `--invert`, `--colors`, `--bin`), with refusals for a tile number over 255, a bad `--subtract`, a missing layer, and a sheet that runs past tile 255. Test group `sktiles` (9 checks).
+- The sources disk (`images/sources-360k.dsk`) now carries three more libraries and is down to 40 free sectors of 1,440: the test allows up to 1,400 used. A further library will need a second disk or a trimmed list.
+- **Not seen on a real F18A**: the page swapping and the two-page rings follow the renderer's model, which restates js99er's F18A; the checklist's S1-S3 are what to look at (the seams at X = 256 and 512, Y = 192 and 384).
+- Not done yet from the list: the object-to-image linker on the PC; later the on-TI option 3 loader and tile editor.
+
 ## 1.34.0 (6 November 2026)
 
 First of the owner's accepted list (after the questions about scrolling, pixel collision, an object loader and floating point). **No kernel change at all**: two optional includes, so every cartridge built without them is byte for byte what 1.33.0 built.

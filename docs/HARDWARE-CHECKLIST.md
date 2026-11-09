@@ -88,6 +88,18 @@ With `workbench8.bin` on the console's menu, **RUN PROGRAM FILE**, and `images/m
 | M2 | FCTN = , then RUN PROGRAM FILE again | the console resets; the prompt comes back; M1 works a second time | that nothing of the first run is left in a way that stops the second |
 | M3 | run a program built for another build (one built against a `kernel.equ` of another release, or `skbuild.py` of an app with `"modprog": true` and different options) | `FOR ANOTHER KERNEL BUILD` with two IDs, and nothing starts | the refusal on a real console |
 
+## Scrolling (1.35.0, with the sprite and aiming demos of 1.33-1.34; none of it has run on a real machine)
+
+`images/scroll8.bin` as a cartridge (js99er: the file is named `...8.bin`; or FinalGROM) on a console with an F18A:
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| S1 | start it and watch for a minute (it walks right along the top edge, down, left, up) | a coloured world (blue water with waves, sand, green grass, dark-green forest, grey rock, brown roads, red-roofed houses) sliding smoothly, with a yellow figure at the middle that does not move; **no seam, tear or jump** as the view passes X = 256 and 512 (a third of the way, two thirds) and Y = 192 | that the F18A's two-page layer 2 and the base swap work as the renderer (js99er's rules) says: the thing most worth looking at |
+| S2 | the arrow keys (FCTN S D E X), and joystick 1 if you have one | the view moves 8 pixels a press (2 a frame with the joystick), stops at the world's edges, and the walk starts again 2 seconds after the last press | the input path, and the clamping at the edges |
+| S3 | note any tile that is wrong (a row or column of the wrong tile at the screen's right or bottom edge while moving) | none | that the strips written as the window moves arrive in time, with the video chip's own timing, which the simulator does not have |
+| A1 | `images/aim8.bin`: the turret in the middle fires every second or so at the ring | the ring drifts and bounces in the box; a bullet through its hollow middle is a miss; SHOTS and HITS on the top line | pixel-exact collision (`SPMPIX`), `FXATN2` and `FXPOL` on a real F18A's sprites |
+| A2 | `images/spritemotion8.bin` | eight balls bouncing off the walls and each other | the motion table, `SPMBOX`, `SPMHIT` and `SPMSWP` on real sprites |
+
 ## How to report
 
 A short note per step is enough: the step number, what you saw, the machine (console, F18A or PICO9918 with its firmware, SAMS size and brand, disk controller or TIPI), and for emulators the version and settings. A photograph of a refusal

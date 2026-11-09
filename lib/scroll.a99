@@ -1,0 +1,475 @@
+*======================================================================
+* scroll.a99 - a scrolling tile map on the F18A's second tile layer.  An
+* optional include: COPY "scroll.a99" after a module's code (or in resident
+* code).  About 1,000 bytes; nothing in the kernel changes.
+*
+* The map is a block of bytes in the CPU's memory, one tile number each, a
+* row after a row; the layer shows 32 x 24 tiles of it (Graphics I) and the
+* program moves a window over it a pixel at a time.  The F18A scrolls a layer
+* by pixel (VR25 and VR26) and lets its name table be two pages wide and/or two
+* high, so that the layer is a ring of 64 x 24, 32 x 48 or 64 x 48 tiles; the
+* ring is kept up to date by writing, as the window moves, the tiles that come
+* into view (a column of 25 for each 8 pixels sideways, a row of 33 for each 8
+* pixels up or down: a few milliseconds), and the two scroll registers and
+* the name table's base (which swaps pages as the window crosses a page: the
+* hardware wraps within a page and onto its neighbour) follow the position.
+*
+* A DESCRIPTOR of 32 bytes in the program's RAM says what to scroll:
+*   +0  SCMAP   address of the map
+*   +2  SCMW    its width in tiles (4,095 at most)       the program fills in
+*   +4  SCMH    its height in tiles (4,095 at most)      these ten bytes
+*   +6  SCNT    VRAM address of layer 2's name table (see below)
+*   +8  SCAT    VRAM address of its attribute table, or 0 for none (the
+*               classic colour table, set up by the program: VR11)
+*   +10 SCFLG   1 = two pages wide (scrolls sideways), 2 = two pages high
+*   +12 SCV49   register 49 as layer 2 is to be shown, in the high byte
+*               (>8000: layer 2 on, tile enhanced colour 0)
+*   +14 SCATB   with SCAT, the address of a table of 256 bytes, the
+*               attribute of each tile number; or 0 ...
+*   +16 SCATR   ... and then every tile has this attribute (high byte)
+*   +18 SCX     the window's place on the map in pixels (the library's:
+*   +20 SCY     read them for the sprites' sake; SCRTO and SCRBY set them)
+*   +22 .. +31  the library's own
+*
+* The name table, with a layer in two pages, is two or four 1K blocks (768
+* bytes used of each; the page to the right is at +>400, the one below at
+* +>800), and must start on a 2K boundary (wide only) or a 4K boundary (high).
+* An attribute table has the same shape.  In the standard video map >2000-2FFF
+* does for any of the three shapes with the classic colour table (SCAT = 0, a
+* table of 32 bytes at >1500 = VR11 >54).  With layer 2 in one page on an axis
+* that axis cannot scroll.  The map should be at least as large as the window.
+*
+*   SCRINI  R0 = the descriptor: sets VR10, VR11 (with an attribute table), VR29
+*           (the page sizes of layer 2; VMODE left layer 1's at 0), draws the
+*           window at (0,0), and turns layer 2 on (SCV49).
+*   SCRTO   R0 = the descriptor, R1 = X, R2 = Y in pixels: put the window
+*           there (kept inside the map) and redraw all of it: 825 tiles, about
+*           30 ms: for a jump, not a step.
+*   SCRBY   R0 = the descriptor, R1 = dX, R2 = dY (signed pixels): move the
+*           window, kept inside the map, drawing only what comes into view.
+*           A move of up to 8 pixels takes at most one column or one row.
+*   Each uses R0-R9 and keeps R10 and up (R11 is saved on the stack).  Call
+*   them in the frame's blanking (in TICK, as the main loop does), because a
+*   register changed mid-frame tears the picture.
+*
+* Positions are 15 bits: the map may be at most 4,095 tiles each way.
+*======================================================================
+
+SCMAP  EQU  0
+SCMW   EQU  2
+SCMH   EQU  4
+SCNT   EQU  6
+SCAT   EQU  8
+SCFLG  EQU  10
+SCV49  EQU  12
+SCATB  EQU  14
+SCATR  EQU  16
+SCX    EQU  18
+SCY    EQU  20
+SCT0   EQU  22
+SCT1   EQU  24
+SCT2   EQU  26
+SCNC   EQU  28
+SCNR   EQU  30
+
+SCRINI .enter
+       MOV  R0,R9
+       LI   R1,32               the window: 32 x 24 tiles, 33 x 25 if it may
+       MOV  @SCFLG(R9),R0       move (a partly shown tile at each edge)
+       ANDI R0,1
+       JEQ  SI1
+       INC  R1
+SI1    MOV  R1,@SCNC(R9)
+       LI   R1,24
+       MOV  @SCFLG(R9),R0
+       ANDI R0,2
+       JEQ  SI2
+       INC  R1
+SI2    MOV  R1,@SCNR(R9)
+       CLR  R1                  VR29 bit 5 = layer 2 two pages wide, bit 4 high
+       MOV  @SCFLG(R9),R0
+       ANDI R0,1
+       JEQ  SI3
+       AI   R1,>2000
+SI3    MOV  @SCFLG(R9),R0
+       ANDI R0,2
+       JEQ  SI4
+       AI   R1,>1000
+SI4    LI   R0,VR_PAGE
+       BL   @VREG
+       MOV  @SCAT(R9),R1        the attribute table, if there is one
+       JEQ  SI5
+       SRL  R1,6
+       SLA  R1,8
+       LI   R0,VR_COLR2
+       BL   @VREG
+SI5    MOV  R9,R0
+       CLR  R1
+       CLR  R2
+       BL   @SCRTO
+       MOV  @SCV49(R9),R1       and now show it
+       LI   R0,VR_ECM
+       BL   @VREG
+       .leave
+       RT
+
+SCRTO  .enter
+       MOV  R0,R9
+       BL   @SCCLP
+       MOV  R1,@SCX(R9)
+       MOV  R2,@SCY(R9)
+       MOV  R1,R4               every tile of the window
+       SRL  R4,3
+       MOV  R2,R5
+       SRL  R5,3
+       MOV  R4,R6
+       A    @SCNC(R9),R6
+       MOV  @SCNR(R9),R7
+       BL   @SCRCT
+       BL   @SCPOS
+       .leave
+       RT
+
+SCRBY  .enter
+       MOV  R0,R9
+       A    @SCX(R9),R1
+       A    @SCY(R9),R2
+       BL   @SCCLP
+       MOV  @SCX(R9),R3
+       SRL  R3,3                the old first column
+       MOV  @SCY(R9),R0
+       SRL  R0,3                and row
+       MOV  R1,@SCX(R9)
+       MOV  R2,@SCY(R9)
+       SRL  R1,3                the new ones
+       SRL  R2,3
+       MOV  R1,@SCT0(R9)
+       MOV  R2,@SCT1(R9)
+       S    R3,R1               columns moved
+       S    R0,R2               rows moved
+       MOV  R2,@SCT2(R9)
+       MOV  R1,R4
+       JEQ  SB1
+       MOV  @SCT0(R9),R1        new columns: the strip that comes into view
+       MOV  @SCNC(R9),R3
+       BL   @SCSTR              R4 = its first column, R0 = how many
+       MOV  R4,R6
+       A    R0,R6
+       MOV  @SCT1(R9),R5
+       MOV  @SCNR(R9),R7
+       BL   @SCRCT
+SB1    MOV  @SCT2(R9),R4
+       JEQ  SB9
+       MOV  @SCT1(R9),R1        new rows
+       MOV  @SCNR(R9),R3
+       BL   @SCSTR
+       MOV  R4,R5
+       MOV  R0,R7
+       MOV  @SCT0(R9),R4
+       MOV  R4,R6
+       A    @SCNC(R9),R6
+       BL   @SCRCT
+SB9    BL   @SCPOS
+       .leave
+       RT
+
+* SCSTR - R4 = how far the window moved on an axis (not 0), R3 = its size in
+* tiles, R1 = its new first tile: R4 = the first tile of the strip that came
+* into view, R0 = how many (at most the window's size).
+SCSTR  MOV  R4,R0
+       JLT  SS1
+       C    R0,R3
+       JL   SS2
+       MOV  R3,R0
+SS2    MOV  R1,R4              it moved on: the strip is at the far side
+       A    R3,R4
+       S    R0,R4
+       RT
+SS1    NEG  R0
+       C    R0,R3
+       JL   SS3
+       MOV  R3,R0
+SS3    MOV  R1,R4              it moved back: the strip is at the near side
+       RT
+
+* SCCLP - R1 = X, R2 = Y (as signed words): kept on the map, and at 0 on an axis
+* the layer does not scroll on.
+SCCLP  MOV  @SCFLG(R9),R3
+       ANDI R3,1
+       JEQ  CL0
+       MOV  @SCMW(R9),R3
+       SLA  R3,3
+       AI   R3,-256
+       JLT  CL0
+       MOV  R1,R1
+       JLT  CL0
+       C    R1,R3
+       JL   CL2
+       MOV  R3,R1
+       JMP  CL2
+CL0    CLR  R1
+CL2    MOV  @SCFLG(R9),R3
+       ANDI R3,2
+       JEQ  CL4
+       MOV  @SCMH(R9),R3
+       SLA  R3,3
+       AI   R3,-192
+       JLT  CL4
+       MOV  R2,R2
+       JLT  CL4
+       C    R2,R3
+       JL   CL5
+       MOV  R3,R2
+       JMP  CL5
+CL4    CLR  R2
+CL5    RT
+
+* SCRCT - the tiles of a rectangle of the map into the layer: R4 = first
+* column, R5 = first row, R6 = the column after the last, R7 = how many rows.
+* A rectangle as wide as the window goes a row at a time (one block write for
+* each page the row touches), a narrower strip a column at a time.  Uses
+* R0-R8; keeps R9.
+SCRCT  .enter
+       MOV  R6,R0
+       S    R4,R0
+       C    R0,@SCNC(R9)
+       JHE  RC4
+RC1    MOV  R4,R1               a strip: column by column
+       BL   @SCCOL
+       INC  R4
+       C    R4,R6
+       JL   RC1
+       JMP  RC9
+RC4    MOV  R5,R1               the whole width: row by row
+       BL   @SCROW
+       INC  R5
+       DEC  R7
+       JNE  RC4
+RC9    .leave
+       RT
+
+* SCROW - one row of tiles: R1 = the row, R4 = the first column, R6 = the
+* column after the last (cut to the map).  The map's bytes go to the name
+* table in blocks, one for each page of the ring the row crosses.  Keeps R4-R9.
+SCROW  .enter
+       .push R4
+       .push R5
+       .push R6
+       .push R7
+       .push R8
+       C    R1,@SCMH(R9)
+       JHE  RW9
+       C    R6,@SCMW(R9)
+       JLE  RW0
+       MOV  @SCMW(R9),R6
+RW0    C    R4,R6
+       JHE  RW9
+       S    R4,R6               R6 = how many tiles
+       MOV  R1,R7
+       MPY  @SCMW(R9),R7        R8 = row x width
+       A    R4,R8
+       A    @SCMAP(R9),R8       R8 = where the first tile is in the map
+       MOV  R1,R2               the ring's row
+       MOV  @SCFLG(R9),R0
+       ANDI R0,2
+       JEQ  RW1
+       CLR  R1
+       LI   R0,48
+       DIV  R0,R1               R2 = the row mod 48
+RW1    CLR  R7
+       CI   R2,24
+       JL   RW2
+       AI   R2,-24
+       LI   R7,>0800            the lower page
+RW2    SLA  R2,5
+       A    R2,R7               R7 = that row's place in the table
+       MOV  R4,R5               the ring's column
+       MOV  @SCFLG(R9),R0
+       ANDI R0,1
+       JEQ  RW3
+       ANDI R5,>003F
+       JMP  RW5
+RW3    ANDI R5,>001F
+RW5    MOV  R5,R0               a block: up to the end of this page
+       ANDI R0,>001F
+       LI   R4,32
+       S    R0,R4
+       C    R6,R4
+       JHE  RW6
+       MOV  R6,R4
+RW6    MOV  R5,R3
+       ANDI R3,>0020
+       SLA  R3,5                the page to the right: +>400
+       A    R0,R3
+       A    R7,R3
+       A    @SCNT(R9),R3        R3 = the block's place in the name table
+       MOV  R3,R0
+       MOV  R8,R1
+       MOV  R4,R2
+       BL   @VMBW
+       MOV  @SCAT(R9),R0        the attributes, if there is a table
+       JEQ  RW8
+       S    @SCNT(R9),R3
+       A    R3,R0
+       MOV  @SCATB(R9),R1
+       JNE  RW7
+       MOVB @SCATR(R9),R1       one value
+       MOV  R4,R2
+       BL   @VFILL
+       JMP  RW8
+RW7    BL   @VWAD               each tile's own
+       .push R5
+       MOV  R4,R2
+       MOV  R8,R3
+RW7L   CLR  R5
+       MOVB *R3+,R5
+       SRL  R5,8
+       A    R1,R5
+       MOVB *R5,@VDPWD
+       DEC  R2
+       JNE  RW7L
+       .pop R5
+RW8    A    R4,R8
+       A    R4,R5
+       MOV  @SCFLG(R9),R0
+       ANDI R0,1
+       JEQ  RWA
+       ANDI R5,>003F
+       JMP  RWB
+RWA    ANDI R5,>001F
+RWB    S    R4,R6
+       JNE  RW5
+RW9    .pop R8
+       .pop R7
+       .pop R6
+       .pop R5
+       .pop R4
+       .leave
+       RT
+
+* SCCOL - one column of tiles: R1 = the column, R5 = the first row, R7 = how
+* many rows (cut to the map).  One address for each tile: the table has no
+* step down.  Keeps R4-R9.
+SCCOL  .enter
+       .push R4
+       .push R5
+       .push R6
+       .push R7
+       .push R8
+       C    R1,@SCMW(R9)
+       JHE  CO9
+       MOV  @SCMH(R9),R0
+       S    R5,R0               the rows left on the map
+       JLT  CO9
+       JEQ  CO9
+       C    R7,R0
+       JL   CO0
+       MOV  R0,R7
+CO0    MOV  R5,R3
+       MPY  @SCMW(R9),R3        R4 = row x width
+       A    R1,R4
+       A    @SCMAP(R9),R4       R4 = where the first tile is in the map
+       MOV  @SCFLG(R9),R0
+       ANDI R0,1
+       JEQ  CO1
+       ANDI R1,>003F            the ring's column, of 64 or of 32
+       JMP  CO2
+CO1    ANDI R1,>001F
+CO2    MOV  R1,R6
+       ANDI R6,>0020
+       SLA  R6,5                the page to the right: +>400
+       ANDI R1,>001F
+       A    R1,R6
+       A    @SCNT(R9),R6        R6 = the column's place in the first row
+       MOV  R5,R8               the ring's row
+       MOV  @SCFLG(R9),R0
+       ANDI R0,2
+       JEQ  CO3
+       CLR  R1
+       MOV  R5,R2
+       LI   R0,48
+       DIV  R0,R1
+       MOV  R2,R8
+CO3    MOV  R8,R2
+       CLR  R3
+       CI   R2,24
+       JL   CO4
+       AI   R2,-24
+       LI   R3,>0800            the lower page
+CO4    SLA  R2,5
+       A    R6,R2
+       A    R3,R2               R2 = this tile's place in the name table
+       MOV  R2,R0
+       BL   @VWAD
+       MOVB *R4,@VDPWD
+       MOV  @SCAT(R9),R0
+       JEQ  CO6
+       S    @SCNT(R9),R2
+       A    R2,R0
+       BL   @VWAD
+       MOV  @SCATB(R9),R3
+       JEQ  CO5
+       CLR  R1
+       MOVB *R4,R1
+       SRL  R1,8
+       A    R3,R1
+       MOVB *R1,@VDPWD
+       JMP  CO6
+CO5    MOVB @SCATR(R9),@VDPWD
+CO6    A    @SCMW(R9),R4        the next row of the map
+       INC  R8
+       CI   R8,48
+       JL   CO7
+       CLR  R8
+CO7    DEC  R7
+       JNE  CO3
+CO9    .pop R8
+       .pop R7
+       .pop R6
+       .pop R5
+       .pop R4
+       .leave
+       RT
+
+* SCPOS - the layer's registers for the window's place: R9 = the descriptor.
+SCPOS  .enter
+       MOV  @SCX(R9),R5
+       ANDI R5,>01FF            where the window starts in the ring of 512
+       MOV  @SCFLG(R9),R0
+       ANDI R0,1
+       JNE  SP1
+       CLR  R5
+SP1    MOV  R5,R4
+       SRL  R4,8                which page it starts in: 0 or 1
+       ANDI R5,>00FF            and how far into it: VR25
+       MOV  @SCY(R9),R7
+       MOV  @SCFLG(R9),R0
+       ANDI R0,2
+       JNE  SP2
+       CLR  R7
+       JMP  SP3
+SP2    CLR  R6                  the place in the ring of 384
+       LI   R0,384
+       DIV  R0,R6
+SP3    CLR  R6
+       CI   R7,192
+       JL   SP4
+       AI   R7,-192             the lower page: VR26 is the part of it
+       LI   R6,2                (a page below is 2K further: 2 units of 1K)
+SP4    MOV  @SCNT(R9),R1
+       SRL  R1,10
+       A    R4,R1
+       A    R6,R1
+       SLA  R1,8
+       LI   R0,VR_NAME2         the name table starts at the window's page
+       BL   @VREG
+       MOV  R5,R1
+       SLA  R1,8
+       LI   R0,VR_HS2
+       BL   @VREG
+       MOV  R7,R1
+       SLA  R1,8
+       LI   R0,VR_VS2
+       BL   @VREG
+       .leave
+       RT

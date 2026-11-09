@@ -1,0 +1,185 @@
+*======================================================================
+* world.a99 - a world to look at: lib/scroll.a99 scrolls a 112 x 56 tile map
+* (examples/scroll/mkmap.py made it: sea, sand, grass, forest, rock, roads,
+* houses, flowers) a pixel at a time, on the F18A's second tile layer, with the
+* hero (a sprite, above the layer) standing in the middle of the screen.
+*
+*   the arrow keys (FCTN S D E X)   move the view 8 pixels a press
+*   joystick 1                      moves it 2 pixels a frame while held
+*   FCTN =                          quits
+* Left alone the view goes for a walk round the edge of the world, right,
+* down, left and up, 2 pixels a frame, and goes on from there when you stop.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+MAPW   EQU  112
+MAPH   EQU  56
+XMAX   EQU  MAPW*8-256                 the furthest the view can go
+YMAX   EQU  MAPH*8-192
+DESC   EQU  APPRAM                     the scroller's descriptor, 32 bytes
+PHASE  EQU  APPRAM+32                  the walk: 0 right, 1 down, 2 left, 3 up
+IDLE   EQU  APPRAM+34                  frames until the walk starts again
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R0,VMGM1                   Graphics I, sprites on
+       LI   R1,VOSPR
+       BL   @VMODE
+       LI   R0,1                       the world's colours (entries 1-15)
+       LI   R1,PAL
+       LI   R2,15
+       BL   @F18PAL
+       CLR  R5                         16 patterns: tile = type x 8 + variant
+IN1    MOV  R5,R0
+       ANDI R0,>FFFE
+       SLA  R0,2
+       MOV  R5,R1
+       ANDI R1,1
+       A    R1,R0                      the tile number
+       SLA  R0,3
+       AI   R0,PATTAB                  its place in the pattern table
+       MOV  R5,R1
+       SLA  R1,3
+       AI   R1,PATS
+       LI   R2,8
+       BL   @VMBW
+       INC  R5
+       CI   R5,16
+       JL   IN1
+       LI   R0,>1500                   layer 2's colours (32 bytes)
+       LI   R1,CTAB
+       LI   R2,32
+       BL   @VMBW
+       LI   R0,VR_COLR2
+       LI   R1,>5400                   (VR11: in 64-byte units)
+       BL   @VREG
+       LI   R0,SPTAB                   the hero: a sprite above the layer
+       LI   R1,HERO
+       LI   R2,8
+       BL   @VMBW
+       LI   R0,SATAB
+       LI   R1,HEROAT
+       LI   R2,8
+       BL   @VMBW
+       LI   R0,50
+       LI   R1,>0100                   sprites above layer 2 (VR50 bit 0)
+       BL   @VREG
+       LI   R0,MAP                     the descriptor
+       MOV  R0,@DESC
+       LI   R0,MAPW
+       MOV  R0,@DESC+2
+       LI   R0,MAPH
+       MOV  R0,@DESC+4
+       LI   R0,>2000                   the name table: 4K at >2000
+       MOV  R0,@DESC+6
+       CLR  @DESC+8                    no attribute table: the classic colours
+       LI   R0,3                       two pages wide and high
+       MOV  R0,@DESC+10
+       LI   R0,>8000                   layer 2 on
+       MOV  R0,@DESC+12
+       LI   R0,DESC
+       BL   @SCRINI
+       CLR  @PHASE
+       CLR  @IDLE
+       .leave
+       RT
+
+TICK   .enter
+       CI   R0,KQUIT*256
+       JNE  TK0
+       SETO @QUITF
+       JMP  TK9
+TK0    CLR  R4                         dX
+       CLR  R5                         dY
+       CI   R0,KLEFT*256               an arrow key: 8 pixels
+       JNE  TK1
+       LI   R4,-8
+TK1    CI   R0,KRIGHT*256
+       JNE  TK2
+       LI   R4,8
+TK2    CI   R0,KUP*256
+       JNE  TK3
+       LI   R5,-8
+TK3    CI   R0,KDOWN*256
+       JNE  TK4
+       LI   R5,8
+TK4    LI   R0,1                       joystick 1 held: 2 pixels a frame
+       BL   @JOYGET
+       MOV  R1,R2
+       ANDI R2,JLEFT
+       JEQ  TK5
+       LI   R4,-2
+TK5    MOV  R1,R2
+       ANDI R2,JRIGHT
+       JEQ  TK6
+       LI   R4,2
+TK6    MOV  R1,R2
+       ANDI R2,JUP
+       JEQ  TK7
+       LI   R5,-2
+TK7    MOV  R1,R2
+       ANDI R2,JDOWN
+       JEQ  TK8
+       LI   R5,2
+TK8    MOV  R4,R0
+       SOC  R5,R0
+       JEQ  WALK                       nothing pressed
+       LI   R0,120                     steering: the walk waits 2 seconds
+       MOV  R0,@IDLE
+       JMP  GO
+WALK   MOV  @IDLE,R0
+       JEQ  WK0
+       DEC  @IDLE
+       JMP  TK9
+WK0    MOV  @PHASE,R0                  the walk: along each edge in turn
+       JNE  WK1
+       LI   R4,2                       right, until the far edge
+       MOV  @DESC+18,R2
+       CI   R2,XMAX
+       JL   GO
+       LI   R0,1
+       MOV  R0,@PHASE
+       CLR  R4
+       JMP  TK9
+WK1    CI   R0,1
+       JNE  WK2
+       LI   R5,2                       down
+       MOV  @DESC+20,R2
+       CI   R2,YMAX
+       JL   GO
+       LI   R0,2
+       MOV  R0,@PHASE
+       CLR  R5
+       JMP  TK9
+WK2    CI   R0,2
+       JNE  WK3
+       LI   R4,-2                      left
+       MOV  @DESC+18,R2
+       JNE  GO
+       LI   R0,3
+       MOV  R0,@PHASE
+       CLR  R4
+       JMP  TK9
+WK3    LI   R5,-2                      up
+       MOV  @DESC+20,R2
+       JNE  GO
+       CLR  @PHASE
+       CLR  R5
+       JMP  TK9
+GO     LI   R0,DESC
+       MOV  R4,R1
+       MOV  R5,R2
+       BL   @SCRBY
+TK9    .leave
+       RT
+
+* the hero: Y, X, pattern 0, colour 13 (yellow); then the end of the list
+HEROAT BYTE 88,124,0,13,>D0,0,0,0
+HERO   BYTE >18,>18,>3C,>5A,>18,>24,>24,>66
+
+       COPY "tiles.a99"
+       COPY "map.a99"
+       COPY "scroll.a99"

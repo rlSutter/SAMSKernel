@@ -1487,7 +1487,7 @@ def sourcesdisk():
     check(missing == {'appcfg', 'appname', 'appmsg', 'modid'}, 'every COPY target is on the disk except the files the build writes for each application (modid only for a module-program host): %s' % sorted(missing))
     info = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.environ['XAS99']), 'xdm99.py'), out], capture_output=True, text=True).stdout.split('\n')[0]
     used = int(re.search(r':\s+(\d+) used\s+(\d+) free', info).group(1))
-    check('SOURCES' in info and '2S/2D' in info and used < 1380, 'a double-density disk named SOURCES with room to spare (under 1,380 of 1,440 sectors used): %s' % info.strip())
+    check('SOURCES' in info and '2S/2D' in info and used < 1400, 'a double-density disk named SOURCES with room to spare (under 1,400 of 1,440 sectors used): %s' % info.strip())
     back = tifdc.read_file(bytearray(open(out, 'rb').read()), 'SRCNOTES')
     check(b'\n'.join(back).decode('latin-1').rstrip() == mksources.NOTES.rstrip(), 'SRCNOTES reads back from the image record for record')
 
@@ -3479,7 +3479,242 @@ def pixel():
     check([r[12], r[13], r[14], r[15]] == [0xC0DE, 0xD00D, 0xE00E, 0xF00F] and r[10] == m.rw(0x8314), 'SPMPIX leaves R10 (the stack pointer) and R12-R15 as it found them')
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+def scroll():
+    """lib/scroll.a99: the scrolling tile map on layer 2.  A random map (100 x 60 tiles of random patterns and colours) is scrolled by SCRINI,
+    SCRTO and SCRBY in the three shapes of ring (64 x 48, 64 x 24, 32 x 48) and the picture the project's F18A renderer (js99er's rules) draws
+    from the video memory and registers is compared, pixel for pixel, with the picture drawn straight from the map; at every step every tile of
+    the window is also checked in the name table, the registers against the ring model, and the attribute table (the table and the
+    constant)."""
+    import asmharness, random, tempfile, shutil, glob, f18render, cycles
+    import numpy as np
+    rnd = random.Random(11)
+    MW, MH = 100, 60
+    mp = [[rnd.randrange(256) for _ in range(MW)] for _ in range(MH)]
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'scrolltest'), d + '/a')
+    with open(d + '/a/map.a99', 'w') as f:
+        f.write('MAP\n')
+        for row in mp:
+            for i in range(0, MW, 20):
+                f.write('       BYTE ' + ','.join(str(v) for v in row[i:i + 20]) + '\n')
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/a', '--out', d + '/o'], capture_output=True, text=True)
+    check(r.returncode == 0, 'the scroll test application builds: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:100])
+    cart = open(glob.glob(d + '/o/*8.bin')[0], 'rb').read()
+    syms = asmharness.symbols(os.path.join(d, 'o', 'kernel.equ'))
+    syms.update(asmharness.symbols(os.path.join(d, 'o', 'sc.equ')))
+    m = sim9900.Machine(cart)
+    m.presses, m.toggles, end = sim9900.schedule([])
+    cpu = cycles.CycleCPU(m)
+    cpu.pc = m.rw(m.rw(0x6006) + 2)
+    while m.insns < 100 * sim9900.VSYNC_INSNS:
+        cpu.step()
+    n = 0
+    while not (0xA000 <= cpu.pc < 0xE000 and cpu.wp == 0x8300) and n < 200000:
+        cpu.step(); n += 1
+    call = lambda name, **kw: asmharness.call(m, cpu, syms[name], {int(k[1:]): v & 0xFFFF for k, v in kw.items()})
+    call('vmode', r0=syms['vmgm1'], r1=syms['vospr'])
+    pats = [[rnd.randrange(256) for _ in range(8)] for _ in range(256)]
+    for t in range(256):
+        for i in range(8):
+            m.vram[0x1800 + t * 8 + i] = pats[t][i]
+    cols = []
+    for g in range(32):
+        fg, bg = rnd.randrange(1, 16), rnd.randrange(1, 16)
+        cols.append((fg, bg))
+        m.vram[0x1500 + g] = (fg << 4) | bg
+    call('vreg', r0=11, r1=0x5400)
+    D = syms['appram']
+    ATB = D + 64
+    atab = [rnd.randrange(256) for _ in range(256)]
+    for i, v in enumerate(atab):
+        m.wb(ATB + i, v)
+    def setup(flags, at=0, atb=0, atr=0):
+        for off, v in ((0, syms['map']), (2, MW), (4, MH), (6, 0x2000), (8, at), (10, flags), (12, 0x8000), (14, atb), (16, atr)):
+            m.ww(D + off, v)
+        call('scrini', r0=D)
+    def pos():
+        return m.rw(D + 18), m.rw(D + 20)
+    def expect(X, Y):
+        pal = f18render.palette_rgb(m)
+        img = np.zeros((192, 256, 3), dtype=np.uint8)
+        for y in range(192):
+            wy = Y + y
+            for x in range(256):
+                wx = X + x
+                t = mp[wy >> 3][wx >> 3]
+                fg, bg = cols[t >> 3]
+                img[y, x] = pal[fg if pats[t][wy & 7] & (0x80 >> (wx & 7)) else bg]
+        return img
+    def window_ok(flags, at=0, atb=0, atr=0):
+        X, Y = pos()
+        wide, high = bool(flags & 1), bool(flags & 2)
+        TW, TH = (64 if wide else 32), (48 if high else 24)
+        c0, r0 = X >> 3, Y >> 3
+        for rr in range(r0, min(MH, r0 + (25 if high else 24))):
+            for cc in range(c0, min(MW, c0 + (33 if wide else 32))):
+                tc, tr = cc % TW, rr % TH
+                a = (tc >= 32) * 0x400 + (tr >= 24) * 0x800 + (tr % 24) * 32 + tc % 32
+                if m.vram[0x2000 + a] != mp[rr][cc]:
+                    return False
+                if at and m.vram[at + a] != ((atab[mp[rr][cc]] if atb else atr >> 8)):
+                    return False
+        return True
+    def regs_ok(flags):
+        X, Y = pos()
+        wide, high = bool(flags & 1), bool(flags & 2)
+        px = (X & 511) if wide else 0
+        py = (Y % 384) if high else 0
+        pv = 1 if py >= 192 else 0
+        want = {10: (0x2000 >> 10) + (px >> 8) + 2 * pv, 25: px & 255, 26: py - 192 * pv, 29: (0x20 if wide else 0) | (0x10 if high else 0)}
+        return all(m.vregs[k] == v for k, v in want.items()) and m.vregs[49] == 0x80
+    def shows(X, Y):
+        return np.array_equal(f18render.render(m)[:192, :256], expect(X, Y))
+    # 1. both ways (a ring of 64 x 48)
+    setup(3)
+    check(pos() == (0, 0) and window_ok(3) and regs_ok(3) and shows(0, 0), 'SCRINI (64 x 48 ring): the window at (0,0) is in the name table, the registers are as the ring model says, and the renderer\'s picture equals the map\'s')
+    walk, bad, shown, X, Y = [], None, 0, 0, 0
+    for step in range(46):
+        if step % 9 == 8:
+            dx, dy = rnd.choice([-1, 1]) * rnd.randint(30, 300), rnd.choice([-1, 1]) * rnd.randint(30, 300)
+        else:
+            dx, dy = rnd.randint(-11, 11), rnd.randint(-11, 11)
+        call('scrby', r0=D, r1=dx, r2=dy)
+        X = max(0, min(MW * 8 - 256, X + dx)); Y = max(0, min(MH * 8 - 192, Y + dy))
+        ok = pos() == (X, Y) and window_ok(3) and regs_ok(3)
+        if step % 5 == 4 or step < 2:
+            ok = ok and shows(X, Y); shown += 1
+        if not ok and bad is None:
+            bad = (step, dx, dy, pos(), (X, Y))
+    check(bad is None, 'SCRBY (64 x 48 ring): 46 steps (small, and a big jump every ninth, in all directions, into the map\'s edges) keep the window, the registers and the position right, and %d of the pictures equal the map\'s%s' % (shown, '' if bad is None else ' (first miss %s)' % (bad,)))
+    ok = True
+    for (x, y) in ((544, 288), (0, 288), (544, 0), (3, 5), (257, 193), (511, 383), (5000, 5000), (-50, 7)):
+        call('scrto', r0=D, r1=x, r2=y)
+        cx, cy = max(0, min(544, x)), max(0, min(288, y))
+        ok = ok and pos() == (cx, cy) and window_ok(3) and regs_ok(3) and shows(cx, cy)
+    check(ok, 'SCRTO: the corners, odd offsets, the ring\'s own edges (511, 383) and positions beyond the map (kept inside it) all draw the map exactly')
+    # 2. sideways only (64 x 24) and up and down only (32 x 48)
+    for flags, label in ((1, '64 x 24'), (2, '32 x 48')):
+        setup(flags)
+        X = Y = 0
+        ok = pos() == (0, 0) and window_ok(flags) and regs_ok(flags) and shows(0, 0)
+        for step in range(30):
+            dx, dy = rnd.randint(-13, 13), rnd.randint(-13, 13)
+            call('scrby', r0=D, r1=dx, r2=dy)
+            if flags & 1:
+                X = max(0, min(MW * 8 - 256, X + dx))
+            if flags & 2:
+                Y = max(0, min(MH * 8 - 192, Y + dy))
+            ok = ok and pos() == (X, Y) and window_ok(flags) and regs_ok(flags)
+            if step % 7 == 6:
+                ok = ok and shows(X, Y)
+        check(ok, 'the %s ring: 30 steps (the axis that has one page stays at 0), the window, registers and pictures right' % label)
+    # 3. attributes: the table of 256, and the one value
+    for atb, atr, label in ((ATB, 0, 'a table of 256'), (0, 0x5A00, 'one value')):
+        setup(3, at=0x3000, atb=atb, atr=atr)
+        ok = m.vregs[11] == 0x3000 >> 6 and window_ok(3, 0x3000, atb, atr)
+        for step in range(20):
+            dx, dy = rnd.randint(-20, 20), rnd.randint(-20, 20)
+            call('scrby', r0=D, r1=dx, r2=dy)
+            ok = ok and window_ok(3, 0x3000, atb, atr) and regs_ok(3)
+        check(ok, 'with an attribute table (%s): VR11 is set and every tile of the window has its attribute through 20 steps' % label)
+    # 4. the example: the world of examples/scroll, walked round its edge by itself, drawn against the picture the map and the tiles give
+    sys.path.insert(0, os.path.join(ROOT, 'examples', 'scroll'))
+    import mkmap
+    ce = build('scroll')
+    se = asmharness.symbols(os.path.join(ROOT, 'build', 'scroll', 'world.equ'))
+    me = sim9900.Machine(ce)
+    me.presses, me.toggles, end = sim9900.schedule([])
+    cpe = sim9900.CPU(me)
+    cpe.pc = me.rw(me.rw(0x6006) + 2)
+    world = mkmap.make()
+    phases, bad, moments = [], None, 0
+    for frames in (60, 160, 400, 650, 900):
+        while me.insns < frames * sim9900.VSYNC_INSNS:
+            cpe.step()
+        X, Y = me.rw(se['desc'] + 18), me.rw(se['desc'] + 20)
+        phases.append(me.rw(se['phase']))
+        pal = f18render.palette_rgb(me)
+        exp = np.zeros((192, 256, 3), dtype=np.uint8)
+        for y in range(192):
+            for x in range(256):
+                wy, wx = Y + y, X + x
+                tl = world[wy >> 3][wx >> 3]
+                cb = mkmap.CTAB[tl >> 3]
+                exp[y, x] = pal[(cb >> 4) if mkmap.PATS[(tl >> 3) * 2 + (tl & 1)][wy & 7] & (0x80 >> (wx & 7)) else (cb & 15)]
+        mask = np.ones((192, 256), dtype=bool)
+        mask[88:98, 124:132] = False                     # the hero stands there
+        diff = int((np.any(f18render.render(me)[:192, :256] != exp, axis=2) & mask).sum())
+        moments += 1
+        if diff and bad is None:
+            bad = (frames, X, Y, diff)
+    check(bad is None and phases == [0, 0, 1, 2, 3], 'examples/scroll: walking by itself right, down, left and up (the phases seen %s), the picture at %d moments, over page flips both ways, is the map\'s but for the hero%s' % (phases, moments, '' if bad is None else ' (first miss %s)' % (bad,)))
+    # 5. what a step costs, by the cycle model (3 MHz, the TI's wait states; the video chip's own delays are not in it)
+    setup(3)
+    def cost(**kw):
+        c0 = cpu.cycles
+        call(kw.pop('name'), **kw)
+        return (cpu.cycles - c0) / 3000.0
+    one = cost(name='scrby', r0=D, r1=1, r2=0)
+    call('scrto', r0=D, r1=0, r2=0)
+    col = cost(name='scrby', r0=D, r1=8, r2=0)
+    row = cost(name='scrby', r0=D, r1=0, r2=8)
+    full = cost(name='scrto', r0=D, r1=200, r2=100)
+    check(one < 2 and col < 10 and row < 6 and full < 60, 'what a step costs by the cycle model, in milliseconds: 1 pixel %.2f, 8 pixels sideways (a column of 25 tiles) %.1f, 8 up or down (a row of 33) %.1f, a jump (SCRTO, 825 tiles) %.0f' % (one, col, row, full))
+
+
+def sktiles():
+    """tools/sktiles.py: a PNG tile sheet and a Tiled map (CSV and TMX) become the assembly data lib/scroll.a99 shows: patterns, colour table
+    and map bytes come out as the sheet and map say, the flip flags of a TMX tile are dropped, --subtract, --first and --invert do what
+    they say, bad numbers are refused, and the output assembles."""
+    import tempfile
+    from PIL import Image
+    d = tempfile.mkdtemp()
+    tool = os.path.join(ROOT, 'tools', 'sktiles.py')
+    run = lambda *args: subprocess.run([sys.executable, tool] + list(args), capture_output=True, text=True)
+    tiles = [bytes(8), bytes([0x80 >> i for i in range(8)]), bytes([0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF]), bytes([0xAA, 0x55] * 4)]
+    sheet = Image.new('RGBA', (16, 16), (255, 255, 255, 255))      # 2 x 2 tiles of 8 x 8: ink is black
+    for k, tl in enumerate(tiles):
+        for y in range(8):
+            for x in range(8):
+                if tl[y] & (0x80 >> x):
+                    sheet.putpixel(((k % 2) * 8 + x, (k // 2) * 8 + y), (0, 0, 0, 255))
+    sheet.putpixel((0, 0), (0, 0, 0, 0))                           # a transparent pixel is paper
+    sheet.save(d + '/sheet.png')
+    open(d + '/m.csv', 'w').write('2,3,4\n1,2,4\n')
+    r = run('--map', d + '/m.csv', '--tiles', d + '/sheet.png', '--subtract', '1', '--colors', '4:3,9:5', '--name', 'W', '--out', d + '/o', '--bin')
+    mp = open(d + '/o-map.a99').read()
+    tl = open(d + '/o-tiles.a99').read()
+    nums = lambda s: [[int(v.replace('>', '0x'), 0) for v in ln.split('BYTE')[1].strip().split(',')] for ln in s.splitlines() if 'BYTE' in ln]
+    pat = [b for row in nums(tl)[:4] for b in row]
+    col = [b for row in nums(tl)[4:] for b in row]
+    check(r.returncode == 0 and bytes(pat) == b''.join(tiles) and col[:3] == [0x43, 0x95, 0x00] and len(col) == 32, 'tiles: a sheet of four 8 x 8 tiles (a transparent pixel counted as paper) gives their 32 pattern bytes in order, and --colors 4:3,9:5 the first two of the 32 colour bytes')
+    rows = nums(mp)
+    check([v for row in rows for v in row] == [1, 2, 3, 0, 1, 3] and 'WW     EQU  3' in mp and 'WH     EQU  2' in mp and open(d + '/o-map.bin', 'rb').read() == bytes([1, 2, 3, 0, 1, 3]), 'map (CSV, --subtract 1): the numbers come out one less, the equates WW and WH are 3 and 2, and --bin writes the same six bytes')
+    tmx = '<map width="4" height="2"><layer name="Sky" width="4" height="2"><data encoding="csv">1,1,1,1,\n1,1,1,1</data></layer><layer name="Ground" width="4" height="2"><data encoding="csv">\n2,3,2147483652,4,\n1,2,3,4\n</data></layer></map>'
+    open(d + '/m.tmx', 'w').write(tmx)
+    r = run('--map', d + '/m.tmx', '--layer', 'Ground', '--subtract', '1', '--out', d + '/t')
+    check(r.returncode == 0 and [v for row in nums(open(d + '/t-map.a99').read()) for v in row] == [1, 2, 3, 3, 0, 1, 2, 3], 'map (TMX, the layer named Ground, with a flip flag on one tile): the second layer is the one used and the flag is dropped')
+    r = run('--map', d + '/m.tmx', '--layer', 'Nothing', '--out', d + '/t2')
+    check(r.returncode != 0 and 'Sky' in (r.stdout + r.stderr) and 'Ground' in (r.stdout + r.stderr), 'a layer name that is not there is refused, and the ones that are are listed')
+    open(d + '/big.csv', 'w').write('1,300\n')
+    r = run('--map', d + '/big.csv', '--out', d + '/b')
+    check(r.returncode != 0 and 'byte' in (r.stdout + r.stderr), 'a tile number over 255 is refused: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:80])
+    r = run('--map', d + '/m.csv', '--subtract', '5', '--out', d + '/b')
+    check(r.returncode != 0 and '--subtract' in (r.stdout + r.stderr), 'a --subtract that makes a number negative is refused')
+    r = run('--tiles', d + '/sheet.png', '--first', '254', '--out', d + '/b')
+    check(r.returncode != 0 and '255' in (r.stdout + r.stderr), 'a sheet that would run past tile 255 from --first is refused')
+    r = run('--tiles', d + '/sheet.png', '--invert', '--out', d + '/i')
+    inv = [b for row in nums(open(d + '/i-tiles.a99').read())[:4] for b in row]
+    inv_expect = [(~b) & 0xFF for tl2 in tiles for b in tl2]
+    inv_expect[0] = inv_expect[0] & 0x7F       # the transparent corner is paper, so it stays "unset" after the flip
+    check(r.returncode == 0 and inv[8:] == inv_expect[8:] and inv[1:8] == inv_expect[1:8], '--invert makes the light pixels the set ones')
+    open(d + '/t.a99', 'w').write('       AORG >C000\n       COPY "%s"\n       COPY "%s"\n' % (d + '/o-map.a99', d + '/o-tiles.a99'))
+    r = subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-b', '-q', d + '/t.a99', '-o', d + '/t.bin'], capture_output=True, text=True)
+    size = os.path.getsize(d + '/t.bin') if os.path.exists(d + '/t.bin') else -1
+    check(r.returncode == 0 and size == 6 + 32 + 32, 'the output assembles (map 6 bytes, patterns 32, colours 32: %d bytes)' % size)
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

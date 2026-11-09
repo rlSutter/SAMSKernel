@@ -1,0 +1,7 @@
+{
+  "name": "SCROLL TEST",
+  "min_pages": 128,
+  "modules": [
+    {"name": "sc", "source": "sc.a99"}
+  ]
+}

@@ -1,0 +1,15 @@
+*======================================================================
+* sc.a99 - a module for tests/test_kernel.py (group scroll): the scrolling
+* include and a map the test writes (map.a99) so that the test can call
+* SCRINI, SCRTO and SCRBY.
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+INIT   RT
+TICK   RT
+
+       COPY "scroll.a99"
+       COPY "map.a99"
