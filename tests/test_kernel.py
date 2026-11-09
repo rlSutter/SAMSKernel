@@ -2360,6 +2360,27 @@ def diskboot():
             break
     scr = [l.rstrip() for l in sim9900.screen(m).split('\n') if l.strip()]
     check(shown, 'the bootstrap reads the three bank files from the disk and the kernel runs the application: its screen shows %r after %d instructions' % (scr[:1], m.insns))
+    # quitting from a disk-started program puts the F18A's registers back, as from a cartridge's (the loader's clear of the scratchpad took
+    # the F18A flag, and the exit skipped the restore: the console's title then came up in 30 rows, with the colour table on its bottom row)
+    m2 = sim9900.Machine(bytes(8192))
+    m2.tifdc = tifdc.TIFDC(image=bytearray(img))
+    m2.presses, m2.toggles, end = sim9900.schedule(sim9900.parse_keys('<WAIT 900><F-=><WAIT 100>'))
+    cpu2 = sim9900.CPU(m2)
+    cpu2.pc, cpu2.wp, cpu2.limi = ea.load(m2, img, 'HELLO'), 0x83E0, 0
+    running = None
+    for chunk in range(400):
+        for i in range(100000):
+            cpu2.step()
+            if getattr(m2, 'at_reset', None) is not None:
+                break
+        if running is None and chunk == 10:
+            running = (m2.rw(0x8348), list(m2.vregs))          # the kernel is up: the F18A flag is set, the screen is 30 rows
+        if getattr(m2, 'at_reset', None) is not None:
+            break
+    r2 = getattr(m2, 'at_reset', None)
+    check(running is not None and running[0] != 0 and running[1][49] == 64, 'a disk-started program has the F18A flag set while it runs (>8348 = %s) and the 30-row mode on (VR49 = %s)' % (hex(running[0]) if running else '?', running[1][49] if running else '?'))
+    check(r2 is not None and [r2[0][i] for i in (10, 11, 19, 24, 25, 26, 27, 28, 29, 30, 31, 49, 50)] == [0] * 13 and r2[0][51] == 32 and r2[0][48] == 1,
+          'FCTN = from it puts VR10 VR11 VR19 VR24-31 VR49 VR50 back to 0, VR51 to 32 and VR48 to 1 before the console\'s reset%s' % ('' if r2 is None else ' (VR49 = %d, VR29 = %d, VR50 = %d, VR51 = %d)' % (r2[0][49], r2[0][29], r2[0][50], r2[0][51])))
     # the bank files are trimmed of their trailing zeros, and the bootstrap zero-fills what a file does not reach
     sizes = {n: len(tifdc.read_program(img, n)) for n in names if '/B' in n}
     check(all(v < 8192 for v in sizes.values()) and sum(sizes.values()) + len(boot) < 16000,

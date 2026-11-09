@@ -66,6 +66,7 @@ Build with `python3 tools/skbuild.py examples/hello --disk --geometry sssd` and 
 | D4 | D3 with the programs on `DSK2.` and ALPHA started from `DSK2.` | the same | the device probing and the handoff's device |
 | D5 | note the time from the return key to the application's screen | a number | how long a disk start takes on a floppy (not known) |
 | D6 | the workbench from disk: `images/workbench-diskstart-360k.dsk` (360K: a double-density controller, a CF7+ or a TIPI), option 5, `DSK1.WBENCH`; then `C`, pick `HELLO/A99`, `A`, `R` | the menu, the catalog, `Assembled: 194 bytes at >C000`, the program | the disk-started workbench reads and assembles from its own disk |
+| D7 | after D1 (Hello), press FCTN = (js99er: Alt =) | the console's title screen, **24 rows, nothing below the copyright line** (1.35.1: before it the title came up in 30 rows with the colour table drawn as garbage on its bottom row, because the disk start lost the F18A flag the exit's restore depends on) | that quitting from a disk-started program puts the F18A back as from a cartridge's |
 
 ## RUN PROGRAM FILE (1.31.0; nothing of it has run on a real machine)
 

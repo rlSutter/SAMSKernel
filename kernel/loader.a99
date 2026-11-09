@@ -133,7 +133,11 @@ ST4    BL   @F18RDV
 * kernel is about to wipe VRAM, where the controller keeps its buffers: it must
 * start as from a cartridge, with every variable clear, so that its first disk
 * call powers the cards up again (otherwise it would use a controller whose
-* VRAM buffers it has just erased).  F18VER, NPAGES and QUITF stay.
+* VRAM buffers it has just erased).  F18VER, NPAGES and QUITF stay; the F18A
+* flag (F18FLG, at >8348) and the PICO flag (VDPPIC, in slot A) are in what is
+* cleared, so the F18A is found again after it: without the flag the exit that
+* puts the F18A's registers back is skipped, and the console's title comes up
+* in 30 rows with the colour table on its bottom row (found by the owner).
        LI   R1,>8348
        LI   R2,>1C             >8348->837F, in words
 DKC1   CLR  *R1+
@@ -145,6 +149,7 @@ DKC2   CLR  *R1+
        DEC  R2
        JNE  DKC2
        BL   @CURINI            slot B is at its default pair again
+       BL   @F18DET            F18FLG and VDPPIC, which the clears took
        B    @>A000             the kernel (KSTART)
        .else
 * relocate the bank copier into scratchpad
