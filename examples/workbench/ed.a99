@@ -396,6 +396,9 @@ LOADFILE .enter
        CLR  @EDNFR
        CLR  @EDTRUNC
        SETO @EDINS
+       LI   R1,SLOADG          'Loading DSK1.NAME ... lines' on row 29
+       CLR  R2
+       BL   @PRGINI
        LI   R2,SRCNAME
        LI   R0,FIN+FVAR
        LI   R1,80
@@ -403,7 +406,12 @@ LOADFILE .enter
        MOV  R0,R0
        JNE  LF8
 LF1    MOV  @EDN,R1
-       BL   @INSLINE
+       MOV  R1,R0              every 8 lines the count and the turning bar
+       ANDI R0,7
+       JNE  LF1A
+       BL   @PRGUP
+       MOV  @EDN,R1
+LF1A   BL   @INSLINE
        CI   R0,-1
        JEQ  LF7
        MOV  R2,@EDT+6          the line's address
@@ -460,14 +468,22 @@ SAVEFILE .enter
        JEQ  SVOK
        LI   R0,>00FE           a file that was only partly loaded: not saved
        JMP  SV9
-SVOK   LI   R2,SRCNAME
+SVOK   LI   R1,SSAVG           'Saving DSK1.NAME ... lines of n' on row 29
+       MOV  @EDN,R2
+       BL   @PRGINI
+       LI   R2,SRCNAME
        LI   R0,FOUT+FVAR
        LI   R1,80
        BL   @FOPEN
        MOV  R0,R0
        JNE  SV9
        CLR  @EDT+14            (the file service clobbers R6-R9)
-SV1    MOV  @EDT+14,R9
+SV1    MOV  @EDT+14,R1         every 8 lines the count and the turning bar
+       MOV  R1,R0
+       ANDI R0,7
+       JNE  SV1A
+       BL   @PRGUP
+SV1A   MOV  @EDT+14,R9
        C    R9,@EDN
        JHE  SV8
        MOV  R9,R1
@@ -506,6 +522,82 @@ SV9    .leave
        RT
 SPACE  BYTE >20
        EVEN
+
+* The progress line.  A file read or written a record at a time on a floppy
+* takes seconds, so row 29 says what is going on: 'Loading DSK1.NAME   n lines'
+* with a bar that turns, or 'Saving DSK1.NAME   n lines of N' (the buffer's
+* size is known when saving).  Written every 8 records, which costs next to
+* nothing beside the disk, and cleaned off when the screen is drawn again.
+* PRGINI - the line begun: R1 = the verb (a string), R2 = the number of lines
+* to come (0: not known).  Uses R0-R7.
+PRGINI .enter
+       MOV  R2,@EDT+12
+       .push R1
+       LI   R0,29*COLS
+       LI   R1,>2000
+       LI   R2,COLS
+       BL   @FILLN
+       LI   R0,29*COLS
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       .pop R1
+       LI   R0,29*COLS+1
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,29*COLS+9
+       LI   R1,SRCNAME
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,29*COLS+49
+       LI   R1,SLINES
+       LI   R2,ABAR
+       BL   @PUTS
+       MOV  @EDT+12,R1
+       JEQ  PI9
+       LI   R0,29*COLS+58
+       LI   R1,SOF
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,29*COLS+61
+       MOV  @EDT+12,R1
+       LI   R2,ABAR
+       BL   @DECW
+PI9    CLR  R1
+       BL   @PRGUP
+       .leave
+       RT
+
+* PRGUP - the count R1 and the next turn of the bar.  Uses R0-R7.
+PRGUP  .enter
+       .push R1
+       LI   R0,29*COLS+44
+       LI   R2,ABAR
+       BL   @DECW
+       .pop R1
+       SRL  R1,3
+       ANDI R1,3
+       AI   R1,SPIN
+       MOVB *R1,R1
+       LI   R0,29*COLS+55
+       LI   R2,ABAR
+       BL   @PUTC
+       .leave
+       RT
+SPIN   BYTE >7C,>2F,>2D,>5C    | / - \
+
+* PRGEND - the line taken off again.  Uses R0-R2.
+PRGEND .enter
+       LI   R0,29*COLS
+       LI   R1,>2000
+       LI   R2,COLS
+       BL   @FILLN
+       LI   R0,29*COLS
+       LI   R1,ANORM
+       LI   R2,COLS
+       BL   @FILLA
+       .leave
+       RT
 
 *----------------------------------------------------------------------
 * The screen is Text 80 mode, 80 columns by 30 rows: row 0 the status bar,
@@ -946,7 +1038,9 @@ KA1    CLR  @EDCOL
 * KEYSAV - save.
 KEYSAV .enter
        BL   @SAVEFILE
-       MOV  R0,R0
+       MOV  R0,@EDT+12
+       BL   @PRGEND
+       MOV  @EDT+12,R0
        JEQ  KS1
        LI   R1,SSERR
        JMP  KS2
@@ -986,6 +1080,9 @@ KM9    .leave
        RT
 
 SEDIT  STRI 'Edit'
+SLOADG STRI 'Loading'
+SSAVG  STRI 'Saving'
+SLINES STRI 'lines'
 SLINE  STRI 'line'
 SOF    STRI 'of'
 SCOL   STRI 'col'

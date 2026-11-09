@@ -3735,7 +3735,56 @@ def sktiles():
     check(r.returncode == 0 and size == 6 + 32 + 32, 'the output assembles (map 6 bytes, patterns 32, colours 32: %d bytes)' % size)
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+def progress():
+    """The workbench's editor shows what it is doing while it reads or writes a file: row 29 says 'Loading DSK1.NAME' with the lines so far and
+    a turning bar while a file loads, and 'Saving' with the lines so far and of how many while it saves, and the line is gone when the
+    screen is drawn again."""
+    import asmharness, tempfile, skdisk, re, tifdc
+    d = tempfile.mkdtemp()
+    src = os.path.join(d, 'prog.txt')
+    open(src, 'w').write(''.join('line %d of the file to be loaded, long enough to be a line\n' % i for i in range(300)))
+    cart, syms, own_equ = asmharness.build_workbench()
+    disk = os.path.join(d, 'disk.dsk')
+    skdisk.make_disk(disk, [src], own_equ)
+    img = bytearray(open(disk, 'rb').read())
+    def watch(keys, frames, start_frame=0):
+        m = sim9900.Machine(cart)
+        m.tifdc = tifdc.TIFDC(image=img)
+        m.presses, m.toggles, end = sim9900.schedule(sim9900.parse_keys(keys))
+        cpu = sim9900.CPU(m)
+        cpu.pc = m.rw(m.rw(0x6006) + 2)
+        seen = []
+        row = lambda: bytes(m.vram[29 * 80:30 * 80]).decode('latin-1').replace('\x00', ' ')
+        n = 0
+        while m.insns < frames * sim9900.VSYNC_INSNS:
+            cpu.step()
+            n += 1
+            if n % 2000 == 0:
+                seen.append(row())
+        return m, seen, row()
+    m, seen, last = watch('<WAIT 10>nPROG/TXT<ENTER><WAIT 10>e<WAIT 1500>', 1700)
+    loading = [r for r in seen if r.lstrip().startswith('Loading')]
+    counts = []
+    for r in loading:
+        mm = re.search(r'(\d+)\s+lines', r)
+        if mm:
+            counts.append(int(mm.group(1)))
+    check(len(loading) >= 3 and 'PROG/TXT' in loading[0] and counts == sorted(counts) and counts[-1] >= 280 and counts[0] < 100,
+          'loading a file of 300 lines: row 29 reads Loading with its name and a count that only grows (%d samples, from %s to %s)' % (len(loading), counts[:1], counts[-1:]))
+    check('Loading' not in last and 'CTRL S' in last, 'when the editor is drawn again row 29 is its help line, not the progress: %r' % last.strip()[:50])
+    m, seen, last = watch('<WAIT 10>nPROG/TXT<ENTER><WAIT 10>e<WAIT 1500><C-s><WAIT 1400>', 3500)
+    saving = [r for r in seen if r.lstrip().startswith('Saving')]
+    scounts = []
+    for r in saving:
+        mm = re.search(r'(\d+)\s+lines\s+\S?\s*of\s+(\d+)', r)
+        if mm:
+            scounts.append((int(mm.group(1)), int(mm.group(2))))
+    check(len(saving) >= 2 and scounts and all(t == 300 or t == 301 for c, t in scounts) and [c for c, t in scounts] == sorted(c for c, t in scounts),
+          'saving it: row 29 reads Saving, the count rises and the total is the buffer\'s (%d samples, e.g. %s)' % (len(saving), scounts[-1:]))
+    check('saved' in last and 'Saving' not in last, 'and after the save the message is "saved": %r' % last.strip()[:40])
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

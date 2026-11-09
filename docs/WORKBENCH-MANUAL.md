@@ -242,6 +242,10 @@ the file on the disk is never cut.
 
 Typing a lower-case letter gives lower case with ALPHA LOCK up and a capital with it down, as everywhere on the console. Everything is saved exactly as typed.
 
+### While a file loads or saves
+
+A file is read or written a line at a time, and on a floppy that takes seconds (a file of 300 lines about five seconds in the simulator's model of the disk, 2,040 lines about half a minute), so the bottom row says what is going on. **Loading** shows `Loading DSK1.NAME   n  lines  |`, the number of lines read so far and a bar that turns (`| / - \`); **saving** shows `Saving DSK1.NAME   n  lines  /  of N`, with the number of lines in the buffer, which is known. The count and the bar change every 8 lines, which costs next to nothing beside the disk. When the file is in, the editor is drawn again and the help line comes back; after a save it says `saved` (or `the file could not be written`). The number is lines, not a percentage, because a record-by-record read does not know how long the file is until it reaches the end (the buffer holds 2,040 lines at most).
+
 ### Messages
 
 | Message | Meaning |

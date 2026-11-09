@@ -68,6 +68,13 @@ Build with `python3 tools/skbuild.py examples/hello --disk --geometry sssd` and 
 | D6 | the workbench from disk: `images/workbench-diskstart-360k.dsk` (360K: a double-density controller, a CF7+ or a TIPI), option 5, `DSK1.WBENCH`; then `C`, pick `HELLO/A99`, `A`, `R` | the menu, the catalog, `Assembled: 194 bytes at >C000`, the program | the disk-started workbench reads and assembles from its own disk |
 | D7 | after D1 (Hello), press FCTN = (js99er: Alt =) | the console's title screen, **24 rows, nothing below the copyright line** (1.35.1: before it the title came up in 30 rows with the colour table drawn as garbage on its bottom row, because the disk start lost the F18A flag the exit's restore depends on) | that quitting from a disk-started program puts the F18A back as from a cartridge's |
 
+## The progress line (1.36.0; the timing is the simulator's)
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| P1 | the workbench, `N`, a long source on a floppy (`images/workbench-360k.dsk` has a few; make a 1,000-line file for a long one), `E` | row 29 reads `Loading DSK1.NAME` with a count that rises and a bar that turns, then the editor | that the line is readable and the count keeps pace with the drive (the simulator says about 17 frames for 8 lines) |
+| P2 | edit a character, CTRL S | `Saving ...  n lines of N`, then `saved` | the same for writing |
+
 ## RUN PROGRAM FILE (1.31.0; nothing of it has run on a real machine)
 
 With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console's menu, choose **RUN PROGRAM FILE** (the second program):
