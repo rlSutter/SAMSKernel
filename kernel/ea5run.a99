@@ -39,12 +39,23 @@ RNSTUB EQU  96                 a module program's file: a stub of 96 bytes ...
 RNHDRS EQU  32                 ... a header of 32 bytes, then the module
 RNPID  EQU  >8338              the kernel build ID the program names (2 words)
 RNPLEN EQU  >833C              the module's length
+RNLK   EQU  >833E              the key taken last (a byte), >FF: none held
+RNDBN  EQU  1500               the loop that waits out contact bounce (~15 ms)
 RNBLK  EQU  600                scans per half of the cursor's blink
 
 * R14 = the name's length in the main code (RNSCN and RNDSR leave it alone)
 EA5RUN LIMI 0
        LWPI >8300
-RN0    BL   @RNCLS
+RN0    BL   @RNSCN             a key already down is not a new one
+       MOVB R0,@RNLK
+       BL   @RNCLS
+       LI   R0,>08F8           character 31 as a solid block: the cursor
+       BL   @RNVW
+       LI   R1,>FF00
+       LI   R2,8
+RN0A   MOVB R1,@VDPWD
+       DEC  R2
+       JNE  RN0A
        LI   R0,2*32+4
        LI   R1,RNTTL
        BL   @RNPRT
@@ -267,33 +278,57 @@ RNE1   BL   @RNPRT
        MOVB R7,@VDPWD
 RNE2   BL   @RNGET
        B    @RN0
-* RNGET - wait for a key to go up, then for one to go down: R0 high byte.  While
-* it waits the cursor (an underscore at the name line's next position) blinks.
+* RNGET - wait for a NEW key: R0 = its code in the high byte.  A key already
+* down when the call is made (the one that got us here) or still down from the
+* last call is not new; a different key is, even if another is held (so typing
+* that overlaps works), once it has been steady for ~15 ms, and a key counts as
+* released only when it has been up that long: contact bounce, on a real TI's
+* keyboard, gives neither doubled nor lost characters.  A key held down gives
+* one character, no repeat.  While it waits the cursor, a solid block
+* (character 31), blinks.
 RNGET  MOV  R11,R13
-RNG1   BL   @RNSCN
-       CB   R0,@RNFF
-       JNE  RNG1
        CLR  R8                 0: the cursor is not showing
        LI   R15,1              (so it shows at once)
 RNG2   BL   @RNSCN
        CB   R0,@RNFF
-       JNE  RNG4               a key
-       DEC  R15
+       JNE  RNG6               a key is down
+       CB   @RNLK,@RNFF        none: was one held? is it really up, or a bounce?
+       JEQ  RNG7
+       LI   R1,RNDBN
+RNGR   DEC  R1
+       JNE  RNGR
+       BL   @RNSCN
+       CB   R0,@RNFF
+       JNE  RNG2               it closed again: still held
+       MOVB R0,@RNLK           really up: the next press is a new key
+       JMP  RNG7
+RNG6   CB   R0,@RNLK           the one already taken, still held?
+       JEQ  RNG7
+       MOV  R0,R10             a different one: steady for a moment?
+       LI   R1,RNDBN
+RNG9   DEC  R1
+       JNE  RNG9
+       BL   @RNSCN
+       CB   R0,R10
+       JNE  RNG2               it changed: look again
+       MOVB R0,@RNLK           taken
+       JMP  RNG4
+RNG7   DEC  R15
        JNE  RNG2
        LI   R15,RNBLK
        MOV  R8,R8
        JNE  RNG3
-       LI   R1,>5F00           show it
+       LI   R1,>1F00           show it
        SETO R8
        JMP  RNG5
 RNG3   LI   R1,>2000           hide it
        CLR  R8
 RNG5   BL   @RNCUR
        JMP  RNG2
-RNG4   MOV  R0,R7              the key: the cursor off, the key back in R0
+RNG4   MOV  R0,R10             the key: the cursor off, the key back in R0
        LI   R1,>2000
        BL   @RNCUR
-       MOV  R7,R0
+       MOV  R10,R0
        B    *R13
 * RNCUR - the character in the high byte of R1 at the name line's next
 * position (R14 characters in).

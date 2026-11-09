@@ -19,7 +19,7 @@ by the build (`kernel build ID E8A7222C: ...`).
     python3 tools/skmodprog.py guest.a99 --target build/workbench --disk guest.dsk          # a single-density disk with the program on it
 
 `--target` is the host's build directory (or its `kernel.equ`; each release ships `images/workbench.kernel.equ`). The tool assembles the module with the host's names, refuses one larger than the host takes
-(`MODMAX`: 8,192 bytes, or 4,096 if the host has common code at `>D000`), and writes the file. To run it: the host cartridge, **RUN PROGRAM FILE**, `DSK1.GUEST`. `examples/modprog/guest.a99` is a small one;
+(`MODMAX`: 8,192 bytes, or 4,096 if the host has common code at `>D000`), and writes the file. To run it: the host cartridge, **RUN PROGRAM FILE**, `DSK1.GUEST`. `examples/modprog/guest.a99` is a small one (a frame counter that ticks every frame, a count of the keys typed, the keys echoed, FCTN = quits: enough to see that it is alive and using the kernel);
 `images/modprog-demo.dsk` has it built for the released workbench cartridge.
 
 ## What happens

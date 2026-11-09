@@ -2841,7 +2841,7 @@ def ea5run():
     subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-b', '-q', d + '/pw.a99', '-o', d + '/pw.bin'], check=True, capture_output=True)
     pw = open(d + '/pw.bin', 'rb').read()
     def row(m, n):
-        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').rstrip()
+        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').replace('\x1f', ' ').rstrip()
     def session(keys, until, limit=200, stop_at=None):
         m = sim9900.Machine(bank0)
         if rom:
@@ -2877,8 +2877,8 @@ def ea5run():
     cur = set()
     m = sim9900.Machine(bank0)
     # (the cursor: sampled while the prompt waits for a key; it must be seen showing and hidden at the name line's next position: a hidden cursor reads as nothing, the row's end being trimmed)
-    m, cpu = session('<WAIT 30>', lambda m, c: cur.add(row(m, 8)[7:8]) or (len(cur) > 1 and '_' in cur), 80)
-    check('_' in cur and len(cur) > 1, 'a cursor blinks at the name line\'s next position while the prompt waits (seen %s)' % sorted(cur))
+    m, cpu = session('<WAIT 30>', lambda m, c: cur.add(chr(m.vram[8 * 32 + 7])) or (len(cur) > 1 and '\x1f' in cur), 80)
+    check('\x1f' in cur and len(cur) > 1 and bytes(m.vram[0x8F8:0x900]) == b'\xff' * 8, 'a solid-block cursor (character 31, its pattern a full 8x8) blinks at the name line\'s next position while the prompt waits (seen %s)' % [hex(ord(x)) for x in sorted(cur)])
     m, cpu = session('<WAIT 30>chainx<F-s><WAIT 20>', lambda m, c: row(m, 8) == '  DSK1.CHAIN', 60)
     check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.CHAIN', 'the prompt shows the title and a name line that starts as DSK1. and takes typing (chainx) and FCTN S (one back): %r' % row(m, 8))
     m, cpu = session('<WAIT 30>chain<ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234 and row(m, 8) == '  DSK1.')
@@ -2969,7 +2969,7 @@ def modprog():
     subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-b', '-q', d + '/pw.a99', '-o', d + '/pw.bin'], check=True, capture_output=True)
     pw = open(d + '/pw.bin', 'rb').read()
     def row(m, n):
-        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').rstrip()
+        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').replace('\x1f', ' ').rstrip()
     def session(keys, until, limit=900):
         m = sim9900.Machine(cart)
         m.tifdc = tifdc.TIFDC(image=bytearray(disk))

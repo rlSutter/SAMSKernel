@@ -73,7 +73,7 @@ With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console
 
 | Step | Do | Good looks like | What it settles |
 | --- | --- | --- | --- |
-| R1 | the prompt: a title, `FILE NAME?`, `DSK1.` on the name line; type a name, `FCTN S` to delete | the typing shows and edits | that the console's screen and the matrix scan read the keys on your machine |
+| R1 | the prompt: a title, `FILE NAME?`, `DSK1.` on the name line and a **solid blinking block** after it; type a name, `FCTN S` to delete one character | every key typed gives one character (also when keys overlap), none doubled, none lost; `FCTN S` takes off exactly one; a held key gives one character, not a run | that the console's screen and the matrix scan read the keys on your machine, and that contact bounce is handled (1.32.1: reported doubled and lost keys and a backspace that cleared the name) |
 | R2 | a program you know runs under the Editor/Assembler's option 5 (`DSK1.UTIL1` style files): type its name | it runs as under the module | that a real option 5 image runs with the console as the runner leaves it (interrupts on, GPL workspace); **tell me which program and what it does** |
 | R3 | `images/hello-diskstart-sssd.dsk` (the hello program as a kernel disk program): `DSK1.HELLO` | the kernel's hello screen | a kernel disk program through the runner |
 | R4 | a name that is not on the disk; `FCTN =` | `I/O ERROR 7`; the console restarts | the error path and the quit |
