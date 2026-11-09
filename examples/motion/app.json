@@ -1,0 +1,6 @@
+{
+  "name": "SPRITE MOTION",
+  "min_pages": 128,
+  "motion": true,
+  "modules": [{"name": "motion", "source": "motion.a99"}]
+}

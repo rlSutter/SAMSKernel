@@ -1468,7 +1468,7 @@ def editorapp():
     check(any('needs more after the dot' in l for l in ln) and any(l.startswith('File:') for l in ln), 'ENTER on the bare device is refused with a message, and the prompt stays: %r' % [l for l in ln if 'needs more' in l or l.startswith('File:')])
 
 def sourcesdisk():
-    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the six long names
+    """tools/mksources.py: the 360K disk of the kernel's sources for the TI.  Every name fits a TI disk, the seven long names
     are shortened with the COPY lines that name them changed to match (and the repository's files are not touched), every file a
     source COPYs is on the disk except the three the build writes for each application, and the disk reads back."""
     import re, tempfile, subprocess, mksources, tifdc
@@ -1484,7 +1484,7 @@ def sourcesdisk():
         for m in re.finditer(r'^\s+COPY\s+"([^"]+)\.a99"', text, re.M):
             if m.group(1).lower() not in have:
                 missing.add(m.group(1).lower())
-    check(missing == {'appcfg', 'appname', 'appmsg'}, 'every COPY target is on the disk except the three the build writes for each application: %s' % sorted(missing))
+    check(missing == {'appcfg', 'appname', 'appmsg', 'modid'}, 'every COPY target is on the disk except the files the build writes for each application (modid only for a module-program host): %s' % sorted(missing))
     info = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.environ['XAS99']), 'xdm99.py'), out], capture_output=True, text=True).stdout.split('\n')[0]
     used = int(re.search(r':\s+(\d+) used\s+(\d+) free', info).group(1))
     check('SOURCES' in info and '2S/2D' in info and used < 1300, 'a double-density disk named SOURCES with room to spare: %s' % info.strip())
@@ -2921,6 +2921,192 @@ def ea5run():
     check(int.from_bytes(pb[6:8], 'big') != 0 and int.from_bytes(pb[int.from_bytes(pb[6:8], 'big') - 0x6000:][:2], 'big') == 0,
           'without "ea5" the cartridge lists one program, as before')
 
+def modprog():
+    """Module programs (tools/skmodprog.py, "modprog": true, docs/MODPROG.md): a kernel module on a disk, run by a cartridge that already has the kernel.  The simulated machine starts at the host
+    cartridge's RUN PROGRAM FILE as the console's menu would, with TI's disk controller ROM and a disk image: GUEST (a module program built against the host's kernel.equ) boots the host's kernel with the
+    guest's module as the application; a program built against another kernel build is refused with both IDs on the screen; a damaged one is refused; an ordinary option 5 image still runs; the file's
+    stub says what is missing where there is no kernel cartridge; and the tool refuses a module that is too big."""
+    import tempfile, tifdc, skdisk, skmodprog, shutil
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])):
+        print('  (skipped: the disk controller ROM is needed: TIFDC_ROM)')
+        return
+    cart = build('tests/apps/modhost')
+    bank0 = cart[:8192]
+    def word(a):
+        return int.from_bytes(bank0[a - 0x6000:a - 0x6000 + 2], 'big')
+    progs, e = [], word(0x6006)
+    while e:
+        n = bank0[e + 4 - 0x6000]
+        progs.append((word(e + 2), bank0[e + 5 - 0x6000:e + 5 - 0x6000 + n].decode()))
+        e = word(e)
+    entry = progs[-1][0]
+    d = tempfile.mkdtemp()
+    target = os.path.join(ROOT, 'build', 'modhost')
+    guest = os.path.join(ROOT, 'tests', 'apps', 'modprog', 'guest.a99')
+    gdata, gid = skmodprog.program_file(guest, target, 'GUEST')
+    equ_crc = __import__('zlib').crc32(open(os.path.join(target, 'kernel.equ'), 'rb').read()) & 0xFFFFFFFF
+    modlen = len(gdata) - 6 - 96 - 32
+    check(gid == equ_crc and gdata[6 + 96:6 + 100] == b'SKMP' and int.from_bytes(gdata[2:4], 'big') == len(gdata) - 6 and int.from_bytes(gdata[4:6], 'big') == 0x2000
+          and int.from_bytes(gdata[6 + 106:6 + 108], 'big') == modlen,
+          'the file for GUEST: an option 5 image for >2000, a 96-byte stub, SKMP, version 1, the host\'s kernel build ID %08X (a CRC-32 of its kernel.equ) and the module\'s %d bytes' % (gid, modlen))
+    # a program built against another kernel build (the host with the music player left out), a damaged one
+    h2 = os.path.join(d, 'h2')
+    shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'modhost'), h2)
+    j = json.load(open(h2 + '/app.json')); j['omit'] = ['music']; json.dump(j, open(h2 + '/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), h2, '--out', d + '/h2out'], capture_output=True, text=True)
+    bdata, bid = skmodprog.program_file(guest, d + '/h2out', 'OTHER')
+    check(r.returncode == 0 and bid != gid, 'the same source built against a host with another kernel (music left out) has another build ID (%08X, not %08X)' % (bid, gid))
+    damaged = bytearray(gdata)
+    damaged[6 + 106:6 + 108] = (modlen + 200).to_bytes(2, 'big')              # claims more module than the file holds
+    open(d + '/q.a99', 'w').write("       AORG >A000\nSTART  LI   R0,>1234\n       MOV  R0,@>3F00\n       RT\n")
+    subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-i', '-q', d + '/q.a99', '-o', d + '/CHAIN'], check=True, capture_output=True)
+    chain = open(d + '/CHAIN', 'rb').read()
+    skdisk.make_disk(d + '/d.dsk', [], None, 'MODTEST', 'sssd', programs=[('GUEST', gdata), ('OTHER', bdata), ('DAMAGED', bytes(damaged)), ('CHAIN', chain)])
+    disk = open(d + '/d.dsk', 'rb').read()
+    open(d + '/pw.a99', 'w').write("       AORG >3000\nPWSTUB LWPI >83E0\n       LI   R0,>3FFF\n       MOV  R0,@>8370\n       LI   R12,>1100\n       LI   R13,>9800\n       LI   R15,>8C02\n       SBO  0\n"
+                                   "       MOV  @>4004,R9\nPW1    MOV  R9,R9\n       JEQ  PWD\n       MOV  R9,@>3F20\n       INCT R9\n       MOV  *R9,R9\n       LI   R12,>1100\n       LI   R13,>9800\n       LI   R15,>8C02\n"
+                                   "       BL   *R9\n       JMP  PW2\nPW2    LI   R12,>1100\n       SBO  0\n       MOV  @>3F20,R9\n       MOV  *R9,R9\n       JMP  PW1\nPWD    SBZ  0\nPWEND  JMP  PWEND\n")
+    subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-b', '-q', d + '/pw.a99', '-o', d + '/pw.bin'], check=True, capture_output=True)
+    pw = open(d + '/pw.bin', 'rb').read()
+    def row(m, n):
+        return bytes(m.vram[n * 32:(n + 1) * 32]).decode('latin-1').replace('\x00', ' ').rstrip()
+    def session(keys, until, limit=900):
+        m = sim9900.Machine(cart)
+        m.tifdc = tifdc.TIFDC(image=bytearray(disk))
+        m.presses, m.toggles, end = sim9900.schedule(sim9900.parse_keys(keys))
+        cpu = sim9900.CPU(m)
+        for i, b in enumerate(pw):
+            m.wb(0x3000 + i, b)
+        cpu.pc, cpu.wp, cpu.limi = 0x3000, 0x83E0, 0
+        for k in range(400000):
+            cpu.step()
+            if cpu.pc == 0x3000 + len(pw) - 2:
+                break
+        m.ww(0x3F00, 0)
+        cpu.pc, cpu.wp, cpu.limi = entry, 0x83E0, 2
+        m.ww(0x83E0 + 26, 0x9800); m.ww(0x83E0 + 28, 0x0100); m.ww(0x83E0 + 30, 0x8C02)
+        try:
+            for i in range(limit):
+                for k in range(20000):
+                    cpu.step()
+                if until(m, cpu):
+                    break
+        except sim9900.Halt:
+            pass
+        return m, cpu
+    def screen_text(m):
+        return ' | '.join(l.strip() for l in lines(m) if l.strip())
+    m, cpu = session('<WAIT 30>guest<ENTER><WAIT 100>', lambda m, c: 'Guest module running' in screen_text(m))
+    st = screen_text(m)
+    check('Guest module running' in st and 'Host module' not in st,
+          'GUEST from the disk: the runner hands it to the loader, the kernel boots and starts it as the application; the screen shows the guest, not the host (%s)' % st[:70])
+    check(m.rw(0x8320) != 0xA55C, 'the loader used the hand-off once (>8320 no longer holds the magic)')
+    m, cpu = session('<WAIT 30>other<ENTER><WAIT 100>', lambda m, c: 'ANOTHER KERNEL' in row(m, 14))
+    check('ANOTHER KERNEL BUILD' in row(m, 14) and ('%04X%04X' % (gid >> 16, gid & 0xFFFF)) in (row(m, 15) + row(m, 16)).replace(' ', '').replace('>', '').replace('CARTRIDGE', '').replace('PROGRAM', '') and
+          ('%04X%04X' % (bid >> 16, bid & 0xFFFF)) in (row(m, 15) + row(m, 16)).replace(' ', '').replace('>', '').replace('CARTRIDGE', '').replace('PROGRAM', ''),
+          'a program for another kernel build is refused with both IDs shown (%r / %r) and the kernel is not started' % (row(m, 15), row(m, 16)))
+    check('Host module' not in screen_text(m) and 'Guest' not in screen_text(m), 'nothing of the host or the guest ran')
+    m, cpu = session('<WAIT 30>damaged<ENTER><WAIT 100>', lambda m, c: 'TOO BIG' in row(m, 14))
+    check('MODULE TOO BIG OR DAMAGED' in row(m, 14), 'a file whose header claims more module than it holds is refused (%r)' % row(m, 14))
+    m, cpu = session('<WAIT 30>chain<ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234 and row(m, 8) == '  DSK1.')
+    check(m.rw(0x3F00) == 0x1234, 'an ordinary option 5 image still runs on a "modprog" cartridge (marker >%04X)' % m.rw(0x3F00))
+    # the stub, run as a plain option 5 image would run it (no kernel cartridge): it says what is missing and returns
+    mm = sim9900.Machine(bytes(8192))
+    for i, b in enumerate(gdata[6:6 + 96]):
+        mm.wb(0x2000 + i, b)
+    mm.ww(0x3F00, 0x10FF)                                              # JMP $ : where the stub returns to
+    cpu2 = sim9900.CPU(mm)
+    cpu2.pc, cpu2.wp, cpu2.limi = 0x2000, 0x83E0, 0
+    mm.ww(0x83E0 + 22, 0x3F00)                                         # R11
+    for k in range(400):
+        cpu2.step()
+        if cpu2.pc == 0x3F00:
+            break
+    check(cpu2.pc == 0x3F00 and 'NEEDS THE SAMS KERNEL CARTRIDGE' in row(mm, 11), 'the 96-byte stub, run where there is no kernel cartridge, writes what it needs on row 11 and returns (%r)' % row(mm, 11))
+    # the tool refuses a module the cartridge cannot take
+    open(d + '/big.a99', 'w').write("       COPY \"kernel.equ\"\n       AORG >C000\n       DATA INIT,INIT,INIT,0\nINIT   RT\n       BSS 9000\n")
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skmodprog.py'), d + '/big.a99', '--target', target, '-o', d + '/BIG'], capture_output=True, text=True)
+    check(r.returncode != 0 and 'takes 8192 at most' in (r.stdout + r.stderr), 'a module of 9,000 bytes is refused by the tool: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:80])
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skmodprog.py'), guest, '--target', os.path.join(ROOT, 'build', 'hello'), '-o', d + '/X'], capture_output=True, text=True)
+    check(r.returncode != 0 and 'modprog' in (r.stdout + r.stderr), 'a target built without "modprog" is refused: %s' % (r.stdout + r.stderr).strip().split('\n')[-1][:80])
+
+def motion():
+    """Sprite motion (app.json "motion": true; kernel/motion.a99): a motion table in CPU RAM that the kernel steps every frame.  The test application puts four sprites on a table at APPRAM (a dot a frame down and half a
+    dot right; a dot and a half right from X 250, so it wraps; one that does not move; one a dot a frame up).  Runs of different length: the positions moved by exactly the velocity for each frame between them, the attribute
+    table in VRAM holds the table's high bytes for the moving sprites, the stationary sprite's entry is left alone, and X wraps at 256.  Keys drive the guards: 1 sets SPMSKP (the flag KPFR sets: no step) and 2 clears it;
+    3 calls SPMINI with a count of 0 (motion stops).  A program that calls SPMINI without the flag is refused by name; the kernel is 6,898 bytes without the feature."""
+    import tempfile, shutil, re
+    c = build('tests/apps/motiontest')
+    ev = {}
+    for mm in re.finditer(r'(\w+):\s*\n\s+equ\s+(>?[0-9A-Fa-f]+)', open(os.path.join(ROOT, 'build', 'motiontest', 'kernel.equ')).read()):
+        v = mm.group(2)
+        ev[mm.group(1).upper()] = int(v[1:], 16) if v.startswith('>') else int(v)
+    TAB, SAT, FRAME = 0x2300, ev['SATAB'], ev['FRAME']
+    def run(keys, frames):
+        saved = os.environ.pop('TI_CONSOLE_ROM', None)
+        try:
+            m, cpu, halt = sim9900.run(c, keys=keys, frames=frames)
+        finally:
+            if saved:
+                os.environ['TI_CONSOLE_ROM'] = saved
+        return m
+    def table(m, i):
+        return [m.rw(TAB + 8 * i + 2 * k) for k in range(4)]            # Y, X, dY, dX
+    def sat(m, i):
+        return (m.vram[SAT + 4 * i], m.vram[SAT + 4 * i + 1])
+    def steps(y0, y1, dy):                                              # whole steps between two Y positions (a velocity of 0 has none)
+        d = (y1 - y0) & 0xFFFF if dy < 0x8000 else (y0 - y1) & 0xFFFF
+        return d // (dy if dy < 0x8000 else 0x10000 - dy)
+    a, b = run('', 200), run('', 260)
+    check([table(a, 0)[2], table(a, 0)[3], table(a, 1)[3], table(a, 3)[2]] == [0x0100, 0x0080, 0x0180, 0xFF00] and table(a, 2)[2:] == [0, 0],
+          'SPMVEL stored the velocities (sprite 0: >0100 and >0080; 1: >0180; 3: >FF00; 2: none)')
+    ky = steps(table(a, 0)[0], table(b, 0)[0], 0x0100)
+    kx = steps(table(a, 0)[1], table(b, 0)[1], 0x0080)
+    k1 = steps(table(a, 1)[1], table(b, 1)[1], 0x0180)
+    k3 = steps(table(a, 3)[0], table(b, 3)[0], 0xFF00)
+    df = b.rw(FRAME) - a.rw(FRAME)
+    check(ky == k3 and abs(ky - 60) <= 1 and abs(ky - df) <= 1 and abs(kx - ky) <= 1 and abs(k1 - ky) <= 1,
+          'from 200 frames to 260 every moving sprite moved by exactly its velocity for each step: %d, %d, %d, %d steps (the kernel counted %d frames)' % (ky, kx, k1, k3, df))
+    sa = [sat(b, i) for i in range(4)]
+    tb = [table(b, i) for i in range(4)]
+    check(all(sa[i] == (tb[i][0] >> 8, tb[i][1] >> 8) for i in (0, 1, 3)), 'the attribute table in VRAM holds the table\'s high bytes for the moving sprites (%s)' % sa)
+    check(sa[2] == (80, 80) and table(b, 2)[0] == 80 << 8 and table(b, 2)[1] == 80 << 8, 'the stationary sprite\'s entry is left as SPMPUT wrote it (%s)' % (sa[2],))
+    k0 = steps(50 << 8, table(a, 0)[0], 0x0100)                         # steps taken since SPMPUT, fewer than 256 here
+    want = ((250 << 8) + k0 * 0x0180) & 0xFFFF
+    check(k0 > 20 and k0 < 256 and table(a, 1)[1] == want and (250 << 8) + k0 * 0x0180 > 0xFFFF,
+          'X wraps at 256: after %d steps sprite 1 (X 250, 1.5 a step) is at >%04X, as (250 x 256 + steps x >0180) mod 65536 says' % (k0, table(a, 1)[1]))
+    f1, f2 = run('<WAIT 5>1<WAIT 60>', 200), run('<WAIT 5>1<WAIT 120>', 260)
+    check(table(f1, 0) == table(f2, 0) and table(f1, 3) == table(f2, 3), 'with SPMSKP set (what KPFR does) the sprites stay where they were: the table is the same 60 frames later')
+    g1, g2 = run('<WAIT 5>1<WAIT 20>2<WAIT 60>', 200), run('<WAIT 5>1<WAIT 20>2<WAIT 120>', 260)
+    check(table(g1, 0) != table(g2, 0) and steps(table(g1, 0)[0], table(g2, 0)[0], 0x0100) in (59, 60, 61), 'and they move again when it is cleared (%d steps in the 60 frames after)' % steps(table(g1, 0)[0], table(g2, 0)[0], 0x0100))
+    h1, h2 = run('<WAIT 5>3<WAIT 60>', 200), run('<WAIT 5>3<WAIT 120>', 260)
+    check(table(h1, 0) == table(h2, 0) and h1.rw(ev['SPMCNT']) == 0, 'SPMINI with a count of 0 stops the motion (count %d, the table the same 60 frames later)' % h1.rw(ev['SPMCNT']))
+    ex = build('motion')
+    saved = os.environ.pop('TI_CONSOLE_ROM', None)
+    try:
+        me, cpu, halt = sim9900.run(ex, keys='', frames=600)
+    finally:
+        if saved:
+            os.environ['TI_CONSOLE_ROM'] = saved
+    eq = {}
+    for mm in re.finditer(r'(\w+):\s*\n\s+equ\s+(>?[0-9A-Fa-f]+)', open(os.path.join(ROOT, 'build', 'motion', 'kernel.equ')).read()):
+        v = mm.group(2)
+        eq[mm.group(1).upper()] = int(v[1:], 16) if v.startswith('>') else int(v)
+    sats = [(me.vram[eq['SATAB'] + 4 * i], me.vram[eq['SATAB'] + 4 * i + 1], me.vram[eq['SATAB'] + 4 * i + 2], me.vram[eq['SATAB'] + 4 * i + 3]) for i in range(8)]
+    check(all(8 <= y <= 180 and 8 <= x <= 245 for y, x, p, col in sats) and [s[3] for s in sats] == [2, 3, 4, 5, 6, 7, 8, 9] and me.vregs[51] == 32,
+          'the example (eight bouncing balls) after 600 frames: every ball inside the screen\'s box, colours 2 to 9, sprites on (%s)' % sats[:3])
+    d = tempfile.mkdtemp()
+    shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'motiontest'), d + '/a')
+    j = json.load(open(d + '/a/app.json')); j['motion'] = False; json.dump(j, open(d + '/a/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/a', '--out', d + '/o'], capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    check(r.returncode != 0 and 'SPMINI' in out and '"motion": true' in out, 'SPMINI without "motion": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h'], capture_output=True, text=True)
+    check('kernel 6898 bytes' in r.stdout, 'without the feature the kernel is still 6,898 bytes')
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', 'motiontest'), '--out', d + '/m'], capture_output=True, text=True)
+    n = re.search(r'kernel (\d+) bytes', r.stdout)
+    check(n and 6898 < int(n.group(1)) < 7300, 'with it the kernel is %s bytes (the motion code and its hooks)' % (n.group(1) if n else '?'))
+
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,
     assemble it, run it."""
@@ -3078,7 +3264,7 @@ def modes():
     m, img, px, pl, has = screen('e', 900)
     check(m.vregs[31] == 0x90 and px(60, 80) == pl(0) and px(64, 80) == pl(1) and px(60, 82) == pl(1), 'E: bitmap layer 16 colours: (x/4 + y/2) mod 16')
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

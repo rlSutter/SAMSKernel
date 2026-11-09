@@ -17,5 +17,6 @@
   ],
   "boot": "wb",
   "disk_name": "WBENCH",
-  "ea5": true
+  "ea5": true,
+  "modprog": true
 }

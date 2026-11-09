@@ -12,6 +12,10 @@ Routines marked *leaf* never call another routine and may be called with a bare 
 
 the cartridge's program: the four checks, then the copy.  Never returns: it ends by branching to the kernel, or in REFUSE.
 
+### `MODPRG` *(internal)*
+
+the runner (ea5run.a99) found a module program on disk and left a handoff in the scratchpad (>8320 = >A55C, >8322 = where the program is in VRAM, >8324 = its length): copy it over the boot module's page pair, so that the kernel starts it as the application (docs/MODPROG.md).  Uses R0-R6, R9.
+
 ### `CPBK` *(internal)*
 
 copy the 8K bank selected by writing *R1 to R2. Position independent; uses R3, R4; never touches R11.
@@ -497,6 +501,24 @@ the effect is over (or stopped): each channel it owned gets the song's last byte
 ### `MUSILN` *(internal)*
 
 silence the channels the effect does not own (a song paused under an effect).  Leaf.  Uses R0-R4.
+
+## Sprite motion (motion.a99, app.json "motion": true)
+
+### `SPMINI`
+
+start sprite motion: R0 = the motion table (CPU RAM, 8 bytes a sprite, word-aligned), R1 = how many sprites it holds (0-32; 0 stops the motion), R2 = the sprite attribute table's address in VRAM (SATAB, or GM2SAT in Graphics II).  The table is cleared (every sprite at 0,0, not moving).  Leaf.  Uses R0-R4.
+
+### `SPMPUT`
+
+put sprite R0 at Y = R1, X = R2 (dots, 0-255: the attribute table's own values) and write them to its attribute entry now.  Needs SPMINI first and a sprite number under its count.  Uses R0-R4.
+
+### `SPMVEL`
+
+set sprite R0's velocity: Y = R1, X = R2, signed 8.8 dots a frame (>0100 = one dot a frame down or right; 0, 0 stops it).  Needs SPMINI first. Uses R0-R3.
+
+### `SPMSTP` *(internal)*
+
+one frame of motion (KFRAME calls it): every moving sprite's position moves by its velocity and its attribute entry's Y and X are written.  Uses R0-R5.
 
 ## Optional include: line editing (lib/linein.a99; COPY it into your module)
 

@@ -45,6 +45,9 @@
 * the console's own font, copied from GROM, in the plain 40-column mode that
 * any video chip can show.
        COPY "kdefs.a99"
+       .ifdef WITHMODPRG
+       COPY "modid.a99"
+       .endif
        .ifdef DISKBOOT
 * Assembled with -D DISKBOOT this is the disk start's bootstrap
 * (docs/DISKSTART.md): an
@@ -169,7 +172,39 @@ ST6    MOV  *R8+,R1            the bank number
        JMP  ST6
 ST7    LI   R0,PGLOWB          slot B back to its default pair
        BL   @PAGEB
+       .ifdef WITHMODPRG
+       BL   @MODPRG            a module program waiting: it is the boot module
+       .endif
        B    @>A000             the kernel (KSTART)
+       .endif
+
+       .ifdef WITHMODPRG
+* MODPRG - the runner (ea5run.a99) found a module program on disk and left a
+* handoff in the scratchpad (>8320 = >A55C, >8322 = where the program is in
+* VRAM, >8324 = its length): copy it over the boot module's page pair, so that
+* the kernel starts it as the application (docs/MODPROG.md).  Uses R0-R6, R9.
+MODPRG MOV  @>8320,R0
+       CI   R0,>A55C
+       JNE  MPG9
+       CLR  @>8320             (once)
+       MOV  R11,R9
+       MOV  @>8322,R5
+       MOV  @>8324,R6
+       LI   R0,PGBOOT
+       BL   @PAGEB             the boot module's two pages at >E000
+       MOV  R5,R0              VRAM address to read from
+       SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       LI   R2,>E000
+MPG1   MOVB @VDPRD,*R2+
+       DEC  R6
+       JNE  MPG1
+       LI   R0,PGLOWB
+       BL   @PAGEB
+       MOV  R9,R11
+MPG9   RT
        .endif
 
        .ifndef DISKBOOT

@@ -1,0 +1,73 @@
+*======================================================================
+* motion.a99 - the test application for sprite motion (group motion):
+* four sprites on a motion table at APPRAM (8 bytes each):
+*   0 starts at Y 50, X 100, moves a dot down and half a dot right a frame
+*   1 starts at Y 20, X 250, moves a dot and a half right (it wraps at 256)
+*   2 is put at Y 80, X 80 and does not move
+*   3 starts at Y 150, X 150, moves a dot up a frame
+*======================================================================
+       COPY "kernel.equ"
+       COPY "macros.a99"
+
+TAB    EQU  APPRAM
+
+       AORG >C000
+       DATA INIT,TICK,INIT,0
+
+INIT   .enter
+       LI   R0,TAB
+       LI   R1,4
+       LI   R2,SATAB
+       BL   @SPMINI
+       CLR  R0
+       LI   R1,50
+       LI   R2,100
+       BL   @SPMPUT
+       CLR  R0
+       LI   R1,>0100
+       LI   R2,>0080
+       BL   @SPMVEL
+       LI   R0,1
+       LI   R1,20
+       LI   R2,250
+       BL   @SPMPUT
+       LI   R0,1
+       CLR  R1
+       LI   R2,>0180
+       BL   @SPMVEL
+       LI   R0,2
+       LI   R1,80
+       LI   R2,80
+       BL   @SPMPUT
+       LI   R0,3
+       LI   R1,150
+       LI   R2,150
+       BL   @SPMPUT
+       LI   R0,3
+       LI   R1,>FF00
+       CLR  R2
+       BL   @SPMVEL
+       .leave
+       RT
+
+TICK   .enter
+       CI   R0,KQUIT*256
+       JNE  TK1
+       SETO @QUITF
+       JMP  TK9
+TK1    CI   R0,'1'*256         1: the step waits (as it does inside KPFR)
+       JNE  TK2
+       SETO @SPMSKP
+       JMP  TK9
+TK2    CI   R0,'2'*256         2: and goes on
+       JNE  TK3
+       CLR  @SPMSKP
+       JMP  TK9
+TK3    CI   R0,'3'*256         3: motion stopped (a count of 0)
+       JNE  TK9
+       LI   R0,TAB
+       CLR  R1
+       LI   R2,SATAB
+       BL   @SPMINI
+TK9    .leave
+       RT

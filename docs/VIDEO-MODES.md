@@ -236,6 +236,15 @@ Without `VOSPR` the stop-sprite register (VR51) is 0: nothing is drawn however t
 | 2 | pattern number (a multiple of 4 for a 16 x 16 sprite) |
 | 3 | bits 3-0 colour (the palette select with enhanced colour); bit 7 early clock (X - 32); bit 6 flip x; bit 5 flip y; bit 4 force 16 x 16 for this sprite |
 
+**Sprite motion** (1.32.0, `"motion": true`: 226 bytes of kernel). The kernel's own mover, because the console's (the interrupt routine adding a velocity to each sprite) is switched off. The program owns a **motion table** in its RAM,
+8 bytes a sprite: Y and X as words of 8.8 fixed point (the high byte is the attribute table's own byte), then the Y and X velocities, signed 8.8 dots a frame (`>0100` one dot a frame down or right, `>FF00` one up or left, `>0080` a dot every other
+frame). `SPMINI` (R0 = the table, R1 = how many sprites, 0-32, R2 = the attribute table's address, `SATAB` or `GM2SAT`) clears the table and starts the motion (a count of 0 stops it); `SPMPUT` (R0 = sprite, R1 = Y, R2 = X in dots) places a
+sprite and writes its entry; `SPMVEL` (R0 = sprite, R1 = Y velocity, R2 = X velocity) sets how it moves, or the program writes the table directly. **Every frame** (`KFRAME`: the main loop, `KIDLE`, `KWAIT`: so sprites keep moving through a
+`LINEIN`, a file call or a long computation that polls) each sprite whose velocity is not zero moves and its Y and X bytes in the attribute table are written; a stationary sprite's entry is left alone, so the program may write it itself.
+Positions wrap at 256 dots as on the console. Not inside `KPFR`, which a program calls in the middle of a stream to VRAM: the step waits (`SPMSKP`) until the next frame. Pattern, colour and the other attribute bytes are the program's;
+bouncing off an edge, collision and animation are the program's too (`examples/motion/motion.a99`: eight balls turned round at the edges by the module's TICK, 40 lines). The kernel routines use R0-R4: keep a loop's counters elsewhere.
+Test group `motion` (12 checks), in the simulator only.
+
 Sprite **patterns** are at `SPTAB` (`GM2SPT` in Graphics II): 8 bytes an 8 x 8 pattern, and a 16 x 16 sprite is four patterns in the order top-left, bottom-left, top-right, bottom-right. The kernel
 spaces the extra planes of enhanced colour sprites `>200` apart (VR29), so each plane holds 64 patterns of 8 x 8, and the colour of a sprite pixel with
 `VOSE1-3` is built exactly as for tiles: 1, 2 or 3 bits from the planes, the palette set from the **colour nibble of byte 3**:

@@ -392,6 +392,14 @@ KI9    .leave
 * pays one test a frame.  Uses R0-R8, R12.
 KFRAME .enter
        BL   @MUTICK
+       .ifdef WITHMOTION
+       MOV  @SPMCNT,R0         sprites moving (and not inside KPFR)?
+       JEQ  KFR0
+       MOV  @SPMSKP,R0
+       JNE  KFR0
+       BL   @SPMSTP
+KFR0
+       .endif
        MOV  @FRMHK,R0
        JEQ  KFR9
        MOV  @FRMGD,R1
@@ -417,7 +425,13 @@ KPFR   .enter
        .push R8
        INC  @FRAME             count the frame
        BL   @KPOLL             and take any keys
+       .ifdef WITHMOTION
+       SETO @SPMSKP            (a VRAM stream may be open: sprites wait)
+       .endif
        BL   @KFRAME            and step the song, and the hook
+       .ifdef WITHMOTION
+       CLR  @SPMSKP
+       .endif
        .pop R8
        .pop R7
        .pop R6

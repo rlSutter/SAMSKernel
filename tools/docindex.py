@@ -11,11 +11,11 @@ comment lines after it, up to a blank comment line, the next header or code.
 import os, re, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KERN = os.path.join(ROOT, 'kernel')
-ORDER = ['loader', 'kernel', 'vdp', 'f18a', 'f18det', 'amsinit', 'pager', 'video', 'keys', 'text', 'modules', 'pool', 'files', 'music', '../lib/linein']
+ORDER = ['loader', 'kernel', 'vdp', 'f18a', 'f18det', 'amsinit', 'pager', 'video', 'keys', 'text', 'modules', 'pool', 'files', 'music', 'motion', '../lib/linein']
 TITLES = {'vdp': 'VDP and the frame wait (vdp.a99)', 'f18a': 'The F18A (f18a.a99)', 'pager': 'SAMS paging (pager.a99)',
           'video': 'Text 80, colour schemes, the DMA row mover (video.a99)', 'keys': 'The keyboard (keys.a99)',
           'text': 'Text on the screen (text.a99)', 'modules': 'Modules (modules.a99)', 'pool': 'The page pool (pool.a99)',
-          'files': 'Files (files.a99)', 'music': 'Music and sound (music.a99)', '../lib/linein': 'Optional include: line editing (lib/linein.a99; COPY it into your module)', 'kernel': 'Main loop and exit (kernel.a99)', 'loader': 'The loader (loader.a99)',
+          'files': 'Files (files.a99)', 'music': 'Music and sound (music.a99)', 'motion': 'Sprite motion (motion.a99, app.json "motion": true)', '../lib/linein': 'Optional include: line editing (lib/linein.a99; COPY it into your module)', 'kernel': 'Main loop and exit (kernel.a99)', 'loader': 'The loader (loader.a99)',
           'f18det': 'F18A detection (f18det.a99, loader only)', 'amsinit': 'Memory card detection (amsinit.a99, loader only)'}
 PUBLIC = [n for line in open(os.path.join(KERN, 'public.txt')) if not line.startswith('#') for n in line.split()]
 LIBPUBLIC = ['LINEIN']          # the optional includes' entry points (lib/): documented, but not in kernel.equ

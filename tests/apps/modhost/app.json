@@ -1,0 +1,6 @@
+{
+  "name": "MOD HOST",
+  "min_pages": 128,
+  "modprog": true,
+  "modules": [{"name": "host", "source": "host.a99"}]
+}

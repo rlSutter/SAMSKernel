@@ -1,0 +1,108 @@
+*======================================================================
+* motion.a99 - sprite motion (app.json "motion": true)
+*
+* The console's own motion (CALL MOTION: the interrupt routine adds a velocity
+* to each sprite every frame) is switched off by the kernel (ISRFLG = >50), and
+* the F18A's sprites live in VRAM where the kernel does not look.  This is the
+* kernel's own: a MOTION TABLE in CPU RAM that the program owns, 8 bytes a
+* sprite, and a step the kernel runs once a frame (KFRAME: from the main loop,
+* KIDLE and KWAIT, so sprites keep moving through a long LINEIN or a file call;
+* not from KPFR, which is called in the middle of a byte stream to VRAM):
+*
+*   +0  Y position, 8.8 fixed point: the high byte is the sprite attribute
+*       table's Y byte (so any offset the video chip wants is the program's)
+*   +2  X position, 8.8 fixed point: the high byte is the table's X byte
+*   +4  Y velocity per frame, signed 8.8: >0100 is a dot a frame down,
+*       >FF00 a dot a frame up, >0080 a dot every other frame
+*   +6  X velocity per frame, signed 8.8
+*
+* Each frame the step adds the velocities to the positions of every sprite whose
+* velocity is not zero and writes the two high bytes into that sprite's Y and X
+* bytes in the attribute table (a stationary sprite is not touched, so the
+* program may write its attribute entry itself).  A position wraps at 256 dots,
+* as a sprite does on the console; the F18A draws nothing below its last row.
+*======================================================================
+
+* SPMINI - start sprite motion: R0 = the motion table (CPU RAM, 8 bytes a
+* sprite, word-aligned), R1 = how many sprites it holds (0-32; 0 stops the
+* motion), R2 = the sprite attribute table's address in VRAM (SATAB, or
+* GM2SAT in Graphics II).  The table is cleared (every sprite at 0,0, not
+* moving).  Leaf.  Uses R0-R4.
+SPMINI CLR  @SPMCNT            (stopped while the table is made ready)
+       CI   R1,32
+       JLE  SPI1
+       LI   R1,32
+SPI1   MOV  R0,@SPMTAB
+       MOV  R2,@SPMSAT
+       MOV  R0,R3
+       MOV  R1,R4
+       SLA  R4,2               words: 4 a sprite
+       JEQ  SPI9
+SPI2   CLR  *R3+
+       DEC  R4
+       JNE  SPI2
+SPI9   MOV  R1,@SPMCNT
+       RT
+
+* SPMPUT - put sprite R0 at Y = R1, X = R2 (dots, 0-255: the attribute table's
+* own values) and write them to its attribute entry now.  Needs SPMINI first
+* and a sprite number under its count.  Uses R0-R4.
+SPMPUT MOV  @SPMTAB,R3
+       JEQ  SPP9
+       C    R0,@SPMCNT
+       JHE  SPP9
+       MOV  R0,R4
+       SLA  R4,3               the sprite's 8-byte entry
+       A    R4,R3
+       SLA  R1,8               Y.0
+       MOV  R1,*R3
+       SLA  R2,8               X.0
+       MOV  R2,@2(R3)
+       SLA  R0,2               the attribute table entry: SAT + 4 x sprite
+       A    @SPMSAT,R0
+       ORI  R0,>4000           VDP write address
+       SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       MOVB R1,@VDPWD
+       MOVB R2,@VDPWD
+SPP9   RT
+
+* SPMVEL - set sprite R0's velocity: Y = R1, X = R2, signed 8.8 dots a frame
+* (>0100 = one dot a frame down or right; 0, 0 stops it).  Needs SPMINI first.
+* Uses R0-R3.
+SPMVEL MOV  @SPMTAB,R3
+       JEQ  SPV9
+       C    R0,@SPMCNT
+       JHE  SPV9
+       SLA  R0,3
+       A    R0,R3
+       MOV  R1,@4(R3)
+       MOV  R2,@6(R3)
+SPV9   RT
+
+* SPMSTP - one frame of motion (KFRAME calls it): every moving sprite's position
+* moves by its velocity and its attribute entry's Y and X are written.  Uses
+* R0-R5.
+SPMSTP MOV  @SPMTAB,R3
+       MOV  @SPMCNT,R4
+       MOV  @SPMSAT,R5
+SPS1   MOV  @4(R3),R0
+       SOC  @6(R3),R0          either velocity not zero?
+       JEQ  SPS2
+       A    @4(R3),*R3         Y.y += dY
+       A    @6(R3),@2(R3)      X.x += dX
+       MOV  R5,R0
+       ORI  R0,>4000           VDP write address of this sprite's entry
+       SWPB R0
+       MOVB R0,@VDPWA
+       SWPB R0
+       MOVB R0,@VDPWA
+       MOVB *R3,@VDPWD         Y (the high byte)
+       MOVB @2(R3),@VDPWD      X
+SPS2   AI   R3,8
+       AI   R5,4
+       DEC  R4
+       JNE  SPS1
+       RT

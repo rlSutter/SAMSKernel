@@ -160,6 +160,9 @@ KXFF   DATA >FFFF
        .ifndef NOFILES
        COPY "files.a99"
        .endif
+       .ifdef WITHMOTION
+       COPY "motion.a99"
+       .endif
        .ifdef NOMUSIC
 MUTICK RT
        .else

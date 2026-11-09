@@ -78,6 +78,16 @@ With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console
 | R3 | `images/hello-diskstart-sssd.dsk` (the hello program as a kernel disk program): `DSK1.HELLO` | the kernel's hello screen | a kernel disk program through the runner |
 | R4 | a name that is not on the disk; `FCTN =` | `I/O ERROR 7`; the console restarts | the error path and the quit |
 
+## Module programs (1.32.0; nothing of it has run on a real machine)
+
+With `workbench8.bin` on the console's menu, **RUN PROGRAM FILE**, and `images/modprog-demo.dsk` in a drive:
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| M1 | `DSK1.GUEST` | the machine checks, then the kernel's screen with `Module program on disk` | that a module program reaches the kernel through the runner and the loader, on real SAMS and F18A; that the module's bytes survive in VRAM through the loader's checks |
+| M2 | FCTN = , then RUN PROGRAM FILE again | the console resets; the prompt comes back; M1 works a second time | that nothing of the first run is left in a way that stops the second |
+| M3 | run a program built for another build (one built against a `kernel.equ` of another release, or `skbuild.py` of an app with `"modprog": true` and different options) | `FOR ANOTHER KERNEL BUILD` with two IDs, and nothing starts | the refusal on a real console |
+
 ## How to report
 
 A short note per step is enough: the step number, what you saw, the machine (console, F18A or PICO9918 with its firmware, SAMS size and brand, disk controller or TIPI), and for emulators the version and settings. A photograph of a refusal

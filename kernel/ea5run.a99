@@ -35,6 +35,10 @@ RNENT  EQU  >8348              the entry address, as the module keeps it
 RNPAB  EQU  >1300              the PAB in VRAM; the name follows at +10
 RNBUF  EQU  >1380              where the LOAD puts the file
 RNKM   EQU  >8338              the six column bytes of the keyboard scan
+RNSTUB EQU  96                 a module program's file: a stub of 96 bytes ...
+RNHDRS EQU  32                 ... a header of 32 bytes, then the module
+RNPID  EQU  >8338              the kernel build ID the program names (2 words)
+RNPLEN EQU  >833C              the module's length
 RNBLK  EQU  600                scans per half of the cursor's blink
 
 * R14 = the name's length in the main code (RNSCN and RNDSR leave it alone)
@@ -165,6 +169,11 @@ RNOK
        JNE  RN5
        MOV  R4,@RNENT
 RN5
+       .ifdef WITHMODPRG
+       B    @RNMOD             a module program? (the test is further down)
+RNM8   LI   R0,RNBUF+6         not one: the data again
+       BL   @RNVR
+       .endif
        .ifdef WITHEA5DIAG
        LI   R0,18*32+2         ADDR >xxxx LEN >xxxx on the screen
        LI   R1,RNAD
@@ -370,6 +379,12 @@ RNS8   CI   R0,>6100           letters to capitals
        JH   RNS9
        AI   R0,->2000
 RNS9   RT
+* RNWRD - the next two bytes from VRAM as a word in R5.  Leaf.
+RNWRD  MOVB @VDPRD,R5
+       SWPB R5
+       MOVB @VDPRD,R5
+       SWPB R5
+       RT
 * RNVR / RNVW - the VDP read / write address from R0.  Leaf.
 RNVR   SWPB R0
        MOVB R0,@VDPWA
@@ -520,6 +535,86 @@ RNH2   SWPB R6
        DEC  R7
        JNE  RNH1
        B    *R9
+       .ifdef WITHMODPRG
+* RNMOD - is the file just loaded a module program?  If so check it and hand
+* it to the loader; if not, back to the ordinary copy at RNM8.
+RNMOD
+       MOV  R2,R2              a module program (docs/MODPROG.md): one file ...
+       JNE  RNMN
+       CI   R4,>2000           ... loaded at >2000 ...
+       JNE  RNMN
+       CI   R3,RNSTUB+RNHDRS   ... with a stub and a header at least ...
+       JL   RNMN
+       LI   R0,RNBUF+6+RNSTUB  ... and the signature after the stub
+       BL   @RNVR
+       BL   @RNWRD
+       CI   R5,>534B           'SK'
+       JNE  RNMN
+       BL   @RNWRD
+       CI   R5,>4D50           'MP'
+       JNE  RNMN
+       BL   @RNWRD             the header's version
+       CI   R5,1
+       JNE  RNMVR
+       BL   @RNWRD             the kernel build it was made for
+       MOV  R5,@RNPID
+       BL   @RNWRD
+       MOV  R5,@RNPID+2
+       BL   @RNWRD             the module's length
+       MOV  R5,@RNPLEN
+       MOV  @RNPID,R5
+       CI   R5,KIDHI           this cartridge's kernel build?
+       JNE  RNMKB
+       MOV  @RNPID+2,R5
+       CI   R5,KIDLO
+       JNE  RNMKB
+       MOV  @RNPLEN,R5
+       JEQ  RNMBG
+       CI   R5,MODMAX          fits the boot module's page(s)?
+       JH   RNMBG
+       AI   R5,RNSTUB+RNHDRS   all of it in the file?
+       C    R5,R3
+       JH   RNMBG
+       LI   R0,>A55C           the handoff to the loader (MODPRG)
+       MOV  R0,@>8320
+       LI   R0,RNBUF+6+RNSTUB+RNHDRS
+       MOV  R0,@>8322
+       MOV  @RNPLEN,@>8324
+       B    @START             the loader boots the kernel, then the program
+RNMN   B    @RNM8              (not a module program)
+RNMKB  LI   R0,14*32+2
+       LI   R1,RNMS1
+       BL   @RNPRT
+       LI   R0,15*32+2
+       LI   R1,RNMS2
+       BL   @RNPRT
+       LI   R0,15*32+13
+       LI   R1,KIDHI
+       BL   @RNHEX
+       LI   R0,15*32+17
+       LI   R1,KIDLO
+       BL   @RNHEX
+       LI   R0,16*32+2
+       LI   R1,RNMS3
+       BL   @RNPRT
+       LI   R0,16*32+13
+       MOV  @RNPID,R1
+       BL   @RNHEX
+       LI   R0,16*32+17
+       MOV  @RNPID+2,R1
+       BL   @RNHEX
+       JMP  RNMKE
+RNMBG  LI   R0,14*32+2
+       LI   R1,RNMS4
+       BL   @RNPRT
+       JMP  RNMKE
+RNMVR  LI   R0,14*32+2
+       LI   R1,RNMS5
+       BL   @RNPRT
+RNMKE  BL   @RNGET
+       B    @RN0
+
+       .endif
 * the text and the constants
 RNTTL  STRI 'RUN PROGRAM FILE'
 RNLDG  STRI 'LOADING...'
@@ -536,6 +631,13 @@ RNDEF  STRI 'DSK1.'
 RNIO   STRI 'I/O ERROR '
 RNND   STRI 'NO SUCH DEVICE'
 RNUT   TEXT 'UTIL1'
+       .ifdef WITHMODPRG
+RNMS1  STRI 'FOR ANOTHER KERNEL BUILD'
+RNMS2  STRI 'CARTRIDGE >'
+RNMS3  STRI 'PROGRAM   >'
+RNMS4  STRI 'MODULE TOO BIG OR DAMAGED'
+RNMS5  STRI 'UNKNOWN PROGRAM VERSION'
+       .endif
 RNPAT  BYTE >05,>00,>13,>80,>00,>00,>21,>00,>00
 RNFF   BYTE >FF
 RNDOT  BYTE '.'

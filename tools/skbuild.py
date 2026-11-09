@@ -12,7 +12,9 @@ app.json:
   {
     "name":      "HELLO",              menu and refusal-screen name (<= 20 chars)
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
+    "modprog": false,                  optional: true lets the cartridge's RUN PROGRAM FILE run module programs from disk (tools/skmodprog.py; implies "ea5"): docs/MODPROG.md
     "ea5": false,                      optional: true adds a second program to the cartridge's menu, RUN PROGRAM FILE (Editor/Assembler option 5, for programs and kernel disk programs): kernel/ea5run.a99
+    "motion": false,                   optional: true puts SPMINI, SPMPUT and SPMVEL (sprite motion: a motion table the kernel steps every frame) in the kernel
     "sfx": false,                      optional: true puts SFXPLAY and SFXSTOP (sound effects over the song) in the kernel: 512 bytes
     "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
     "disk_name": "HELLO",              optional: the name of the program on a disk (--disk): 1-6 capitals and digits
@@ -212,7 +214,11 @@ def load_app(appdir):
     if not isinstance(omit, list) or any(o not in OMITTABLE for o in omit):
         die('"omit" lists some of: %s' % ', '.join(sorted(OMITTABLE)))
     app.setdefault('ea5', False)
+    app.setdefault('modprog', False)
+    if app['modprog']:
+        app['ea5'] = True                 # the runner is what loads a module program
     app.setdefault('sfx', False)
+    app.setdefault('motion', False)
     if app['sfx'] and 'music' in omit:
         die('\"sfx\": true needs the music player: \"music\" is left out')
     app.setdefault('prun', False)
@@ -316,6 +322,9 @@ def write_cfg(app, bdir, banks, pgfree):
     L.append('ARSIZE EQU  %d           bytes of the program\'s own code at the start of application RAM' % app.get('_arsize', 0))
     L.append('COMMONPG EQU >%02X           the page of the common code, mapped at >D000 at start (0: none)' %
              next((m['_page'] for m in app['modules'] if m.get('_common')), 0))
+    if app.get('modprog'):
+        com = any(m.get('_common') for m in app['modules'])
+        L.append('MODMAX EQU  %d            the largest module program this cartridge takes (docs/MODPROG.md)' % (4096 if com else 8192))
     L.append('PGFREE EQU  >%02X' % pgfree + '            first SAMS page the build leaves unassigned')
     pm = 0 if 'pool' in app['omit'] else app['pool_max_pages']       # (no pool: no bitmap)
     L.append('POOLMX EQU  %d            pages the pool can manage: pool_max_pages' % pm)
@@ -529,9 +538,9 @@ def main():
     else:
         text = '* no resident code\nKRESB\nKRESE\n'
     open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
-    if app['omit'] or not app['prun'] or not app['sfx']:
+    if app['omit'] or not app['prun'] or not app['sfx'] or not app['motion']:
         gone = omitted_routines(app, ksrc)
-        for name, flag in (('PRUN', 'prun'), ('SFXPLAY', 'sfx'), ('SFXSTOP', 'sfx')):
+        for name, flag in (('PRUN', 'prun'), ('SFXPLAY', 'sfx'), ('SFXSTOP', 'sfx'), ('SPMINI', 'motion'), ('SPMPUT', 'motion'), ('SPMVEL', 'motion')):
             if not app[flag]:
                 gone[name] = flag
         users = [(m['name'], os.path.join(appdir, m['source'])) for m in app['modules']]
@@ -540,12 +549,12 @@ def main():
         for who, path in users:
             hit = sorted(gone.keys() & source_words(path, incs))
             if hit:
-                if gone[hit[0]] in ('prun', 'sfx'):
+                if gone[hit[0]] in ('prun', 'sfx', 'motion'):
                     die('%s uses %s, which this kernel does not have: app.json needs "%s": true' % (who, hit[0], gone[hit[0]]))
                 die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) + (['WITHSFX'] if app['sfx'] else []) +
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) + (['WITHSFX'] if app['sfx'] else []) + (['WITHMOTION'] if app['motion'] else []) +
                  (['ARCODE'] if 'appram_code' in app else []))
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']
@@ -557,8 +566,15 @@ def main():
         sys.exit(0)               # the first pass for application RAM code: the kernel's symbols are all that was wanted
     if 'appram_code' in app:
         check_same_kernel(bdir + '.ar', bdir)
+    if app['modprog']:
+        import zlib
+        crc = zlib.crc32(open(equ, 'rb').read()) & 0xFFFFFFFF          # this kernel build's identity: its exported symbols
+        open(os.path.join(bdir, 'modid.a99'), 'w').write(
+            '* modid.a99 - made by tools/skbuild.py: this kernel build\'s identity (docs/MODPROG.md)\nKIDHI  EQU  >%04X\nKIDLO  EQU  >%04X\n' % (crc >> 16, crc & 0xFFFF))
+        print('kernel build ID %08X: module programs (tools/skmodprog.py) are built against this kernel.equ' % crc)
     loader = asm(os.path.join(ksrc, 'loader.a99'), os.path.join(bdir, 'loader.bin'), kincs,
-                 os.path.join(bdir, 'loader.lst'), None, (['WITHEA5'] + (['WITHEA5DIAG'] if app.get('ea5_diag') else [])) if app['ea5'] else None)
+                 os.path.join(bdir, 'loader.lst'), None,
+                 (['WITHEA5'] + (['WITHMODPRG'] if app['modprog'] else []) + (['WITHEA5DIAG'] if app.get('ea5_diag') else [])) if app['ea5'] else None)
     ds = os.path.join(appdir, 'databank.a99')
     ds = ds if os.path.exists(ds) else os.path.join(ksrc, 'databank.a99')
     data = asm(ds, os.path.join(bdir, 'databank.bin'), incs, os.path.join(bdir, 'databank.lst'))

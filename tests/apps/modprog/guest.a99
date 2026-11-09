@@ -1,0 +1,159 @@
+*======================================================================
+* hello.a99 - the smallest SAMS Kernel application: one module that
+* prints a line, echoes what is typed, and quits on FCTN =.
+*======================================================================
+* HOW TO READ THIS FILE.  This is the smallest complete program for the SAMS
+* Kernel, and the best place to start: every other example is this plus more.
+* Read it from the top; each line is explained.  The kernel (kernel/*.a99) is
+* the platform: it starts the machine, checks the F18A video card and the SAMS
+* memory card, sets up the screen and the keyboard, and then calls the three
+* entry points of your MODULE once the module's code has been placed at >C000.
+* A module is just assembly code that starts with a small table of entry
+* addresses.
+*
+* What a program is on this system: INIT runs once when the module is switched
+* to; TICK runs once for every video frame (60 times a second) with the key
+* just typed in R0, and is where a program does its work; REDRAW is called
+* when the whole screen must be drawn again (after a video mode change, or
+* when you return to this module from another).  A module never has a main
+* loop of its own: it does a little work in TICK and returns, which is what
+* lets the kernel poll the keyboard, count frames and play music between
+* calls.
+*
+* Two ways to build and run it (the guide's part 0 compares them): [PC]
+* python3 tools/skbuild.py examples/hello makes a cartridge image; [TI] type
+* or copy this file onto a disk, load the workbench cartridge, and use N, A
+* and R.  The source is the same either way.
+* Every routine name and equate the kernel exports (CLS, PUTS, KQUIT, COLS,
+* APPRAM, QUITF ...) is defined by this file.  The build writes it
+* (build/hello/kernel.equ); on the TI it is the file KERNEL/EQU on the disk.
+* COPY pastes another file's text in at this point, as if you had typed it
+* here.
+* the kernel's symbols (routines, variables, equates)
+       COPY  "kernel.equ"
+       COPY "macros.a99"      .enter, .leave, .push, .pop, .callmod
+
+* Colours.  The F18A's text mode gives every character cell a second byte, its
+* ATTRIBUTE.  The attribute does not hold colours: it holds two ROLE numbers,
+* a foreground role in the high four bits and a background role in the low
+* four, and the current COLOUR SCHEME says what colour each role is.  RTEXT,
+* RBG, RBARFG and RBARBG are role numbers from kdefs.a99.  Using roles means
+* the user can change the whole colour scheme (the kernel does it on a key)
+* without your program redrawing anything.
+*
+* The expression builds a byte and shifts it left 8 bits (*256) because the
+* kernel's routines take the attribute in the HIGH byte of a register: the
+* TMS9900's byte instructions (MOVB, CB ...) always work on the high byte of a
+* register, and so most arguments to the kernel's routines are 'a byte in the
+* high half'.  Note that xas99, and the assembler built into the workbench,
+* evaluate an expression strictly left to right, so the parentheses matter.
+ATEXT  EQU  (RTEXT*16+RBG)*256        text on the page background
+ABAR   EQU  (RBARFG*16+RBARBG)*256    the status bar's colours
+
+* Variables.  APPRAM is the kernel's name for the 7,168 bytes of ordinary RAM
+* (>2300 to >3EFF) that belong to your application and are shared by all of
+* its modules; you give names to offsets in it with EQU.  CURPOS holds the
+* screen position (row * 80 + column) where the next typed character will go.
+* EQU only gives a name to a number: it reserves nothing, so choosing the
+* offsets is your job.
+CURPOS EQU  APPRAM+0                   where the next typed character goes
+
+* AORG places the code at the absolute address >C000, the start of the window
+* ('slot C') at which the kernel maps every module's SAMS pages.  A module is
+* always assembled for >C000.
+       AORG >C000
+* The module's entry table is the first thing at >C000, four words: the
+* addresses of INIT, TICK and REDRAW and a reserved zero.  The kernel finds
+* the module's routines through this table, so the order is fixed.  You may
+* add your own entries after the zero for other modules to call (see
+* examples/browser).
+* the entry table: INIT, TICK, REDRAW, reserved
+       DATA  INIT,TICK,REDRAW,0
+
+* A routine in this system is called with BL (branch and link), which puts the
+* return address in R11, and returns with RT (which is B *R11).  A routine
+* that itself calls another routine with BL would lose its own return address
+* in R11, so it saves it first with .enter and restores it with .leave: these
+* are macros (macros.a99) that push and pop R11 on a small software stack kept
+* in R10.  A routine that calls nothing (a 'leaf') needs neither and just ends
+* with RT.
+* INIT - the module has been switched to: draw the screen.
+INIT   .enter
+       BL   @REDRAW
+       .leave
+       RT
+
+* CLS, FILLA, PUTS, PUTC are the kernel's text routines.  Arguments go in
+* registers, results come back in registers, and each routine's header comment
+* (kernel/text.a99, docs/ROUTINES.md) lists exactly which registers it changes
+* ('Uses R0-R7'): that list matters, because a register you wanted to keep may
+* be gone after the call.  Here every call is followed by loading fresh
+* values, so nothing needs saving.
+* REDRAW - the whole screen.
+REDRAW .enter
+       LI   R1,ATEXT
+       BL   @CLS                       every cell a space in the text colours
+       CLR  R0                         the top row as a bar
+       LI   R1,ABAR
+       LI   R2,COLS
+       BL   @FILLA
+       LI   R0,1
+       LI   R1,TITLE
+       LI   R2,ABAR
+       BL   @PUTS
+* A screen position is a single number: row * COLS + column, counting from 0
+* at the top left.  COLS is the width of the current video mode (80 in the
+* default Text 80 mode, 40 in Text 40), so writing 2*COLS+2 means 'row 2,
+* column 2' whatever the mode.  Never write 80 here: the program would be
+* wrong the moment the mode changes.
+       LI   R0,2*COLS+2
+       LI   R1,HELLO
+       LI   R2,ATEXT
+       BL   @PUTS
+       LI   R0,4*COLS+2
+       MOV  R0,@CURPOS
+       .leave
+       RT
+
+* TICK - once a frame; R0 = the key typed (high byte) or 0.
+* TICK is called once per frame.  R0 holds the key the user just pressed, as a
+* code in the HIGH byte (so a key whose code is >41, the letter A, arrives as
+* >4100), or 0 if no key was pressed this frame.  The kernel has already
+* scanned the keyboard, turned FCTN and CTRL chords into codes, and applied
+* key repeat.  MOV R0,R0 is the usual way to test a register against zero: any
+* move sets the status flags, so the following JEQ (jump if equal) is taken
+* when R0 was zero.
+TICK   .enter
+       MOV  R0,R0
+       JEQ  TK9                        no key
+       CI   R0,KQUIT*256               FCTN = ?
+       JNE  TK1
+       SETO @QUITF                     ask the kernel to quit
+       JMP  TK9
+* KQUIT is the code of FCTN = (the TI's QUIT key).  A program that wants to
+* leave sets the variable QUITF to any non-zero value (SETO writes >FFFF) and
+* the kernel ends the program cleanly at the end of this frame, switching the
+* memory mapping off and returning to the console.  Below, a character is
+* echoed only if its code is from >2000 to >7EFF, the printable ASCII range;
+* CI compares R0 with an immediate value, and JL / JHE are unsigned jumps
+* ('lower' and 'higher or equal'), the right ones for comparing character
+* codes and addresses.
+TK1    CI   R0,>2000                   a printable character (space to ~)?
+       JL   TK9
+       CI   R0,>7F00
+       JHE  TK9
+       MOV  R0,R1                      echo it
+       MOV  @CURPOS,R0
+       LI   R2,ATEXT
+       BL   @PUTC
+       INC  @CURPOS
+TK9    .leave
+       RT
+
+* Strings are stored length first: STRI 'abc' assembles to the byte 3 followed
+* by the three characters, which is the form PUTS expects.  EVEN pads to a
+* word boundary: the TMS9900 reads words from even addresses only, so any
+* instruction or word-sized data that follows byte data must be aligned.
+TITLE  STRI 'Guest module running'
+HELLO  STRI 'A module program on disk; FCTN = quits.'
+       EVEN
