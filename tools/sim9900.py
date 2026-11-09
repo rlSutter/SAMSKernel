@@ -120,6 +120,18 @@ class Machine:
         self.map = list(range(16))   # window -> page
         self.ams_regs_visible = False
         self.wide_regs = False       # True: the card's registers are 12 bits (a 16M SAMS)
+        # The 74LS612 card of the Tekumel 4M schematic (TEK-024), as hardware does it, for tests: the register takes its low 8 bits from the
+        # byte on the bus at each write cycle and its upper bits from a latch that follows every odd-address write on the expansion bus and
+        # holds through the next cycle; a word is written odd byte first.  So a byte written to the even address alone takes whatever the
+        # last odd write left in the latch.  ams_pagebits = 8 (1M), 10 (4M), 11 (8M) or 12 (16M); ams_latch_bits = pagebits - 8 (the
+        # latch's outputs that are wired); ams_readback False: the registers cannot be read (the bus floats: >FF).
+        self.ams_latch_model = False
+        self.ams_latch = 0
+        self.ams_latch_bits = 2
+        self.ams_pagebits = 10
+        self.ams_readback = True
+        self.ams_violations = []     # register writes that were not the odd byte then the even byte of a word
+        self._ams_odd_last = None
         self.ams_mapping = False
         self.f18a = f18a
         self.vram = bytearray(16384)
@@ -212,6 +224,11 @@ class Machine:
             return self.ams[self.page_of(addr) * 4096 + (addr & 0xFFF)]
         if addr < 0x6000:
             if self.sams and self.ams_regs_visible and addr < 0x4020:
+                if self.ams_latch_model:
+                    if not self.ams_readback:
+                        return 0xFF
+                    v = self.map[(addr - 0x4000) >> 1]
+                    return (v & 0xFF) if not addr & 1 else (v >> 8) & 0x0F
                 return self.map[(addr - 0x4000) >> 1]
             if self.pi_on:
                 return self.pirom[addr - 0x4000]
@@ -250,6 +267,8 @@ class Machine:
         val &= 0xFF
         if addr < 0x2000:
             return
+        if self.ams_latch_model and addr & 1 and (0x2000 <= addr < 0x6000 or addr >= 0xA000):
+            self.ams_latch = val                     # the latch follows every odd-address write on the expansion bus
         if addr < 0x4000 or addr >= 0xA000:
             pg = self.page_of(addr)
             if pg in self.bad_pages:                 # a test: a page that does not hold what is written
@@ -259,7 +278,14 @@ class Machine:
         if addr < 0x6000:
             if self.sams and self.ams_regs_visible and addr < 0x4020:
                 i = (addr - 0x4000) >> 1
-                if self.wide_regs:       # a card of more than 1M: 12 bits, the even byte the low 8, the odd byte bits 8-11 (as js99er)
+                if self.ams_latch_model:
+                    if addr & 1:
+                        self._ams_odd_last = addr
+                    elif self._ams_odd_last != addr + 1:
+                        self.ams_violations.append(addr)         # an even byte with no odd byte just before it
+                    mask = (1 << self.ams_latch_bits) - 1
+                    self.map[i] = (val | ((self.ams_latch & mask) << 8)) & ((1 << self.ams_pagebits) - 1)
+                elif self.wide_regs:       # a card of more than 1M: 12 bits, the even byte the low 8, the odd byte bits 8-11 (as js99er)
                     self.map[i] = (self.map[i] & 0x0FF) | ((val & 0x0F) << 8) if addr & 1 else (self.map[i] & 0xF00) | val
                 elif not addr & 1:       # a card of 1M: the even byte is the page; the odd byte is ignored
                     self.map[i] = val
@@ -340,6 +366,11 @@ class Machine:
 
     def ww(self, addr, val):
         addr &= 0xFFFE
+        if self.ams_latch_model and self.sams and self.ams_regs_visible and 0x4000 <= addr < 0x4020:
+            self.wb(addr + 1, val & 0xFF)            # the console's multiplexer: the odd byte first
+            self.wb(addr, val >> 8)
+            self._ams_odd_last = None
+            return
         self.wb(addr, val >> 8)
         self.wb(addr + 1, val & 0xFF)
 

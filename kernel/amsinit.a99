@@ -5,30 +5,17 @@
 *======================================================================
 
 * HOW THE LOADER FINDS OUT WHAT MEMORY CARD IT HAS.  Nothing announces a SAMS
-* card, so the loader asks it a question only a mapper can answer.  With the
-* card's registers switched into view (SBO 0 at its CRU base), a register is
-* just 16 bits of storage that the CPU can write and read back; with no card,
-* the address range holds nothing (or the console's own ROM) and a value
-* written does not come back.  AMSDET writes a probe value, reads it back,
-* restores the old contents and compares.  The same trick, in three
-* variations, sizes the card and tests every page.
-* AMSDET - detect a mapper.  Must be called in pass-through mode
-* (before AMSINI).  Returns R0 = 1 if present, 0 if not.
-* Uses R1-R3, R12.
-AMSDET LI   R12,AMSCRU
-       SBO  0                  expose registers at >4000
-       MOV  @AMSREG+4,R1       save window-2 register
-       LI   R2,>1515           arbitrary probe value, same in both bytes
-       MOV  R2,@AMSREG+4
-       NOP                     let the bus settle before reading back
-       MOV  @AMSREG+4,R3
-       MOV  R1,@AMSREG+4       restore
-       SBZ  0                  registers hidden again
-       CLR  R0
-       CB   R2,R3              compare the byte the register latched
-       JNE  AMSD1
-       INC  R0
-AMSD1  RT
+* card, and it cannot be asked by reading a register back: the 74LS612 mapper
+* of the 4M board (Tekumel's TEK-024) has no path that returns a register to
+* the bus (its low data pins are tied to ground and to the latch's outputs),
+* and a proposal for an FPGA machine says the same of real cards, which
+* "do not reliably allow" it.  Before 1.37.0 AMSDET wrote a probe to a register
+* and read it back, and would have refused a perfectly good card.  What a
+* mapper does that nothing else does is show a different piece of memory
+* through a window when its register changes, so that is what is looked for:
+* AMSINI writes the identity map (writes only), and AMSSIZ then writes
+* markers into pages that are 1, 2, 4 ... pages apart and sees which of
+* them are the same page.  Without a card every page is the same memory.
 
 * WHY THE FIRST THING IS AN IDENTITY MAP.  Before mapping is switched on, the
 * card passes the CPU's addresses straight through (pass-through mode).  When
@@ -86,19 +73,20 @@ PAGEA  .enter
 * HOW TO COUNT PAGES WITHOUT ASKING.  A card with 256 pages decodes eight
 * page-number bits; a page number with more bits just wraps around, so page
 * >10 + 256 is the same page as >10.  AMSSIZ writes a marker into page >10,
-* then writes a different marker into the page 32 above it, and looks to see
-* whether page >10 still has its own marker.  If the marker survived, the card
-* has more than 32 pages, so it doubles the distance and tries again; the
-* first distance at which the write lands on page >10 is the number of pages
-* the card has (32, 64, 128 ... up to 4,096, a 16-megabyte card).
-* AMSSIZ - how many pages the card has: R0 = 32, 64, 128 ... up to 4096 (a
-* 16M card).  Writes a marker to page >10 and checks whether a write to page
-* >10+32, +64 ... +2048 lands on it (the card decodes only as many page bits
-* as it has).  Run after AMSINI and before anything is loaded: it overwrites
-* the first word of page >10 and of the pages tried.  Leaf apart from MAPPG
-* (R11 kept in R6).  Uses R0-R6, R12.
+* then writes a different marker into the page 1 above it, and looks to see
+* whether page >10 still has its own marker.  If it does not, the two are the
+* same memory: there is no mapper.  If it does, it doubles the distance and
+* tries again; the first distance at which the write lands on page >10 is the
+* number of pages the card has (2, 4 ... 32, 64, 128 ... up to 4,096, a
+* 16-megabyte card: 1,024 is the 4M board, 2,048 the PicoPEB's 8M).
+* AMSSIZ - how many pages the card has: R0 = 0 for no mapper (every page is
+* the same memory), else 2, 4 ... 4096 (a 16M card).  Writes a marker to page
+* >10 and checks whether a write to page >10+1, +2, +4 ... +2048 lands on it
+* (the card decodes only as many page bits as it has).  Run after AMSINI and
+* before anything is loaded: it overwrites the first word of page >10 and of
+* the pages tried.  Leaf apart from MAPPG (R11 kept in R6).  Uses R0-R6, R12.
 AMSSIZ MOV  R11,R6             MAPPG is called: keep the return address
-       LI   R5,32              alias distance to try first
+       LI   R5,1               alias distance to try first
 AZ1    LI   R0,>10             the reference page ...
        LI   R1,>E              ... into window >E000
        BL   @MAPPG
@@ -120,8 +108,11 @@ AZ1    LI   R0,>10             the reference page ...
 AZ2    LI   R0,PGLOWB          window >E000 back to its own page
        LI   R1,>E
        BL   @MAPPG
-       MOV  R5,R0              32 ... 2048, or 4096 when nothing aliased
-       B    *R6
+       MOV  R5,R0              1 ... 2048, or 4096 when nothing aliased
+       CI   R0,1
+       JNE  AZ3
+       CLR  R0                 neighbouring pages are one memory: no mapper
+AZ3    B    *R6
 
 * AMSTST - write a page-specific word to the first and last word of every
 * page from >10 up to R0-1, then check them all.  Pages below >10 are

@@ -35,8 +35,9 @@ The image is padded to a power-of-two number of banks (at least four).
 ## 3. Start-up
 
 1. The console's menu finds the cartridge header at `>6000` (valid, one program) and runs `START`.
-2. `START` (interrupts off, workspace `>8300`): **detect** the mapper (`AMSDET`), clear the kernel's scratchpad variables
-   (`>8340-837F`), **identity-map** all 16 windows and switch mapping on (`AMSINI`), **size** the card (`AMSSIZ`), refuse if it
+2. `START` (interrupts off, workspace `>8300`): clear the kernel's scratchpad variables
+   (`>8340-837F`), **identity-map** all 16 windows and switch mapping on (`AMSINI`), **size** the card (`AMSSIZ`: 0 pages means
+   no mapper, found by pages that are all one memory, never by reading a register back), refuse if it
    has fewer than `PGMIN` pages, **clear slot A** (`>2000-3FFF`) and set the stack, **test** every page from `>10` up
    (`AMSTST`), **unlock** and **detect** the F18A, read its version.
 3. A refusal ends in `REFUSE`, which shows a 40-column message and spins with interrupts allowed one slice at a time so the

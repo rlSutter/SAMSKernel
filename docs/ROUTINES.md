@@ -98,10 +98,6 @@ the firmware version from status register 14 (e.g. >19 for 1.9) into F18VER as a
 
 ## Memory card detection (amsinit.a99, loader only)
 
-### `AMSDET` *(internal)*
-
-detect a mapper.  Must be called in pass-through mode (before AMSINI).  Returns R0 = 1 if present, 0 if not. Uses R1-R3, R12.
-
 ### `AMSINI` *(internal)*
 
 identity-map all 16 windows and switch mapping mode on. After this, page n is at address n<<12 for n = 0..15, which means the kernel at >A000 is on pages >A->D and nothing moved. Uses R1-R3, R12.
@@ -116,7 +112,7 @@ map pages R0 and R0+1 into slot A (>2000, >3000).
 
 ### `AMSSIZ` *(internal)*
 
-how many pages the card has: R0 = 32, 64, 128 ... up to 4096 (a 16M card).  Writes a marker to page >10 and checks whether a write to page >10+32, +64 ... +2048 lands on it (the card decodes only as many page bits as it has).  Run after AMSINI and before anything is loaded: it overwrites the first word of page >10 and of the pages tried.  Leaf apart from MAPPG (R11 kept in R6).  Uses R0-R6, R12.
+how many pages the card has: R0 = 0 for no mapper (every page is the same memory), else 2, 4 ... 4096 (a 16M card).  Writes a marker to page >10 and checks whether a write to page >10+1, +2, +4 ... +2048 lands on it (the card decodes only as many page bits as it has).  Run after AMSINI and before anything is loaded: it overwrites the first word of page >10 and of the pages tried.  Leaf apart from MAPPG (R11 kept in R6).  Uses R0-R6, R12.
 
 ### `AMSTST` *(internal)*
 

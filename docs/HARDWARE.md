@@ -13,12 +13,15 @@ real machine as a test: run `examples/diag` and press CTRL T.
 
 The loader (cartridge bank 0, `loader.a99`) runs these before it loads anything:
 
-1. **SAMS present.** `AMSDET` writes and reads back a mapper register.
-2. **SAMS size.** `AMSSIZ` writes a marker to page `>10`, then a different value to page `>10` + 32,
-   + 64 ... + 2048; the first write that lands on page `>10`'s marker shows how many page bits the card
-   decodes. With no alias at +2048 the card has 4,096 pages (16M). The count is 32, 64 ... 4,096.
-   The probe comes *before* any full test because writing every page of a too-small card would go
-   through an alias into the kernel's own pages. The count must be at least `min_pages`.
+1. **SAMS present and its size.** `AMSINI` writes the identity map (writes only, so it is harmless with no card), then
+   `AMSSIZ` writes a marker to page `>10`, then a different value to page `>10` + 1, + 2, + 4 ... + 2048; the
+   first write that lands on page `>10`'s marker shows how many page bits the card decodes. If it already lands at +1
+   the two pages are one memory and **there is no mapper** (0 pages). With no alias at +2048 the card has 4,096 pages
+   (16M). The count is 2, 4 ... 4,096 (1,024 is the 4M board, 2,048 the PicoPEB's 8M). **No register is ever read
+   back** (see "The SAMS register" below); until 1.36.x `AMSDET` did that, and would have refused a good card. The
+   probe comes *before* any full test because writing every page of a too-small card would go through an alias
+   into the kernel's own pages. The count must be at least `min_pages`.
+2. **(the same step)**
 3. **Page test.** `AMSTST` writes a page-specific word to the first and last word of every page from
    `>10` to the top, then checks them. A failure names the page. (Pages below `>10` are slot A, the
    kernel's and slot B/C's defaults, and the free pages `>04-09`; they are not tested.)
@@ -33,6 +36,37 @@ refusal code is a leaf that needs no expansion RAM, because with no memory card 
 
 Then slot A and the kernel's scratchpad variables are cleared (real RAM powers up random), the
 banks are copied into SAMS and the kernel starts.
+
+## The SAMS register (from the 4M board's schematic)
+
+Source: the Tekumel Software schematic `TI-99/4A 1024K/4096K SAMS MEMORY-R5` (TEK-024, A3 page 1), read for 1.37.0; the board
+is the same for 1M (two 512K chips, links W1 and W2 at 2-3) and 4M (two 2048K chips, 1-2).
+
+- **CRU >1E00** (a 74LS688 compares the address, a 74LS259 holds the bits): **bit 0** shows the registers at `>4000->401F`,
+  **bit 1** turns mapping on. Both clear on a hardware RESET, **not on QUIT** (a software reset: it never asserts RESET), so
+  the kernel's exit clears them (`SBZ 1`, `SBZ 0`) before the console's reset. The register values are not cleared by anything.
+- **Register n** (window n, `>n000`) is at `>4000 + 2n`, and is written as a **word**. The 74LS612 takes its **low 8 page bits
+  from the byte on the bus** at each write cycle and its **upper bits from a 74LS373 latch** that follows every odd-address write
+  on the expansion bus and holds through the next cycle. The console does a word as **the odd byte first, then the even**
+  (TI's specification), so after `MOV R,@>40nn` the register is: **bits 0-7 = the even byte (the word's high byte), bits 8-9 =
+  the low two bits of the odd byte (the word's low byte)**, 16M designs wiring four latch bits (8-11). The kernel writes
+  `SWPB page`: the page's low byte high, its upper bits low. A page of 1M or less leaves the odd byte 0.
+- So **a register written as a byte alone is undefined** on such a card (its upper bits are whatever the last odd write
+  anywhere on the bus left), and **a page written in both bytes** (`SLA R,8` + `SOC`, as TXA's pager did) is page
+  `n + 256 x (n AND 3)` on a 4M card (and `n + 256 x (n AND 15)` on a 16M one). The kernel does neither: the simulator's card
+  model (`ams_latch_model`, group `sams4m`) records any register write that is not the odd byte then the even byte of a word.
+- **Size**: the register is 10 bits on the 4M board (bits 10 and above are ignored: page 1024 is page 0), 8 on the 1M, 11 on the
+  PicoPEB's 8M, 12 on a 16M design (Classic99's model).
+- **No readback**: the 612's data pins have no path back to the bus (D0 and D1 are grounded, D2 and D3 go to the latch's
+  outputs), so a register cannot be read. The kernel never does.
+
+## What was concluded from it (1.37.0)
+
+The register layout and the word write were already right (checked against the schematic). Changed: the loader no longer
+detects the card by reading a register back, and `AMSSIZ` begins at a distance of 1 page and says 0 for no mapper. Not
+verified against hardware: that the pass-through mode (mapping off) shows page n in window n on every board (the kernel's
+identity map relies on it), and the latch's polarity (read from the drawing's symbols; consistent with js99er's model and with
+the kernel, which Press and The Lantern Coast ran on real SAMS cards of 1M or less).
 
 ## Video: the F18A's modes
 

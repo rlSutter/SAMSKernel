@@ -96,6 +96,17 @@ With `workbench8.bin` on the console's menu, **RUN PROGRAM FILE**, and `images/m
 | M2 | FCTN = , then RUN PROGRAM FILE again | the console resets; the prompt comes back; M1 works a second time | that nothing of the first run is left in a way that stops the second |
 | M3 | run a program built for another build (one built against a `kernel.equ` of another release, or `skbuild.py` of an app with `"modprog": true` and different options) | `FOR ANOTHER KERNEL BUILD` with two IDs, and nothing starts | the refusal on a real console |
 
+## A real 4M (or larger) SAMS card (1.37.0; nothing of the kernel has run on one)
+
+The kernel has been run on 1M-or-smaller real cards by its ancestors (Press, The Lantern Coast) and, as packaged, only on the simulator's models of larger ones. With a real 4M board (Tekumel TEK-024) or the PicoPEB's 8M:
+
+| Step | Do | Good looks like | What it settles |
+| --- | --- | --- | --- |
+| H1 | `images/diag` as a cartridge, or any program, on the machine with the card | it starts (no `NEEDS A MEMORY CARD WITH 512K`); the diagnostic's memory line says 1,024 pages (4M), 2,048 (8M) | that the card is found with no register readback, and sized right |
+| H2 | CTRL T in the diagnostic | the page test passes | that every page holds what is written, with the register written as a word, odd byte first |
+| H3 | a program that uses pages above >FF (the pool: `PALLOC` many pages) | the data comes back right from pages 256-1023 | the register's upper bits (the odd byte's low two bits) |
+| H4 | quit with FCTN =, then pick the program again | it starts again | that QUIT leaves the CRU bits set and the kernel's exit cleared them |
+
 ## Scrolling (1.35.0, with the sprite and aiming demos of 1.33-1.34; none of it has run on a real machine)
 
 `images/scroll8.bin` as a cartridge (js99er: the file is named `...8.bin`; or FinalGROM) on a console with an F18A:

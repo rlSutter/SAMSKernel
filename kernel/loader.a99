@@ -83,22 +83,19 @@ PRGL2  DATA >0000              (app.json "ea5": true; kernel/ea5run.a99)
 * returns: it ends by branching to the kernel, or in REFUSE.
 START  LIMI 0
        LWPI WS
-       BL   @AMSDET            R0 = 1 if a mapper answered (leaf)
-       MOV  R0,R0
-       JNE  ST1
-       LI   R1,MSGSAM          no memory card: refuse
-       B    @REFUSE
-ST1    LI   R1,>8340           the kernel's scratchpad variables start clean
+       LI   R1,>8340           the kernel's scratchpad variables start clean
        LI   R2,>20             >8340->837F, in words
 ST1A   CLR  *R1+
        DEC  R2
        JNE  ST1A
-       BL   @AMSINI            identity map, mapping on (leaf)
-       BL   @AMSSIZ            R0 = 32, 64 ... 4096 pages
+       BL   @AMSINI            identity map, mapping on (leaf; writes only: with
+*                              no card these writes land on nothing)
+       BL   @AMSSIZ            R0 = 0 (no mapper), or 2 ... 4096 pages
        MOV  R0,@NPAGES
+       JEQ  ST1B
        CI   R0,PGMIN
        JHE  ST2
-       LI   R1,MSGSAM          too small: refuse
+ST1B   LI   R1,MSGSAM          no memory card, or too small: refuse
        B    @REFUSE
 * Slot A RAM exists now: clear it (power-up RAM is random; after a Quit
 * the last session's state is still there) and give the stack a home.

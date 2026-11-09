@@ -64,6 +64,58 @@ def refusal():
     m, cpu, halt = sim9900.run(c, frames=120, pages=256)
     check(m.rw(0x8344) == 256 and 'Hello' in lines(m)[0], '1M card found as 256 pages and accepted')
 
+def sams4m():
+    """The kernel against the 74LS612 card of the Tekumel 4M schematic (TEK-024), modelled as hardware does it: the register's low 8 bits
+    are the byte on the bus at each write, its upper bits come from a latch that follows every odd-address write on the expansion bus,
+    a word goes odd byte first, bits beyond the card's own are ignored, and the registers cannot be read back.  The kernel must find and
+    size the card (1M, 4M, 8M, 16M, and 512K) without reading a register, and write every register as the odd byte then the even byte of
+    a word (a byte alone, or a page in both bytes, picks up stale or wrong upper bits on such a card)."""
+    c = build('hello')
+    def card(bits, readback=False):
+        def setup(m):
+            m.ams_latch_model = True
+            m.ams_pagebits = bits
+            m.ams_latch_bits = max(0, bits - 8)
+            m.ams_readback = readback
+        return setup
+    for pages, bits in ((128, 7), (256, 8), (512, 9), (1024, 10), (2048, 11), (4096, 12)):
+        holder = {}
+        def setup(m, bits=bits):
+            card(bits)(m)
+            holder['m'] = m
+        m, cpu, halt = sim9900.run(c, frames=150, pages=pages, setup=setup)
+        check(halt is None and m.rw(0x8344) == pages and 'Hello' in lines(m)[0] and m.ams_violations == [],
+              '%s card (%d pages, %d-bit registers, no readback): found, sized and booted, every register written as a word, odd byte first (NPAGES = %d)%s' % (('%dM' % (pages // 256)) if pages >= 256 else '%dK' % (pages * 4), pages, bits, m.rw(0x8344), '' if not m.ams_violations else ' violations %s' % m.ams_violations[:3]))
+    m, cpu, halt = sim9900.run(c, frames=150, pages=1024, setup=card(10, readback=True))
+    check(m.rw(0x8344) == 1024 and 'Hello' in lines(m)[0], 'the same 4M card with readback also boots (the kernel does not care)')
+    m, cpu, halt = sim9900.run(c, frames=150, pages=16, setup=card(8))
+    check(any('WITH 512K' in l for l in lines(m)), 'a card of 16 pages (aliasing at distance 16) is refused')
+    m, cpu, halt = sim9900.run(c, frames=150, sams=False, setup=card(10))
+    check(any('WITH 512K' in l for l in lines(m)), 'no card at all is refused (with nothing to read back, by pages that are all one memory)')
+    cw = build('workbench')
+    m, cpu, halt = sim9900.run(cw, keys='<WAIT 60>e<WAIT 80>', frames=400, pages=1024, setup=card(10))
+    check(halt is None and m.ams_violations == [], 'the workbench on the 4M card, through a switch of module: no register is ever written as a byte alone (%d writes seen)' % len(m.ams_violations))
+    # the model itself
+    mm = sim9900.Machine(bytes(8192), pages=1024)
+    mm.ams_latch_model = True; mm.ams_pagebits = 10; mm.ams_latch_bits = 2; mm.ams_regs_visible = True
+    sw = lambda p: ((p & 0xFF) << 8) | (p >> 8)
+    mm.ww(0x4004, sw(0x2A3))
+    a = mm.map[2]
+    mm.ww(0x4004, sw(0xC03))
+    b = mm.map[2]
+    mm.ww(0x4004, 0x0505)                  # the page in both bytes: 5 and the odd byte's low bits
+    c2 = mm.map[2]
+    mm.wb(0x2001, 3)                       # an odd write anywhere on the bus leaves 3 in the latch ...
+    mm.wb(0x4004, 5)                       # ... and a byte alone to the even address takes it
+    d = mm.map[2]
+    mm.wb(0x3001, 0)
+    mm.wb(0x4004, 5)
+    e = mm.map[2]
+    mm.ams_readback = False
+    check((a, b, c2, d, e) == (0x2A3, 3, 5 | (1 << 8), 5 | (3 << 8), 5) and mm.rb(0x4004) == 0xFF and mm.ams_violations == [0x4004, 0x4004],
+          'the model: a word swapped as the kernel writes it gives the page (>2A3), bits 10-11 are ignored on a 4M card, the page in both bytes gives page 5 + 256 x (5 and 3), a byte alone takes the latch\'s stale bits, and the registers read >FF (%s)' % [hex(v) for v in (a, b, c2, d, e)])
+
+
 def ram():
     c = build('hello')
     os.environ['SIM_RANDOM_RAM'] = '7'
@@ -3784,7 +3836,7 @@ def progress():
     check('saved' in last and 'Saving' not in last, 'and after the save the message is "saved": %r' % last.strip()[:40])
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':
