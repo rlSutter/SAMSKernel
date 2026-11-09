@@ -1021,7 +1021,7 @@ there is no exit hook.
 - **`appram_code`** (optional): `{"source": "ar.a99", "exports": ["NAME", ...]}`, code kept in application RAM at `>2300` (see Part 7); `APPRAM` then begins after it.
 - **`common`** (optional): `{"source": "common.a99", "exports": ["NAME", ...]}`, code shared by every module, assembled at `>D000` and mapped there at start-up (see Part 8); every module must then be `"size": 4096`.
 - **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
-- **`motion`** (optional, true puts sprite motion in the kernel: `SPMINI`, `SPMPUT`, `SPMVEL`; 226 bytes): VIDEO-MODES.md part 7.
+- **`motion`** (optional, true puts sprite motion in the kernel: `SPMINI`, `SPMPUT`, `SPMVEL`; 226 bytes) and **`motion_helpers`** (true adds `SPMBOX`, bounce inside a box, `SPMHIT`, sprite overlap, `SPMSWP`, swap velocities; 320 bytes more, and implies `motion`): VIDEO-MODES.md part 7.
 - **`modprog`** (optional, true lets the cartridge's RUN PROGRAM FILE run module programs from disk; implies `ea5`): docs/MODPROG.md, `tools/skmodprog.py`.
 - **`ea5`** (optional, true adds RUN PROGRAM FILE, Editor/Assembler option 5, as a second program on the cartridge's console menu: workbench manual).
 - **`rows`** on a picture data entry (88 by default, 1 to 96): see "Pictures" in Part 5; **`sfx`** (optional, true puts `SFXPLAY` in the kernel).
@@ -1147,7 +1147,7 @@ screen, DMA, a DSK1 write/read/delete), CTRL 3 to cycle colour schemes, every ke
 overwrite the workbench's own state (WORKBENCH.md part 5).
 - Video: every F18A mode is reachable (`VMODE`, `VREG`), but the kernel only *draws* for you in the glyph modes
   (Text 80/40, Graphics I); sprites, Graphics II, Multicolor and the layers you write to VRAM yourself. No sprite
-  library beyond motion (`"motion": true`: `SPMINI`, `SPMPUT`, `SPMVEL`: VIDEO-MODES.md part 7), no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.
+  library beyond motion (`"motion": true`: `SPMINI`, `SPMPUT`, `SPMVEL`, and with `"motion_helpers": true` `SPMBOX`, `SPMHIT`, `SPMSWP`: VIDEO-MODES.md part 7), no scroller, no tile editor. A module that changes registers beyond `VMODE`'s must keep `VR1CPY` right.
 - Sound: a music player and tone effects (MUSIC.md), but no envelopes, no effect mixer and no priorities; the console's sound lists are available, unmixed with the player.
 - No heap, no menus and no full-screen text editor (an optional line editor, `lib/linein.a99`, comes with it): those are applications (Press has an editor built on the
   ancestor of this kernel; see FROM-PRESS.md).

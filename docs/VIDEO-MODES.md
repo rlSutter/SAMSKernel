@@ -243,7 +243,12 @@ sprite and writes its entry; `SPMVEL` (R0 = sprite, R1 = Y velocity, R2 = X velo
 `LINEIN`, a file call or a long computation that polls) each sprite whose velocity is not zero moves and its Y and X bytes in the attribute table are written; a stationary sprite's entry is left alone, so the program may write it itself.
 Positions wrap at 256 dots as on the console. Not inside `KPFR`, which a program calls in the middle of a stream to VRAM: the step waits (`SPMSKP`) until the next frame. Pattern, colour and the other attribute bytes are the program's;
 bouncing off an edge, collision and animation are the program's too (`examples/motion/motion.a99`: eight balls turned round at the edges by the module's TICK, 40 lines). The kernel routines use R0-R4: keep a loop's counters elsewhere.
-Test group `motion` (12 checks), in the simulator only.
+**The helpers** (`"motion_helpers": true`, with `"motion"`: 320 bytes more, 7,444 in all) take the common chores off the program. **`SPMBOX`** (R0 = first sprite, R1 = last, R2 = the address of a 4-word box in the program's RAM: Y min, Y max, X min, X max in dots; R2 = 0 turns it off) makes those sprites
+bounce: after each step a sprite that is past an edge **and still going out** is put back as far inside as it was outside and its velocity on that axis is negated; one that is going in, or placed outside the box and moving inward, is left alone (so it cannot stick). The box is read from RAM every frame, so the program may move its walls;
+sprites outside the range keep wrapping. Keep the box more than a sprite's speed away from 0 and 255. **`SPMHIT`** (R0, R1 = two sprites, R2 = their size in dots; answer R0 = 1 or 0) says whether they overlap: both their Y and their X are less than that far apart, the screen's wrap taken into account (Y 252 and 3 are 7 apart); a sprite number
+the table does not hold gives 0. **`SPMSWP`** (R0, R1) exchanges two sprites' velocities, what two equal balls do in a head-on meeting: call it when `SPMHIT` first says they have met (`examples/motion`: eight balls, `SPMBOX` for the walls, `SPMHIT` and `SPMSWP` for each of the 28 pairs, with a flag per pair so that a meeting swaps once). `SPMHIT` tests
+squares by their corners, not pixels, and the F18A's own coincidence flag is not offered: the kernel reads the video status every frame and clears it.
+Test group `motion` (17 checks), in the simulator only.
 
 Sprite **patterns** are at `SPTAB` (`GM2SPT` in Graphics II): 8 bytes an 8 x 8 pattern, and a 16 x 16 sprite is four patterns in the order top-left, bottom-left, top-right, bottom-right. The kernel
 spaces the extra planes of enhanced colour sprites `>200` apart (VR29), so each plane holds 64 patterns of 8 x 8, and the colour of a sprite pixel with

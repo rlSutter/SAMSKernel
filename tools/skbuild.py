@@ -14,6 +14,7 @@ app.json:
     "min_pages": 128,                  SAMS pages required: 32, 64, 128 ... 4096
     "modprog": false,                  optional: true lets the cartridge's RUN PROGRAM FILE run module programs from disk (tools/skmodprog.py; implies "ea5"): docs/MODPROG.md
     "ea5": false,                      optional: true adds a second program to the cartridge's menu, RUN PROGRAM FILE (Editor/Assembler option 5, for programs and kernel disk programs): kernel/ea5run.a99
+    "motion_helpers": false,           optional: true (with "motion") adds SPMBOX, SPMHIT and SPMSWP: bounce inside a box, sprite-against-sprite overlap, swapping velocities
     "motion": false,                   optional: true puts SPMINI, SPMPUT and SPMVEL (sprite motion: a motion table the kernel steps every frame) in the kernel
     "sfx": false,                      optional: true puts SFXPLAY and SFXSTOP (sound effects over the song) in the kernel: 512 bytes
     "prun": false,                     optional: true puts PRUN (run another disk program) in the kernel: 206 bytes
@@ -219,6 +220,9 @@ def load_app(appdir):
         app['ea5'] = True                 # the runner is what loads a module program
     app.setdefault('sfx', False)
     app.setdefault('motion', False)
+    app.setdefault('motion_helpers', False)
+    if app['motion_helpers']:
+        app['motion'] = True              # the helpers are part of sprite motion
     if app['sfx'] and 'music' in omit:
         die('\"sfx\": true needs the music player: \"music\" is left out')
     app.setdefault('prun', False)
@@ -538,9 +542,9 @@ def main():
     else:
         text = '* no resident code\nKRESB\nKRESE\n'
     open(os.path.join(bdir, 'kresident.a99'), 'w').write(text)
-    if app['omit'] or not app['prun'] or not app['sfx'] or not app['motion']:
+    if app['omit'] or not app['prun'] or not app['sfx'] or not app['motion'] or not app['motion_helpers']:
         gone = omitted_routines(app, ksrc)
-        for name, flag in (('PRUN', 'prun'), ('SFXPLAY', 'sfx'), ('SFXSTOP', 'sfx'), ('SPMINI', 'motion'), ('SPMPUT', 'motion'), ('SPMVEL', 'motion')):
+        for name, flag in (('PRUN', 'prun'), ('SFXPLAY', 'sfx'), ('SFXSTOP', 'sfx'), ('SPMINI', 'motion'), ('SPMPUT', 'motion'), ('SPMVEL', 'motion'), ('SPMBOX', 'motion_helpers'), ('SPMHIT', 'motion_helpers'), ('SPMSWP', 'motion_helpers')):
             if not app[flag]:
                 gone[name] = flag
         users = [(m['name'], os.path.join(appdir, m['source'])) for m in app['modules']]
@@ -549,12 +553,12 @@ def main():
         for who, path in users:
             hit = sorted(gone.keys() & source_words(path, incs))
             if hit:
-                if gone[hit[0]] in ('prun', 'sfx', 'motion'):
+                if gone[hit[0]] in ('prun', 'sfx', 'motion', 'motion_helpers'):
                     die('%s uses %s, which this kernel does not have: app.json needs "%s": true' % (who, hit[0], gone[hit[0]]))
                 die('%s uses %s, which this kernel does not have: app.json leaves "%s" out of it' % (who, hit[0], gone[hit[0]]))
     equ = os.path.join(bdir, 'kernel.equ')
     kernel = asm(os.path.join(ksrc, 'kernel.a99'), os.path.join(bdir, 'kernel.bin'), kincs,
-                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) + (['WITHSFX'] if app['sfx'] else []) + (['WITHMOTION'] if app['motion'] else []) +
+                 os.path.join(bdir, 'kernel.lst'), equ, [OMITTABLE[o][0] for o in app['omit']] + (['WITHPRUN'] if app['prun'] else []) + (['WITHSFX'] if app['sfx'] else []) + (['WITHMOTION'] if app['motion'] else []) + (['WITHMOTHLP'] if app['motion_helpers'] else []) +
                  (['ARCODE'] if 'appram_code' in app else []))
     labels = equ_labels(equ)
     rbytes = labels['krese'] - labels['kresb']

@@ -198,6 +198,8 @@ SPMTAB EQU  >20BA            the motion table in CPU RAM (8 bytes a sprite)
 SPMCNT EQU  >20BC            how many sprites it holds (0: no motion)
 SPMSAT EQU  >20BE            the sprite attribute table in VRAM
 SPMSKP EQU  >20E6            non-zero: no motion step now (KPFR sets it)
+SPMBXR EQU  >20AC            bounce range: first sprite (high byte), last (low)
+SPMBXP EQU  >20AE            the bounce box in the program's RAM (0: none)
 
 * The page each window holds, tracked by the pager (a page is 0-4095):
 CURA2  EQU  >21E0            window >2000 (slot A)

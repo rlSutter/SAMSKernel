@@ -1,8 +1,11 @@
 *======================================================================
-* motion.a99 - eight balls bouncing round the screen: sprite motion
-* (app.json "motion": true).  The kernel moves the sprites every frame from a
-* motion table in the program's RAM; this module sets the table up once and,
-* each frame, turns a ball round when it reaches an edge.  FCTN = quits.
+* motion.a99 - eight balls bouncing round the screen: sprite motion with its
+* helpers (app.json "motion": true and "motion_helpers": true).  The kernel
+* moves the sprites every frame from a motion table in the program's RAM and,
+* because SPMBOX says so, turns a ball round at the edge of a box; this module
+* sets the table up once and, each frame, asks SPMHIT whether two balls have
+* met and, if they just have, exchanges their velocities with SPMSWP.
+* FCTN = quits.
 *
 * The motion table (8 bytes a sprite): Y.y, X.x, dY, dX, each a word of 8.8
 * fixed point; the high byte of a position is the sprite attribute table's own
@@ -13,8 +16,10 @@
 
 NSPR   EQU  8
 TAB    EQU  APPRAM                    8 sprites x 8 bytes
-* (SPMINI, SPMPUT, SPMVEL use R0-R4: the loop below counts in R6 and R7)
-CBUF   EQU  APPRAM+64                 pattern and colour bytes for the table
+BOXR   EQU  APPRAM+64                 the bounce box: Ymin, Ymax, Xmin, Xmax
+HITS   EQU  APPRAM+72                 28 words: did this pair overlap last frame
+CBUF   EQU  APPRAM+130                pattern and colour bytes for the table
+* (the kernel's routines use R0-R4: the loops below count in R5 to R8)
 
        AORG >C000
        DATA INIT,TICK,INIT,0
@@ -31,75 +36,83 @@ INIT   .enter
        LI   R1,NSPR
        LI   R2,SATAB
        BL   @SPMINI
+       LI   R5,BOXD                    the box, into RAM for the kernel
+       LI   R6,BOXR
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       MOV  *R5+,*R6+
+       CLR  R0                         balls 0 to 7 bounce in it
+       LI   R1,NSPR-1
+       LI   R2,BOXR
+       BL   @SPMBOX
+       LI   R5,HITS                    no pair overlapping yet
+       LI   R6,28
+IN0    CLR  *R5+
+       DEC  R6
+       JNE  IN0
        LI   R7,START
-       CLR  R6
-IN1    MOV  R6,R0                      sprite R6: its start Y and X ...
+       CLR  R8
+IN1    MOV  R8,R0                      ball R8: its start Y and X ...
        MOV  *R7,R1
        MOV  @2(R7),R2
        BL   @SPMPUT
-       MOV  R6,R0                      ... and its velocity
+       MOV  R8,R0                      ... and its velocity
        MOV  @4(R7),R1
        MOV  @6(R7),R2
        BL   @SPMVEL
-       MOV  R6,R0                      pattern 0, colour 2 + sprite
+       MOV  R8,R0                      pattern 0, colour 2 + ball
        SLA  R0,2
        AI   R0,SATAB+2
-       MOV  R6,R1
+       MOV  R8,R1
        AI   R1,2
        MOV  R1,@CBUF
        LI   R1,CBUF
        LI   R2,2
        BL   @VMBW
        AI   R7,8
-       INC  R6
-       CI   R6,NSPR
+       INC  R8
+       CI   R8,NSPR
        JL   IN1
        .leave
        RT
 
-* Each frame: a ball at an edge that is still heading out turns round.
+* Each frame: every pair of balls (28 of them): met just now? swap velocities.
 TICK   .enter
        CI   R0,KQUIT*256
        JNE  TK0
        SETO @QUITF
        JMP  TK9
-TK0    LI   R3,TAB
-       LI   R4,NSPR
-TK1    MOVB *R3,R1                     Y in dots
-       SRL  R1,8
-       MOV  @4(R3),R0                  Y velocity
-       CI   R1,176                     at the bottom and going down?
+TK0    LI   R8,HITS
+       CLR  R5                         ball i
+TK1    MOV  R5,R6
+       INC  R6                         ball j, after i
+TK2    MOV  R5,R0
+       MOV  R6,R1
+       LI   R2,8                       the balls are 8 dots across
+       BL   @SPMHIT                    R0 = 1 if they overlap
+       MOV  *R8,R1                     did they last frame?
+       MOV  R0,*R8+
+       MOV  R0,R0
+       JEQ  TK3
+       MOV  R1,R1
+       JNE  TK3                        (still the same meeting)
+       MOV  R5,R0                      they have just met: swap
+       MOV  R6,R1
+       BL   @SPMSWP
+TK3    INC  R6
+       CI   R6,NSPR
        JL   TK2
-       MOV  R0,R0
-       JLT  TK3
-       NEG  @4(R3)
-       JMP  TK3
-TK2    CI   R1,10                      at the top and going up?
-       JH   TK3
-       MOV  R0,R0
-       JGT  TK3
-       NEG  @4(R3)
-TK3    MOVB @2(R3),R1                  X in dots
-       SRL  R1,8
-       MOV  @6(R3),R0                  X velocity
-       CI   R1,240                     at the right and going right?
-       JL   TK4
-       MOV  R0,R0
-       JLT  TK5
-       NEG  @6(R3)
-       JMP  TK5
-TK4    CI   R1,8                       at the left and going left?
-       JH   TK5
-       MOV  R0,R0
-       JGT  TK5
-       NEG  @6(R3)
-TK5    AI   R3,8
-       DEC  R4
-       JNE  TK1
+       INC  R5
+       CI   R5,NSPR-1
+       JL   TK1
 TK9    .leave
        RT
 
 PBALL  BYTE >3C,>7E,>FF,>FF,>FF,>FF,>7E,>3C
+
+* Ymin, Ymax, Xmin, Xmax: where a ball's corner may be (the screen is 192 x 256)
+BOXD   DATA 12,176,8,240
 
 * Y, X (dots, as the attribute table has them), then Y and X velocity (8.8)
 START  DATA 20,30,>0140,>0100

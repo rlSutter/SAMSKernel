@@ -10,6 +10,8 @@
        COPY "macros.a99"
 
 TAB    EQU  APPRAM
+BOXRAM EQU  APPRAM+60
+RES    EQU  APPRAM+40
 
        AORG >C000
        DATA INIT,TICK,INIT,0
@@ -64,10 +66,89 @@ TK2    CI   R0,'2'*256         2: and goes on
        CLR  @SPMSKP
        JMP  TK9
 TK3    CI   R0,'3'*256         3: motion stopped (a count of 0)
-       JNE  TK9
+       JNE  TK4
        LI   R0,TAB
        CLR  R1
        LI   R2,SATAB
        BL   @SPMINI
+       JMP  TK9
+TK4    CI   R0,'4'*256         4: sprites 0 and 1 bounce inside a box
+       JNE  TK5
+       LI   R1,BOXDAT          (the kernel reads the box every frame: from RAM)
+       LI   R2,BOXRAM
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       MOV  *R1+,*R2+
+       CLR  R0
+       LI   R1,1
+       LI   R2,BOXRAM
+       BL   @SPMBOX
+       JMP  TK9
+TK5    CI   R0,'5'*256         5: the collision tests; results in RES, RES+2 ...
+       JNE  TK9
+       BL   @TESTS
 TK9    .leave
+       RT
+
+BOXDAT DATA 40,120,60,200             Ymin, Ymax, Xmin, Xmax
+
+* The collision tests: each puts sprites 2 and 3 somewhere with SPMPUT, asks
+* SPMHIT and stores the answer.
+TESTS  .enter
+       LI   R0,3                      1: overlapping (80,80) and (84,86), size 8: 1
+       LI   R1,84
+       LI   R2,86
+       BL   @SPMPUT
+       BL   @HIT28
+       MOV  R0,@RES
+       LI   R0,3                      2: 10 apart in Y: 0
+       LI   R1,90
+       LI   R2,80
+       BL   @SPMPUT
+       BL   @HIT28
+       MOV  R0,@RES+2
+       LI   R0,2                      3: across the wrap: Y 252 and 3 are 7 apart: 1
+       LI   R1,252
+       LI   R2,10
+       BL   @SPMPUT
+       LI   R0,3
+       LI   R1,3
+       LI   R2,12
+       BL   @SPMPUT
+       BL   @HIT28
+       MOV  R0,@RES+4
+       LI   R0,3                      4: Y 252 and 6 are 10 apart: 0
+       LI   R1,6
+       LI   R2,12
+       BL   @SPMPUT
+       BL   @HIT28
+       MOV  R0,@RES+6
+       LI   R0,2                      5: a sprite the table does not hold: 0
+       LI   R1,9
+       LI   R2,8
+       BL   @SPMHIT
+       MOV  R0,@RES+8
+       LI   R0,2                      6: SPMSWP: 2 gets 3's velocity and the other way
+       LI   R1,>0100
+       LI   R2,>0020
+       BL   @SPMVEL
+       LI   R0,3
+       LI   R1,>FF00
+       LI   R2,>0040
+       BL   @SPMVEL
+       LI   R0,2
+       LI   R1,3
+       BL   @SPMSWP
+       LI   R0,>A55A                  done
+       MOV  R0,@RES+10
+       .leave
+       RT
+
+HIT28  .enter                         SPMHIT of sprites 2 and 3, size 8
+       LI   R0,2
+       LI   R1,3
+       LI   R2,8
+       BL   @SPMHIT
+       .leave
        RT

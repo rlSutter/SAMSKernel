@@ -29,6 +29,9 @@
 * GM2SAT in Graphics II).  The table is cleared (every sprite at 0,0, not
 * moving).  Leaf.  Uses R0-R4.
 SPMINI CLR  @SPMCNT            (stopped while the table is made ready)
+       .ifdef WITHMOTHLP
+       CLR  @SPMBXP            (and no bounce box)
+       .endif
        CI   R1,32
        JLE  SPI1
        LI   R1,32
@@ -82,17 +85,165 @@ SPMVEL MOV  @SPMTAB,R3
        MOV  R2,@6(R3)
 SPV9   RT
 
-* SPMSTP - one frame of motion (KFRAME calls it): every moving sprite's position
-* moves by its velocity and its attribute entry's Y and X are written.  Uses
-* R0-R5.
-SPMSTP MOV  @SPMTAB,R3
+       .ifdef WITHMOTHLP
+* ---- the helpers (app.json "motion_helpers": true): bounce and collision ----
+
+* SPMBOX - make the sprites R0 to R1 (inclusive) bounce inside a box: R2 = the
+* address of 4 words in the program's RAM, Ymin, Ymax, Xmin, Xmax in dots (the
+* attribute table's own values: the sprite's Y and X, so leave room for its
+* size); R2 = 0 turns bouncing off.  The kernel reads the box every frame, so
+* the program may move its walls.  A sprite that moves past an edge, going out,
+* is put back as far inside as it was outside and its velocity on that axis
+* turns round; one going in is left alone.  Keep the box more than a sprite's
+* speed away from 0 and 255 (a position wraps there).  SPMINI turns it off.
+* Leaf.  Uses R0-R2.
+SPMBOX SLA  R0,8
+       ANDI R1,>00FF
+       A    R1,R0
+       MOV  R0,@SPMBXR
+       MOV  R2,@SPMBXP
+       RT
+
+* SPMHIT - do sprites R0 and R1 overlap?  R2 = their size in dots (8, or 16):
+* they do if both their Y and X are less than that far apart (a position is the
+* sprite's corner; the screen's wrap is taken into account).  R0 = 1 if they do,
+* else 0 (also for a sprite number the table does not hold).  Leaf.  Uses R0-R4.
+SPMHIT MOV  @SPMTAB,R3
+       JEQ  SPH9
+       C    R0,@SPMCNT
+       JHE  SPH9
+       C    R1,@SPMCNT
+       JHE  SPH9
+       MOV  R3,R4
+       SLA  R0,3
+       A    R0,R3              A's entry
+       SLA  R1,3
+       A    R1,R4              B's entry
+       MOVB *R3,R0             Ya
+       SB   *R4,R0             - Yb, in 8 bits: wraps as the screen does
+       SRA  R0,8
+       ABS  R0
+       C    R0,R2
+       JHE  SPH9               too far apart in Y
+       MOVB @2(R3),R0
+       SB   @2(R4),R0
+       SRA  R0,8
+       ABS  R0
+       C    R0,R2
+       JHE  SPH9               too far apart in X
+       LI   R0,1
+       RT
+SPH9   CLR  R0
+       RT
+
+* SPMSWP - exchange the velocities of sprites R0 and R1: what two equal balls
+* do in a head-on collision (call it when SPMHIT says they have met).  A sprite
+* number the table does not hold is ignored.  Leaf.  Uses R0-R4.
+SPMSWP MOV  @SPMTAB,R3
+       JEQ  SPW9
+       C    R0,@SPMCNT
+       JHE  SPW9
+       C    R1,@SPMCNT
+       JHE  SPW9
+       MOV  R3,R4
+       SLA  R0,3
+       A    R0,R3
+       SLA  R1,3
+       A    R1,R4
+       MOV  @4(R3),R2
+       MOV  @4(R4),@4(R3)
+       MOV  R2,@4(R4)
+       MOV  @6(R3),R2
+       MOV  @6(R4),@6(R3)
+       MOV  R2,@6(R4)
+SPW9   RT
+
+* SPMBNC - sprite entry R3 against the box R8 (SPMSTP calls it): turn round
+* what is going out of the box.  Leaf.  Uses R0-R1.
+SPMBNC MOVB *R3,R0             Y in dots
+       CB   R0,@3(R8)          past the bottom edge?
+       JLE  SPB1
+       MOV  @4(R3),R1          going down?
+       JLT  SPB2
+       JEQ  SPB2
+       MOV  @2(R8),R1          the edge, 8.8: Y := 2 x edge - Y
+       SLA  R1,8
+       A    R1,R1
+       S    *R3,R1
+       MOV  R1,*R3
+       NEG  @4(R3)
+       JMP  SPB2
+SPB1   CB   R0,@1(R8)          past the top edge?
+       JHE  SPB2
+       MOV  @4(R3),R1          going up?
+       JGT  SPB2
+       JEQ  SPB2
+       MOV  @0(R8),R1
+       SLA  R1,8
+       A    R1,R1
+       S    *R3,R1
+       MOV  R1,*R3
+       NEG  @4(R3)
+SPB2   MOVB @2(R3),R0          X in dots
+       CB   R0,@7(R8)          past the right edge?
+       JLE  SPB3
+       MOV  @6(R3),R1          going right?
+       JLT  SPB9
+       JEQ  SPB9
+       MOV  @6(R8),R1
+       SLA  R1,8
+       A    R1,R1
+       S    @2(R3),R1
+       MOV  R1,@2(R3)
+       NEG  @6(R3)
+       RT
+SPB3   CB   R0,@5(R8)          past the left edge?
+       JHE  SPB9
+       MOV  @6(R3),R1          going left?
+       JGT  SPB9
+       JEQ  SPB9
+       MOV  @4(R8),R1
+       SLA  R1,8
+       A    R1,R1
+       S    @2(R3),R1
+       MOV  R1,@2(R3)
+       NEG  @6(R3)
+SPB9   RT
+
+       .endif
+
+* SPMSTP - one frame of motion (KFRAME calls it): every moving sprite's
+* position moves by its velocity (and, with the helpers, bounces if SPMBOX
+* says so) and its attribute entry's Y and X are written.  Uses R0-R5; with
+* the helpers R0-R8 (its return address is then kept in R6).
+SPMSTP
+       .ifdef WITHMOTHLP
+       MOV  R11,R6
+       .endif
+       MOV  @SPMTAB,R3
        MOV  @SPMCNT,R4
        MOV  @SPMSAT,R5
+       .ifdef WITHMOTHLP
+       MOV  @SPMBXP,R8         the bounce box, if any
+       CLR  R7                 the sprite number
+       .endif
 SPS1   MOV  @4(R3),R0
        SOC  @6(R3),R0          either velocity not zero?
        JEQ  SPS2
        A    @4(R3),*R3         Y.y += dY
        A    @6(R3),@2(R3)      X.x += dX
+       .ifdef WITHMOTHLP
+       MOV  R8,R8
+       JEQ  SPS4               no box
+       MOV  R7,R0              a sprite in the bounce range?
+       SLA  R0,8
+       CB   R0,@SPMBXR
+       JL   SPS4
+       CB   R0,@SPMBXR+1
+       JH   SPS4
+       BL   @SPMBNC
+SPS4
+       .endif
        MOV  R5,R0
        ORI  R0,>4000           VDP write address of this sprite's entry
        SWPB R0
@@ -103,6 +254,13 @@ SPS1   MOV  @4(R3),R0
        MOVB @2(R3),@VDPWD      X
 SPS2   AI   R3,8
        AI   R5,4
+       .ifdef WITHMOTHLP
+       INC  R7
+       .endif
        DEC  R4
        JNE  SPS1
+       .ifdef WITHMOTHLP
+       B    *R6
+       .else
        RT
+       .endif

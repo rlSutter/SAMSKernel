@@ -3081,6 +3081,26 @@ def motion():
     check(table(g1, 0) != table(g2, 0) and steps(table(g1, 0)[0], table(g2, 0)[0], 0x0100) in (59, 60, 61), 'and they move again when it is cleared (%d steps in the 60 frames after)' % steps(table(g1, 0)[0], table(g2, 0)[0], 0x0100))
     h1, h2 = run('<WAIT 5>3<WAIT 60>', 200), run('<WAIT 5>3<WAIT 120>', 260)
     check(table(h1, 0) == table(h2, 0) and h1.rw(ev['SPMCNT']) == 0, 'SPMINI with a count of 0 stops the motion (count %d, the table the same 60 frames later)' % h1.rw(ev['SPMCNT']))
+    # the helpers: bounce inside a box (sprites 0 and 1), the box read from RAM every frame
+    bs = [run('<WAIT 5>4<WAIT 600>', f) for f in (110, 170, 230, 290)]
+    ok_in, flips = True, set()
+    seen = []
+    for bm in bs:
+        y0, x0, dy0, dx0 = table(bm, 0)
+        y1, x1, dy1, dx1 = table(bm, 1)
+        seen.append((y0 >> 8, x0 >> 8, dy0, dy1 & 0xFFFF, x1 >> 8, dx1))
+        ok_in = ok_in and 40 <= (y0 >> 8) <= 120 and 60 <= (x0 >> 8) <= 200 and 60 <= (x1 >> 8) <= 200
+        flips.add(dy0 & 0x8000 != 0)
+        ok_in = ok_in and abs(((dy0 + 0x8000) & 0xFFFF) - 0x8000) == 0x0100 and abs(((dx0 + 0x8000) & 0xFFFF) - 0x8000) == 0x0080 and abs(((dx1 + 0x8000) & 0xFFFF) - 0x8000) == 0x0180
+    check(ok_in and flips == {True, False},
+          'SPMBOX: sprites 0 and 1 stay inside the box (Y 40-120, X 60-200) at four times, with their speeds unchanged and sprite 0\'s Y velocity turned round in between (signs seen %s); sprite 1 started outside it (X 250) and was put back %s' % (sorted(flips), seen[:2]))
+    out = bs[-1]
+    check(table(out, 3)[2] == 0xFF00 and table(out, 2)[2:] == [0, 0], 'sprites outside the bounce range (2 and 3) are not turned round: sprite 3 still has its Y velocity >FF00')
+    hm = run('<WAIT 5>5<WAIT 60>', 200)
+    res = [hm.rw(TAB + 40 + 2 * k) for k in range(6)]
+    check(res[:5] == [1, 0, 1, 0, 0] and res[5] == 0xA55A,
+          'SPMHIT: overlapping sprites give 1, 10 apart give 0, Y 252 and 3 (7 apart across the wrap) give 1, 252 and 6 (10 apart) give 0, a sprite not in the table gives 0 (%s)' % res)
+    check(table(hm, 2)[2:] == [0xFF00, 0x0040] and table(hm, 3)[2:] == [0x0100, 0x0020], 'SPMSWP exchanged sprite 2\'s and 3\'s velocities (%s, %s)' % (table(hm, 2)[2:], table(hm, 3)[2:]))
     ex = build('motion')
     saved = os.environ.pop('TI_CONSOLE_ROM', None)
     try:
@@ -3097,15 +3117,21 @@ def motion():
           'the example (eight bouncing balls) after 600 frames: every ball inside the screen\'s box, colours 2 to 9, sprites on (%s)' % sats[:3])
     d = tempfile.mkdtemp()
     shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'motiontest'), d + '/a')
-    j = json.load(open(d + '/a/app.json')); j['motion'] = False; json.dump(j, open(d + '/a/app.json', 'w'))
+    j = json.load(open(d + '/a/app.json')); j['motion'] = False; j['motion_helpers'] = False; json.dump(j, open(d + '/a/app.json', 'w'))
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/a', '--out', d + '/o'], capture_output=True, text=True)
     out = r.stdout + r.stderr
-    check(r.returncode != 0 and 'SPMINI' in out and '"motion": true' in out, 'SPMINI without "motion": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
+    check(r.returncode != 0 and 'SPM' in out and '"motion' in out, 'a program that calls SPMINI and the rest without "motion": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h'], capture_output=True, text=True)
     check('kernel 6898 bytes' in r.stdout, 'without the feature the kernel is still 6,898 bytes')
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', 'motiontest'), '--out', d + '/m'], capture_output=True, text=True)
     n = re.search(r'kernel (\d+) bytes', r.stdout)
-    check(n and 6898 < int(n.group(1)) < 7300, 'with it the kernel is %s bytes (the motion code and its hooks)' % (n.group(1) if n else '?'))
+    check(n and 7300 < int(n.group(1)) < 7600, 'with motion and its helpers the kernel is %s bytes' % (n.group(1) if n else '?'))
+    shutil.copytree(os.path.join(ROOT, 'tests', 'apps', 'motiontest'), d + '/b')
+    j = json.load(open(d + '/b/app.json')); j['motion_helpers'] = False; json.dump(j, open(d + '/b/app.json', 'w'))
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), d + '/b', '--out', d + '/o2'], capture_output=True, text=True)
+    out = r.stdout + r.stderr
+    check(r.returncode != 0 and 'SPMBOX' in out and '"motion_helpers": true' in out, 'SPMBOX without "motion_helpers": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
+
 
 def workbench():
     """The workbench: the editor's keys, the catalog, and the whole round: type a program in the editor,

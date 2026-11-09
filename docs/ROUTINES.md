@@ -516,9 +516,25 @@ put sprite R0 at Y = R1, X = R2 (dots, 0-255: the attribute table's own values) 
 
 set sprite R0's velocity: Y = R1, X = R2, signed 8.8 dots a frame (>0100 = one dot a frame down or right; 0, 0 stops it).  Needs SPMINI first. Uses R0-R3.
 
+### `SPMBOX`
+
+make the sprites R0 to R1 (inclusive) bounce inside a box: R2 = the address of 4 words in the program's RAM, Ymin, Ymax, Xmin, Xmax in dots (the attribute table's own values: the sprite's Y and X, so leave room for its size); R2 = 0 turns bouncing off.  The kernel reads the box every frame, so the program may move its walls.  A sprite that moves past an edge, going out, is put back as far inside as it was outside and its velocity on that axis turns round; one going in is left alone.  Keep the box more than a sprite's speed away from 0 and 255 (a position wraps there).  SPMINI turns it off. Leaf.  Uses R0-R2.
+
+### `SPMHIT`
+
+do sprites R0 and R1 overlap?  R2 = their size in dots (8, or 16): they do if both their Y and X are less than that far apart (a position is the sprite's corner; the screen's wrap is taken into account).  R0 = 1 if they do, else 0 (also for a sprite number the table does not hold).  Leaf.  Uses R0-R4.
+
+### `SPMSWP`
+
+exchange the velocities of sprites R0 and R1: what two equal balls do in a head-on collision (call it when SPMHIT says they have met).  A sprite number the table does not hold is ignored.  Leaf.  Uses R0-R4.
+
+### `SPMBNC` *(internal)*
+
+sprite entry R3 against the box R8 (SPMSTP calls it): turn round what is going out of the box.  Leaf.  Uses R0-R1.
+
 ### `SPMSTP` *(internal)*
 
-one frame of motion (KFRAME calls it): every moving sprite's position moves by its velocity and its attribute entry's Y and X are written.  Uses R0-R5.
+one frame of motion (KFRAME calls it): every moving sprite's position moves by its velocity (and, with the helpers, bounces if SPMBOX says so) and its attribute entry's Y and X are written.  Uses R0-R5; with the helpers R0-R8 (its return address is then kept in R6).
 
 ## Optional include: line editing (lib/linein.a99; COPY it into your module)
 

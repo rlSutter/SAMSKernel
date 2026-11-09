@@ -2,5 +2,11 @@
   "name": "MOTION TEST",
   "min_pages": 128,
   "motion": true,
-  "modules": [{"name": "motion", "source": "motion.a99"}]
+  "modules": [
+    {
+      "name": "motion",
+      "source": "motion.a99"
+    }
+  ],
+  "motion_helpers": true
 }
