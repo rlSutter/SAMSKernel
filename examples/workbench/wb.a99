@@ -45,6 +45,7 @@ SEL    EQU  APPRAM+38          the catalog's selection
 NFILES EQU  APPRAM+40
 EPTR   EQU  APPRAM+42
 DEVLEN EQU  APPRAM+44
+CATTRY EQU  APPRAM+46          0: the catalog opened with length 0, 1: with 38
 CATBUF EQU  APPRAM+256         a catalog record (HFDC: up to 146 bytes;
 *                              the assembler's LINE area, idle here)
 CATTAB EQU  APPRAM+5200         the names: 20 entries of 12 bytes (the
@@ -434,14 +435,31 @@ CO3A   MOVB *R1+,*R5+
 CO4    MOV  R3,@DEVLEN
        SWPB R3
        MOVB R3,@CATNM
-       LI   R2,CATNM
+       CLR  @CATTRY
+CO4A   LI   R2,CATNM
        LI   R0,FIN+FINTL
        CLR  R1                 length 0: the DSR's own (HFDC refuses 38)
-       BL   @FOPEN
+       MOV  @CATTRY,R3
+       JEQ  CO4B
+       LI   R1,38              the second try says 38 (some controllers want it)
+CO4B   BL   @FOPEN
        MOV  R0,R0
+       JEQ  CO4C
+       MOV  @CATTRY,R3         refused: once more, with 38
        JNE  CO9
-       LI   R1,CATBUF          the first record: the disk
+       INC  @CATTRY
+       JMP  CO4A
+CO4C   LI   R1,CATBUF          the first record: the disk
        BL   @FREAD
+       MOV  R0,R0
+       JNE  CO4E
+       MOV  R2,R2              (a record of no length is no answer either)
+       JNE  CO5
+CO4E   BL   @FCLOSE            nothing read: close and try again with 38
+       MOV  @CATTRY,R3
+       JNE  CO9
+       INC  @CATTRY
+       JMP  CO4A
 CO5    LI   R1,CATBUF
        BL   @FREAD
        MOV  R0,R0

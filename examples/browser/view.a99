@@ -41,7 +41,7 @@ VWINIT .enter
        SLA  R1,4               its entry: ENTS + n * 16
        AI   R1,ENTS
        LI   R2,VNAME+1         DSK1. then the name
-       LI   R3,SDSK+1
+       LI   R3,DEVSTR+1
        LI   R4,5
 VI1    MOVB *R3+,*R2+
        DEC  R4
@@ -249,7 +249,6 @@ VT8    BL   @VWDRAW
 VT9    .leave
        RT
 
-SDSK   STRI 'DSK1.'
 SKEYS  STRI 'UP DOWN scroll   BEGIN top   BACK return   FCTN = quit'
 SLINE  STRI 'Line'
 SOF    STRI 'of'

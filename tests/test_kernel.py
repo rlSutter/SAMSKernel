@@ -222,6 +222,38 @@ def browser():
     check(lines(m)[2].strip() == 'line 4' and 'Line 4 of 129' in lines(m)[29], 'DOWN scrolls (lines read into pool pages, drawn through MAPE)')
     m, cpu, halt = sim9900.run(c, keys='<F-x><F-x><ENTER><WAIT 200><F-9><WAIT 100>', frames=900, setup=setup)
     check('Disk browser' in lines(m)[0], 'BACK returns to the browser (PREVPG)')
+    # a controller that wants the catalog's record length said, one that opens it with length 0 and then reads nothing, and one that
+    # refuses it altogether: the first two are read by a second try with 38 (a js99er Myarc controller showed nothing), the third
+    # gives a message with the DSR's error and not a blank screen; keys 1-9 choose the drive, and the viewer follows it
+    def with_ctl(**kw):
+        def s2(m):
+            setup(m)
+            for k, v in kw.items():
+                setattr(m, k, v)
+        return s2
+    for label, kw in (('wants 38 given', {'catalog_lengths': (38,)}), ('opens it and reads nothing at length 0', {'catalog_len0_empty': True})):
+        m, cpu, halt = sim9900.run(c, keys='<WAIT 40>', frames=200, setup=with_ctl(**kw))
+        ln = lines(m)
+        check('PRESSDISK' in ln[2] and ln[5].split()[:1] == ['DATA'] and not ln[27].strip(), 'a controller that %s: the catalog is read by the second try (length 38)' % label)
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>', frames=200, setup=with_ctl(catalog_lengths=()))
+    ln = lines(m)
+    check('Disk browser' in ln[0] and 'could not be read: error' in ln[27] and ln[27].split()[-1] == '2', 'a controller that refuses the catalog: the frame and the message with the error (%r), not a blank screen' % ln[27].strip())
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>2<WAIT 40>', frames=250, setup=setup)
+    ln = lines(m)
+    check('DSK2.' in ln[0] and 'could not be read: error' in ln[27], 'key 2 makes it DSK2. (the title says so), the stand-in has no such drive, and the DSR\'s error is shown: %r' % ln[27].strip())
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>2<WAIT 40>1<WAIT 40>', frames=300, setup=setup)
+    ln = lines(m)
+    check('DSK1.' in ln[0] and 'PRESSDISK' in ln[2] and not ln[27].strip(), 'and key 1 brings DSK1 back with its catalog and no message')
+    # the workbench's own catalog command (C), on a controller that wants the length 38 given
+    import asmharness
+    def hook(m):
+        m.tifdc = None
+        m.dvfiles['HELLO/A99'] = [b'* a line']
+        m.dvfiles['SRC'] = [b'abc']
+        m.catalog_lengths = (38,)
+    m, img = asmharness.workbench_ui('<WAIT 10>c<WAIT 300>', 700, [], setup2=hook)
+    text = ' '.join(sim9900.screen(m).split('\n'))
+    check('HELLO/A99' in text and 'SRC' in text, 'the workbench\'s catalog on a controller that wants 38 given: the second try lists the files (%d names seen)' % sum(n in text for n in ('HELLO/A99', 'SRC')))
 
 def sams16():
     """SAMS cards of 512K to 16M, whose registers are 12 bits (the even byte the low 8, the odd byte bits 8-11, as in

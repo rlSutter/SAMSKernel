@@ -104,6 +104,8 @@ class Machine:
         self.scratch = bytearray(256)
         self.sams = sams
         self.dvfiles = {}       # the stand-in drive's files: name -> records
+        self.catalog_lengths = (0, 38)   # the record lengths a catalog may be opened with (a controller may want 38 given)
+        self.catalog_len0_empty = False  # True: a catalog opened with length 0 opens, and then every READ answers end of file
         self.prints = {}        # printer devices (PIO..., PI.PIO...): full name -> bytes written, in order
         self.pi_clock = None    # PI.CLOCK's reply (a string), or None: no clock
         self.ftypes = {}        # name -> (variable?, internal?, record length); DIS/VAR 80 if absent
@@ -602,10 +604,11 @@ class Machine:
             mode = (flags >> 1) & 3                   # 0 update, 1 output, 2 input, 3 append
             reclen = self.vram[pab + 4]
             if fname == '':                           # the catalog
-                if mode != 2 or var or not internal or reclen not in (0, 38):
+                if mode != 2 or var or not internal or reclen not in self.catalog_lengths:
                     fail(2); return True
+                empty = self.catalog_len0_empty and reclen == 0
                 self.vram[pab + 4] = 38
-                handles[pab] = {'name': None, 'mode': 'in', 'pos': 0, 'recs': self.catalog()}
+                handles[pab] = {'name': None, 'mode': 'in', 'pos': 0, 'recs': [] if empty else self.catalog()}
                 return True
             if mode == 2:
                 if fname not in self.dvfiles:

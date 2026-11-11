@@ -23,6 +23,7 @@ DISKSZ EQU  APPRAM+4           the disk's sectors
 DISKFR EQU  APPRAM+6           ... free
 MSGNO  EQU  APPRAM+8           the message to show (0: none)
 EPTR   EQU  APPRAM+10          work: the entry being filled
+RETRY  EQU  APPRAM+12          0: catalog opened with length 0, 1: with 38
 DNAME  EQU  APPRAM+16          the disk's name, length-prefixed (11 bytes)
 ENTS   EQU  APPRAM+32          the files: MAXF entries of 16 bytes
 *                              +0 name (length-prefixed, 10 characters at most)
@@ -40,3 +41,4 @@ VPAGES EQU  VNAME+24           8 words: the SAMS page of each 51 lines
 LINBUF EQU  VNAME+40           a line as read (80 bytes)
 VWORK  EQU  VNAME+130          scratch words
 LPP    EQU  51                 lines per page: 51 * 80 = 4,080 bytes
+DEVSTR EQU  VNAME+160          the device: 'DSK1.', length-prefixed (8 bytes)

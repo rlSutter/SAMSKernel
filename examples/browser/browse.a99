@@ -33,7 +33,15 @@
 * BRINIT - switched to: read the catalog, then draw.
 BRINIT .enter
        CLR  @MSGNO
-       BL   @BCAT
+       MOVB @DEVSTR,@DEVSTR    the device: 'DSK1.' the first time only (the
+       JNE  BI0                digit stays what a key made it across a trip
+       LI   R1,SDSK            through the viewer)
+       LI   R2,DEVSTR
+       LI   R3,6
+BI00   MOVB *R1+,*R2+
+       DEC  R3
+       JNE  BI00
+BI0    BL   @BRLOAD
        MOV  @SEL,R0            keep the selection inside the list
        C    R0,@NFILES
        JL   BI1
@@ -42,29 +50,63 @@ BI1    BL   @BRDRAW
        .leave
        RT
 
-* BCAT - read the catalog of DSK1 into ENTS.  A failure shows its error
-* in the message line.
+* BRLOAD - the frame and 'Reading ...' first (so that a controller that is slow,
+* or answers with nothing, is seen to be being asked), then the catalog.
+BRLOAD .enter
+       BL   @BRDRAW
+       LI   R0,27*COLS+2
+       LI   R1,SREAD
+       LI   R2,AMARK
+       BL   @PUTS
+       BL   @BCAT
+       .leave
+       RT
+
+* BCAT - read the catalog of the device in DEVSTR into ENTS.  It is opened
+* with record length 0 (the DSR's own; the HFDC refuses 38) and, if the DSR
+* refuses that, or opens it and then reads nothing, again with 38 (some
+* controllers want it said).  A failure shows its error in the message line.
 BCAT   .enter
-       CLR  @NFILES
+       CLR  @RETRY
+BCT    CLR  @NFILES
        CLR  @DISKSZ
        CLR  @DISKFR
        CLR  R0
        MOVB R0,@DNAME
-       LI   R2,SDSK            the device alone: the catalog
+       LI   R2,DEVSTR          the device alone: the catalog
        LI   R0,FIN+FINTL       INTERNAL, input
-       CLR  R1                 length 0: the DSR's own (HFDC refuses 38)
-       BL   @FOPEN
+       CLR  R1                 length 0: the DSR's own
+       MOV  @RETRY,R3
+       JEQ  BCL
+       LI   R1,38              the second try says 38
+BCL    BL   @FOPEN
        MOV  R0,R0
        JEQ  BC0
-       MOV  R0,@MSGNO          could not open: the DSR's error
-       AI   R0,100
+       AI   R0,100             could not open: 100 + the DSR's error
        MOV  R0,@MSGNO
-       JMP  BC9
+       MOV  @RETRY,R0
+       JNE  BC9
+       INC  @RETRY
+       CLR  @MSGNO
+       JMP  BCT
 BC0    LI   R1,RECBUF          the first record describes the disk
        BL   @FREAD
        MOV  R0,R0
-       JNE  BCC
-       LI   R1,RECBUF          its name ...
+       JEQ  BC0X
+       AI   R0,100             not read: 100 + the error (5: end of file)
+       MOV  R0,@MSGNO
+       JMP  BC0Y
+BC0X   MOV  R2,R2              a record of no length is no answer
+       JNE  BC0Z
+       LI   R0,105
+       MOV  R0,@MSGNO
+BC0Y   BL   @FCLOSE
+       MOV  @RETRY,R0
+       JNE  BC9                the second try failed too: the message stays
+       INC  @RETRY
+       CLR  @MSGNO
+       JMP  BCT
+BC0Z   LI   R1,RECBUF          its name ...
        LI   R2,DNAME
        LI   R3,11
 BC0A   MOVB *R1+,*R2+
@@ -132,6 +174,10 @@ BRDRAW .enter
        BL   @FILLA
        LI   R0,1
        LI   R1,STITLE
+       LI   R2,ABAR
+       BL   @PUTS
+       LI   R0,17              the device
+       LI   R1,DEVSTR
        LI   R2,ABAR
        BL   @PUTS
        LI   R0,2*COLS+2        the disk: name, size, free
@@ -236,6 +282,13 @@ BM1    MOV  R2,R1
        LI   R0,27*COLS+2
        LI   R2,AERR
        BL   @PUTS
+       MOV  @MSGNO,R1          a catalog failure: its error's number too
+       CI   R1,100
+       JL   BM9
+       AI   R1,-100
+       LI   R0,27*COLS+36
+       LI   R2,AERR
+       BL   @DECW
 BM9    .leave
        RT
 
@@ -263,8 +316,16 @@ BT2    CI   R0,KDOWN*256
        INC  @SEL
        JMP  BT8
 BT3    CI   R0,KENTER*256
-       JNE  BT9
-       MOV  @NFILES,R1         a file selected?
+       JEQ  BT3A
+       CI   R0,'1'*256         1-9: that drive
+       JL   BT9
+       CI   R0,'9'*256
+       JH   BT9
+       MOVB R0,@DEVSTR+4
+       CLR  @SEL
+       BL   @BRLOAD
+       JMP  BT8
+BT3A   MOV  @NFILES,R1         a file selected?
        JEQ  BT9
        MOV  @SEL,R1            DIS/VAR (type 2) only
        SLA  R1,4
@@ -282,14 +343,15 @@ BT8    BL   @BRDRAW
 BT9    .leave
        RT
 
-STITLE STRI ' Disk browser   DSK1'
+STITLE STRI ' Disk browser   '
 SDSK   STRI 'DSK1.'
+SREAD  STRI 'Reading the catalog ...'
 SSECT  STRI 'sectors'
 SFREE  STRI 'free'
 SHEAD  STRI 'Name          Type        Sectors'
-SKEYS  STRI 'UP DOWN select   ENTER view a text file   FCTN = quit'
+SKEYS  STRI 'UP DOWN select   ENTER view   1-9 drive   FCTN = quit'
 SNOTXT STRI 'Not a DIS/VAR text file.'
-SNOCAT STRI 'The disk could not be read.'
+SNOCAT STRI 'The disk could not be read: error'
 STQ    STRI '?'
 STDF   STRI 'DIS/FIX'
 STDV   STRI 'DIS/VAR'
