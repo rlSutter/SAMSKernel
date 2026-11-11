@@ -11,6 +11,20 @@ form: the loader as rewritten, the module system, the page pool, and everything 
 **Routes.** Steps 1-8 run prebuilt images (`images/`), which need a **[PC]** only to have been made: copy them to the cartridge and the disk and you can do them with no PC. Step 9 has two forms below: **[PC]** builds `tests/apps/files2`;
 **[TI]** runs `COPY/A99` from the workbench disk (the same test, two files open at once). Steps 10 and 11 are **[TI]** by nature (the workbench itself).
 
+## Results reported so far
+
+Everything below was reported by the project owner; "js99er" means the emulator (F18A and SAMS on), whose behaviour is confirmed but not the chip's. A line says only what was reported: no version number was given for most, and where the owner did not say whether it was a real machine, it says so.
+
+| When | Where | What | Result |
+| --- | --- | --- | --- |
+| 8 Nov 2026 | js99er | the walk, steps 1-4 (hello and its exit to the console's title, the diagnostic and CTRL T, leaving it, the key chords) | pass |
+| 8 Nov 2026 | js99er | the walk, steps 5-6 (the fifteen video-mode screens; the music, pause, the A, the beep and the tune with a sound effect over it) | pass |
+| 7 Nov 2026 | not stated | scrolling S1-S3 (no seam, tear or jump at X = 256 and 512 and Y = 192; arrow keys and joystick; no wrong tile at the edges) | pass |
+| 6-7 Nov 2026 | not stated | sprite motion (`spritemotion8.bin`) | works |
+| 3-7 Nov 2026 | js99er | RUN PROGRAM FILE runs a program (found the card at >1100, loaded, ran); the first prompt read keys unreliably and its backspace cleared the name: **fixed in 1.32.1, not yet retried**; a Lamplight freeze with a 16M card was TXA's page-register write, patched on a copy of the disk | partly |
+| 7 Nov 2026 | js99er | after FCTN = from a disk-started `HELLO` the console's title came up in 30 rows with garbage on the bottom row: **fixed in 1.35.1, not yet retried** (step D7) | fixed, retry pending |
+| (nothing yet) | a real 4M or larger card | H1-H4 | not run |
+
 ## The walk
 
 | # | Do | You should see | If not, tell me |
