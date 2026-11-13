@@ -24,7 +24,7 @@ Everything below was reported by the project owner; "js99er" means the emulator 
 | 3-7 Nov 2026 | js99er | RUN PROGRAM FILE runs a program (found the card at >1100, loaded, ran); the first prompt read keys unreliably and its backspace cleared the name: **fixed in 1.32.1, not yet retried**; a Lamplight freeze with a 16M card was TXA's page-register write, patched on a copy of the disk | partly |
 | 7 Nov 2026 | js99er | after FCTN = from a disk-started `HELLO` the console's title came up in 30 rows with garbage on the bottom row: **fixed in 1.35.1, not yet retried** (step D7) | fixed, retry pending |
 | 8 Nov 2026 | js99er (disk controller not stated) | the walk, steps 9-10 (COPY in the workbench; assembling HELLO/A99 and running it) and 12 and 12a (a card above 1M: step 2 again, then 6 and 10; the ASK program) | pass |
-| 8 Nov 2026 | js99er | the walk, step 8 (the disk browser) | **nothing shown with the Myarc floppy controller, the catalog with the Generic one**: the browser now tries length 38 as well, shows an error number, and keys 1-9 pick the drive (1.37.1, retry pending) |
+| 9 Nov 2026 | js99er, Myarc floppy controller | the walk, step 8 (the disk browser) with 1.37.1's `diskbrowser8.bin` and a disk in DSK1: **the catalog is listed** and the option on a file works (the owner's words: "the option to edit the file worked as well"). With 1.37.0 and the same controller the browser showed nothing, and the Generic controller always showed the catalog | pass (the cause was the catalog's open or first read at record length 0; 1.37.1 tries 38 as well; which of the two it was is not known) |
 | (nothing yet) | a real 4M or larger card | H1-H4 | not run |
 
 ## The walk
