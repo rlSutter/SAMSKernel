@@ -111,9 +111,11 @@ def sams4m():
     mm.wb(0x3001, 0)
     mm.wb(0x4004, 5)
     e = mm.map[2]
+    mm.ams_readback = True
+    even, odd = mm.rb(0x4004), mm.rb(0x4005)
     mm.ams_readback = False
-    check((a, b, c2, d, e) == (0x2A3, 3, 5 | (1 << 8), 5 | (3 << 8), 5) and mm.rb(0x4004) == 0xFF and mm.ams_violations == [0x4004, 0x4004],
-          'the model: a word swapped as the kernel writes it gives the page (>2A3), bits 10-11 are ignored on a 4M card, the page in both bytes gives page 5 + 256 x (5 and 3), a byte alone takes the latch\'s stale bits, and the registers read >FF (%s)' % [hex(v) for v in (a, b, c2, d, e)])
+    check((a, b, c2, d, e) == (0x2A3, 3, 5 | (1 << 8), 5 | (3 << 8), 5) and mm.rb(0x4004) == 0xFF and (even, odd) == (5, 0xFF) and mm.ams_violations == [0x4004, 0x4004],
+          'the model: a word swapped as the kernel writes it gives the page (>2A3), bits 10-11 are ignored on a 4M card, the page in both bytes gives page 5 + 256 x (5 and 3), a byte alone takes the latch\'s stale bits, and a register reads back its even byte only (>05 and >FF), or >FF when it cannot be read (%s)' % [hex(v) for v in (a, b, c2, d, e)])
 
 
 def ram():

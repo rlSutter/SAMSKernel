@@ -57,8 +57,13 @@ is the same for 1M (two 512K chips, links W1 and W2 at 2-3) and 4M (two 2048K ch
   model (`ams_latch_model`, group `sams4m`) records any register write that is not the odd byte then the even byte of a word.
 - **Size**: the register is 10 bits on the 4M board (bits 10 and above are ignored: page 1024 is page 0), 8 on the 1M, 11 on the
   PicoPEB's 8M, 12 on a 16M design (Classic99's model).
-- **No readback**: the 612's data pins have no path back to the bus (D0 and D1 are grounded, D2 and D3 go to the latch's
-  outputs), so a register cannot be read. The kernel never does.
+- **Readback**: only the eight even-byte bits (page bits 0-7) read back on the Tekumel board; the upper bits come from the
+  latch and cannot be read (the owner's proposal, Addendum R7, citing MAME's `samsmem.cpp`; I had written that a register
+  could not be read at all, which was too strong), and the proposal says real cards in general "do not reliably allow"
+  readback. The kernel never reads a register back (since 1.37.0; before, `AMSDET` compared the even byte, which the Tekumel
+  board would have answered: the change is a robustness gain on cards that answer less, not a fix of that board).
+
+**Confirmed by the owner's revised proposal (Addendum R7, 10 November 2026)**: the register layout above (page >123 is the word >2301), that mapping off is an identity map, and that the odd byte is written first and latched. The full list of what the kernel requires of a machine, with the proposal's open points, is in `KERNEL-SPEC-REVIEW.md` (with the release outputs).
 
 ## What was concluded from it (1.37.0)
 

@@ -126,7 +126,8 @@ class Machine:
         # byte on the bus at each write cycle and its upper bits from a latch that follows every odd-address write on the expansion bus and
         # holds through the next cycle; a word is written odd byte first.  So a byte written to the even address alone takes whatever the
         # last odd write left in the latch.  ams_pagebits = 8 (1M), 10 (4M), 11 (8M) or 12 (16M); ams_latch_bits = pagebits - 8 (the
-        # latch's outputs that are wired); ams_readback False: the registers cannot be read (the bus floats: >FF).
+        # latch's outputs that are wired); ams_readback False: the registers cannot be read (the bus floats: >FF); True: the even byte
+        # (page bits 0-7) reads back and the odd byte floats, as on the Tekumel board (the owner's proposal, R7).
         self.ams_latch_model = False
         self.ams_latch = 0
         self.ams_latch_bits = 2
@@ -230,7 +231,7 @@ class Machine:
                     if not self.ams_readback:
                         return 0xFF
                     v = self.map[(addr - 0x4000) >> 1]
-                    return (v & 0xFF) if not addr & 1 else (v >> 8) & 0x0F
+                    return (v & 0xFF) if not addr & 1 else 0xFF     # only the eight even-byte bits read back (Tekumel board)
                 return self.map[(addr - 0x4000) >> 1]
             if self.pi_on:
                 return self.pirom[addr - 0x4000]
