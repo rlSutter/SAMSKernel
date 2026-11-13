@@ -106,6 +106,7 @@ class Machine:
         self.dvfiles = {}       # the stand-in drive's files: name -> records
         self.catalog_lengths = (0, 38)   # the record lengths a catalog may be opened with (a controller may want 38 given)
         self.catalog_len0_empty = False  # True: a catalog opened with length 0 opens, and then every READ answers end of file
+        self.dvtypes = {}                # name -> the type code the catalog gives it (6: a directory as TIPI writes it; negative: protected)
         self.prints = {}        # printer devices (PIO..., PI.PIO...): full name -> bytes written, in order
         self.pi_clock = None    # PI.CLOCK's reply (a string), or None: no clock
         self.ftypes = {}        # name -> (variable?, internal?, record length); DIS/VAR 80 if absent
@@ -689,7 +690,7 @@ class Machine:
                                                          for rs in self.dvfiles.values()))]
         for name in sorted(self.dvfiles):
             fv, fi, fl = self.ftypes.get(name, (True, False, 80))
-            t = (2 if fv else 1) + (2 if fi else 0)
+            t = self.dvtypes.get(name, (2 if fv else 1) + (2 if fi else 0))
             size = 1 + (sum(len(r) + 1 for r in self.dvfiles[name]) + 255) // 256
             out.append(rec(name, t, size, fl))
         out.append(rec('', 0, 0, 0))

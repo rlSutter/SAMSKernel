@@ -46,7 +46,9 @@ BI0    BL   @BRLOAD
        C    R0,@NFILES
        JL   BI1
        CLR  @SEL
-BI1    BL   @BRDRAW
+       CLR  @TOP
+BI1    BL   @BRSCR
+       BL   @BRDRAW
        .leave
        RT
 
@@ -204,8 +206,27 @@ BRDRAW .enter
        LI   R1,SHEAD
        LI   R2,AMARK
        BL   @PUTS
-       CLR  R9                 the files (R9: not changed by the routines below)
+       MOV  @NFILES,R1         which file of how many
+       JEQ  BD0
+       MOV  @SEL,R1
+       INC  R1
+       LI   R0,4*COLS+54
+       LI   R2,AMARK
+       BL   @DECW
+       LI   R0,4*COLS+58
+       LI   R1,SOF
+       LI   R2,AMARK
+       BL   @PUTS
+       LI   R0,4*COLS+61
+       MOV  @NFILES,R1
+       LI   R2,AMARK
+       BL   @DECW
+BD0    MOV  @TOP,R9            the files from TOP (R9 is kept by the rows)
 BD1    C    R9,@NFILES
+       JHE  BD9
+       MOV  R9,R0
+       S    @TOP,R0
+       CI   R0,VIS
        JHE  BD9
        MOV  R9,R0
        BL   @BRROW
@@ -231,7 +252,8 @@ BW1    MOV  R4,@VWORK          (kept: PUTS changes R0-R7)
        SLA  R0,4
        AI   R0,ENTS
        MOV  R0,@VWORK+2        the entry
-       MOV  R9,R1              the row: 5 + n
+       MOV  R9,R1              the row: 5 + n - TOP
+       S    @TOP,R1
        AI   R1,5
        LI   R2,COLS
        MPY  R1,R2              R3 = the row's first cell
@@ -247,7 +269,7 @@ BW1    MOV  R4,@VWORK          (kept: PUTS changes R0-R7)
        BL   @PUTS
        MOV  @VWORK+2,R1        type: its name from the table
        MOV  @12(R1),R1
-       CI   R1,5
+       CI   R1,6
        JLE  BW2
        CLR  R1
 BW2    SLA  R1,1
@@ -323,6 +345,7 @@ BT3    CI   R0,KENTER*256
        JH   BT9
        MOVB R0,@DEVSTR+4
        CLR  @SEL
+       CLR  @TOP
        BL   @BRLOAD
        JMP  BT8
 BT3A   MOV  @NFILES,R1         a file selected?
@@ -339,9 +362,24 @@ BT4    LI   R0,PG_VIEW         the viewer, with the file's number
        MOV  @SEL,R1
        BL   @GOMOD
        JMP  BT9
-BT8    BL   @BRDRAW
+BT8    BL   @BRSCR
+       BL   @BRDRAW
 BT9    .leave
        RT
+
+* BRSCR - TOP so that the selected file is on the screen.
+BRSCR  MOV  @SEL,R0
+       C    R0,@TOP
+       JHE  BS1
+       MOV  R0,@TOP            above the screen: it becomes the top
+BS1    MOV  @TOP,R1
+       AI   R1,VIS
+       C    R0,R1
+       JL   BS9
+       MOV  R0,R1              below it: it becomes the bottom
+       AI   R1,1-VIS
+       MOV  R1,@TOP
+BS9    RT
 
 STITLE STRI ' Disk browser   '
 SDSK   STRI 'DSK1.'
@@ -358,5 +396,7 @@ STDV   STRI 'DIS/VAR'
 STIF   STRI 'INT/FIX'
 STIV   STRI 'INT/VAR'
 STPG   STRI 'PROGRAM'
+STDIR  STRI 'DIR'
+SOF    STRI 'of'
        EVEN
-STYPES DATA STQ,STDF,STDV,STIF,STIV,STPG
+STYPES DATA STQ,STDF,STDV,STIF,STIV,STPG,STDIR

@@ -246,6 +246,42 @@ def browser():
     m, cpu, halt = sim9900.run(c, keys='<WAIT 40>2<WAIT 40>1<WAIT 40>', frames=300, setup=setup)
     ln = lines(m)
     check('DSK1.' in ln[0] and 'PRESSDISK' in ln[2] and not ln[27].strip(), 'and key 1 brings DSK1 back with its catalog and no message')
+    # a long catalog: 60 files, then 127 (the most a catalog holds), the list scrolling with the selection, "n of N" shown, a TIPI
+    # directory (type 6) named DIR, a protected file (a negative type) by its type
+    def many(n, extra=None):
+        def s3(m):
+            setup(m)
+            m.dvfiles.clear()
+            for i in range(n):
+                m.dvfiles['F%03d' % i] = [b'line']
+            for k, v in (extra or {}).items():
+                m.dvtypes[k] = v
+        return s3
+    downs = '<F-x>' * 40
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>', frames=400, setup=many(60, {'F001': 6, 'F002': -2}))
+    ln = lines(m)
+    check(' '.join(ln[4].split()[-3:]) == '1 of 60' and ln[5].split()[0] == 'F000' and ln[25].split()[0] == 'F020' and ln[6].split()[1] == 'DIR' and ln[7].split()[1] == 'DIS/VAR',
+          'a catalog of 60 files: "1 of 60", the first 21 on the screen (F000 to F020), a type 6 file named DIR and a protected one by its type: %r %r' % (ln[4].split()[-3:], ln[6].split()[:2]))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>' + downs + '<WAIT 20>', frames=1600, setup=many(60))
+    ln = lines(m)
+    check(' '.join(ln[4].split()[-3:]) == '41 of 60' and ln[25].split()[0] == 'F040' and ln[5].split()[0] == 'F020', 'DOWN 40 times: "41 of 60", F040 is selected at the bottom of the screen and the list has scrolled to start at F020 (%r, %r)' % (ln[5].split()[:1], ln[25].split()[:1]))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>' + '<F-x>' * 130 + '<WAIT 20>', frames=3000, setup=many(127))
+    ln = lines(m)
+    check(' '.join(ln[4].split()[-3:]) == '127 of 127' and ln[25].split()[0] == 'F126', '127 files, DOWN 130 times (more than there are): "127 of 127" and the last file F126 at the bottom (%r)' % (ln[25].split()[:1],))
+    m, cpu, halt = sim9900.run(c, keys='<WAIT 40>' + '<F-x>' * 30 + '<F-e>' * 25 + '<WAIT 20>', frames=2000, setup=many(60))
+    ln = lines(m)
+    check(' '.join(ln[4].split()[-3:]) == '6 of 60' and ln[5].split()[0] == 'F005', 'and UP again scrolls back: after 30 down and 25 up, "6 of 60" and the list starts at F005 (%r)' % (ln[4].split()[-3:],))
+    # the workbench's catalog command: the same long catalog, picked from by scrolling
+    import asmharness
+    def hook2(m):
+        m.tifdc = None
+        for i in range(127):
+            m.dvfiles['G%03d' % i] = [b'x']
+        m.catalog_lengths = (0, 38)
+    m, img = asmharness.workbench_ui('<WAIT 10>c<WAIT 600>' + '<F-x>' * 130 + '<WAIT 40>', 2600, [], setup2=hook2)
+    text = [l.rstrip() for l in sim9900.screen(m).split('\n')]
+    check(any('127 of 127' in l for l in text) and any('G126' in l for l in text) and not any('G000' in l for l in text),
+          'the workbench\'s catalog with 127 files: DOWN to the end shows "127 of 127" and G126, with the first of the list scrolled off')
     # the workbench's own catalog command (C), on a controller that wants the length 38 given
     import asmharness
     def hook(m):

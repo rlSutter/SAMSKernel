@@ -175,7 +175,7 @@ The name may be up to 31 characters, so a path on a TIPI works (`PI.PROJ.HELLO/A
 ```
 
 `UP` and `DOWN` (`FCTN E` and `FCTN X`) move the highlight; **ENTER** puts the chosen file's name in the field (with the device kept); **FCTN 9** returns without choosing. A disk that cannot be read, or has no files, says
-`no files, or the disk could not be read`. The catalog is read afresh each time; a longer directory shows only its first 20 files, so keep working disks small or put sources on a directory a TIPI can map.
+`no files, or the disk could not be read`. The catalog is read afresh each time. It holds up to **127 files** (what a catalog can hold): 24 are on the screen, the list scrolls with UP and DOWN as the selection moves, and the top right says which file of how many is selected (`6 of 63`).
 
 ### Includes: `COPY`
 
@@ -623,7 +623,7 @@ Each line of the list is `line number`, `message`. What each message means, with
 | --- | --- |
 | editor | 2,040 lines of 80 columns (163,200 bytes); a longer file loads in part and cannot be saved |
 | file name | 31 characters |
-| catalog | the first 20 files |
+| catalog | 127 files, 24 on the screen (the list scrolls) |
 | assembler image | 4,096 bytes, one run from the first `AORG` |
 | symbols | about 580 in all (the 341 of `KERNEL/EQU` included); names 12 characters |
 | `COPY` | three levels |
