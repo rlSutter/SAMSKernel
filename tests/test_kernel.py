@@ -2976,6 +2976,11 @@ def ea5run():
     rh = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h', '--disk', '--geometry', 'sssd'], capture_output=True, text=True)
     himg = bytearray(open(d + '/h/hello.dsk', 'rb').read())
     programs += [(n, tifdc.read_program(himg, n)) for n in sorted(tifdc.TIFDC(image=himg).files())]
+    for nm, src in (('la', LINK_A), ('lb', LINK_B)):           # a program linked from object files by tools/obj2ea5.py
+        open(d + '/' + nm + '.a99', 'w').write(src)
+        subprocess.run([sys.executable, os.environ['XAS99'], '-R', '-q', d + '/' + nm + '.a99', '-o', d + '/' + nm + '.obj'], check=True, capture_output=True)
+    subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'obj2ea5.py'), d + '/lb.obj', d + '/la.obj', '-o', d + '/LINKA'], check=True, capture_output=True)
+    programs += [('LINKA', open(d + '/LINKA', 'rb').read()), ('LINKB', open(d + '/LINKB', 'rb').read())]
     skdisk.make_disk(d + '/d.dsk', [], None, 'EA5RUN', 'sssd', programs=programs)
     disk = open(d + '/d.dsk', 'rb').read()
     open(d + '/pw.a99', 'w').write("       AORG >3000\nPWSTUB LWPI >83E0\n       LI   R0,>3FFF\n       MOV  R0,@>8370\n       LI   R12,>1100\n       LI   R13,>9800\n       LI   R15,>8C02\n       SBO  0\n"
@@ -3035,6 +3040,9 @@ def ea5run():
     check(row(m, 2).strip() == 'RUN PROGRAM FILE' and row(m, 8) == '  DSK1.', 'the program ended with RT and the prompt came back, the name line reset to DSK1.')
     m, cpu = session('<WAIT 30><ENTER><WAIT 100>', lambda m, c: m.rw(0x3F00) == 0x1234)
     check(m.rw(0x3F00) == 0x1234 and m.rw(0x3F02) == 0xBEEF, 'ENTER with the name line still DSK1. runs UTIL1 (and UTIL2), as the module\'s option 5 does with an empty name (marker >%04X)' % m.rw(0x3F00))
+    m, cpu = session('<WAIT 30>linka<ENTER><WAIT 100>', lambda m, c: m.rw(0x3F04) == 0x5A5A)
+    check(m.rw(0x3F00) == 0x5A5A and m.rw(0x3F02) == 0x4321 and m.rw(0x3F04) == 0x5A5A,
+          'a program linked by tools/obj2ea5.py from two object files (B first, so the image starts with a stub, B @entry, above the program) runs: >%04X >%04X >%04X' % (m.rw(0x3F00), m.rw(0x3F02), m.rw(0x3F04)))
     crom = open(os.environ['TIFDC_ROM'], 'rb').read()          # the card's device list: where DSK1's routine is
     def cw(a): return int.from_bytes(crom[a - 0x4000:a - 0x4000 + 2], 'big')
     e, dsk1 = cw(0x4008), None
@@ -3906,7 +3914,131 @@ def progress():
     check('saved' in last and 'Saving' not in last, 'and after the save the message is "saved": %r' % last.strip()[:40])
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+LINK_A = """       DEF  START
+       REF  SETV,VAL
+START  MOV  R11,R9            (the runner's return)
+       BL   @SETV
+       MOV  @VAL,R1
+       MOV  R1,@>3F04
+       B    *R9
+       END  START
+"""
+LINK_B = """       DEF  SETV,VAL
+       REF  VDPWA,SOUND
+SETV   MOV  @VAL,@>3F00
+       LI   R0,>4321
+       MOV  R0,@>3F02
+       RT
+VAL    DATA >5A5A
+PORTS  DATA VDPWA,SOUND
+       END
+"""
+
+
+def obj2ea5():
+    """tools/obj2ea5.py: Editor/Assembler object files linked into an option 5 image.  Two relocatable modules with DEFs and REFs give the
+    memory xas99's own linker gives, in either order; the file with the entry comes first (an option 5 image starts where its first file
+    loads); compressed objects give the same image; an absolute program the same as xas99 -i; the console's fixed names (VDPWA, SOUND)
+    resolve; a program that REFs E/A's utilities is refused by name (or linked to E/A's addresses with the option); an undefined name, a name
+    defined twice and a damaged record are refused; a big program is split into files of at most 8K; objects can be read off a TI disk."""
+    import tempfile, ea5 as ea
+    d = tempfile.mkdtemp()
+    X = os.environ['XAS99']
+    tool = os.path.join(ROOT, 'tools', 'obj2ea5.py')
+    def asm(name, src, *opts):
+        open(os.path.join(d, name + '.a99'), 'w').write(src)
+        r = subprocess.run([sys.executable, X, '-R', '-q'] + list(opts) + [os.path.join(d, name + '.a99'), '-o', os.path.join(d, name + ('.obj' if '-i' not in opts else ''))], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+    def run(*args):
+        return subprocess.run([sys.executable, tool] + list(args), capture_output=True, text=True)
+    def memory(first):
+        mem, files, name = {}, [], first
+        while True:
+            data = open(name, 'rb').read()
+            addr, body, more = ea.parse(data)
+            files.append((addr, len(body)))
+            for i, b in enumerate(body):
+                mem[addr + i] = b
+            if not more:
+                return mem, files
+            name = os.path.join(os.path.dirname(name), ea.next_name(os.path.basename(name)))
+    def xlink(objs, out):
+        r = subprocess.run([sys.executable, X, '-i', '-l'] + [os.path.join(d, o) for o in objs] + ['-o', os.path.join(d, out)], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return memory(os.path.join(d, out))[0]
+    def same(mine, theirs):
+        keys = set(mine) | set(theirs)
+        return all(mine.get(k, 0) == theirs.get(k, 0) for k in keys)
+    asm('a', LINK_A)
+    asm('b', LINK_B)
+    r = run(os.path.join(d, 'a.obj'), os.path.join(d, 'b.obj'), '-o', os.path.join(d, 'AB'))
+    mine, files = memory(os.path.join(d, 'AB'))
+    check(r.returncode == 0 and same(mine, xlink(['a.obj', 'b.obj'], 'XAB')) and files[0][0] == 0xA000,
+          'two relocatable modules (A REFs SETV and VAL, B DEFs them): the same memory as xas99\'s linker, from >A000 (%s)' % r.stdout.strip())
+    va = mine[0xA000 + 4] << 8 | mine[0xA000 + 5]
+    r = run(os.path.join(d, 'b.obj'), os.path.join(d, 'a.obj'), '-o', os.path.join(d, 'BA'))
+    mine, files = memory(os.path.join(d, 'BA'))
+    stub = files[0][0]
+    start = mine.get(stub + 2, 0) << 8 | mine.get(stub + 3, 0)
+    rest = {k: v for k, v in mine.items() if not stub <= k < stub + 4}
+    check(r.returncode == 0 and same(rest, xlink(['b.obj', 'a.obj'], 'XBA')) and len(files) == 2 and files[0][1] == 4 and (mine[stub] << 8 | mine[stub + 1]) == 0x0460
+          and 'entry >%04X' % start in r.stdout and files[1][0] == 0xA000 and stub >= 0xA000 + files[1][1] + 6,
+          'in the other order (B first) the entry is past B: the first file is a stub, B @entry, above the program and past the last file\'s six extra bytes, then the program from >A000; the memory is xas99\'s (%s)' % r.stdout.strip())
+    vdp = mine.get(max(a for a in mine) - 3, 0) << 8 | mine.get(max(a for a in mine) - 2, 0)
+    asm('ac', LINK_A, '-C')
+    asm('bc', LINK_B, '-C')
+    r = run(os.path.join(d, 'ac.obj'), os.path.join(d, 'bc.obj'), '-o', os.path.join(d, 'CAB'))
+    check(r.returncode == 0 and same(memory(os.path.join(d, 'CAB'))[0], memory(os.path.join(d, 'AB'))[0]), 'compressed objects (option C) give the same image')
+    mab = memory(os.path.join(d, 'AB'))[0]
+    words = [mab.get(a, 0) << 8 | mab.get(a + 1, 0) for a in range(0xA000, max(mab) + 1, 2)]
+    check(0x8C02 in words and 0x8400 in words, 'the console\'s fixed names resolve: DATA VDPWA,SOUND became >8C02 and >8400')
+    absrc = "       AORG >B000\nGO     LI   R0,>1111\n       MOV  R0,@>3F00\n       RT\nTAB    DATA 1,2,3\n       AORG >B100\nMORE   DATA >BEEF\n       END  GO\n"
+    asm('abs', absrc)
+    asm('absimg', absrc, '-i')
+    r = run(os.path.join(d, 'abs.obj'), '-o', os.path.join(d, 'ABS'))
+    mine, files = memory(os.path.join(d, 'ABS'))
+    check(r.returncode == 0 and same(mine, memory(os.path.join(d, 'absimg'))[0]) and files[0][0] == 0xB000, 'an absolute program (AORG >B000 and >B100) gives what xas99 -i gives, starting at >B000')
+    asm('u', "       DEF  GO\n       REF  VMBW,KSCAN\nGO     BLWP @VMBW\n       BLWP @KSCAN\n       RT\n       END  GO\n")
+    r = run(os.path.join(d, 'u.obj'), '-o', os.path.join(d, 'U'))
+    check(r.returncode == 1 and 'VMBW' in r.stdout and 'KSCAN' in r.stdout and 'RUN PROGRAM FILE' in r.stdout, 'a program that REFs E/A\'s utilities is refused by name: %s' % r.stdout.strip()[:110])
+    r = run(os.path.join(d, 'u.obj'), '-o', os.path.join(d, 'U'), '--allow-ea-utilities')
+    mu = memory(os.path.join(d, 'U'))[0]
+    check(r.returncode == 0 and 'warning' in r.stdout and (mu[0xA002] << 8 | mu[0xA003]) == 0x2110 and (mu[0xA006] << 8 | mu[0xA007]) == 0x2108,
+          'with --allow-ea-utilities they link to E/A\'s vectors (VMBW >2110, KSCAN >2108), with a warning')
+    asm('f', "       DEF  GO\n       REF  FOO\nGO     BL   @FOO\n       END  GO\n")
+    r = run(os.path.join(d, 'f.obj'), '-o', os.path.join(d, 'F'))
+    check(r.returncode == 1 and 'nothing defines FOO' in r.stdout, 'an undefined name is refused: %s' % r.stdout.strip())
+    r = run(os.path.join(d, 'b.obj'), os.path.join(d, 'b.obj'), '-o', os.path.join(d, 'BB'))
+    check(r.returncode == 1 and 'defined twice' in r.stdout, 'a name defined twice (the same module given twice) is refused')
+    data = bytearray(open(os.path.join(d, 'a.obj'), 'rb').read())
+    i = data.index(b'A0000') + 6                      # the first hex digit of the first data word (after the load tag A and the word's tag B)
+    data[i] = ord('7') if data[i] != ord('7') else ord('8')
+    open(os.path.join(d, 'bad.obj'), 'wb').write(data)
+    r1 = run(os.path.join(d, 'bad.obj'), os.path.join(d, 'b.obj'), '-o', os.path.join(d, 'BAD'))
+    r2 = run(os.path.join(d, 'bad.obj'), os.path.join(d, 'b.obj'), '-o', os.path.join(d, 'BAD'), '--no-checksum')
+    check(r1.returncode == 1 and 'checksum' in r1.stdout and r2.returncode == 0, 'a damaged record is refused by its checksum (--no-checksum loads it): %s' % r1.stdout.strip()[:90])
+    big = "       DEF  GO\nGO     RT\n" + "".join("       DATA >%04X,>%04X,>%04X,>%04X\n" % (k, k + 1, k + 2, k + 3) for k in range(0, 10000, 4)) + "       END  GO\n"
+    asm('big', big)
+    r = run(os.path.join(d, 'big.obj'), '-o', os.path.join(d, 'BIG'))
+    mine, files = memory(os.path.join(d, 'BIG'))
+    check(r.returncode == 0 and len(files) == 3 and all(n <= 8192 - 6 for a, n in files) and sum(n for a, n in files) >= 20002 and files[0][0] == 0xA000,
+          'a program of 20,002 bytes is split into files of at most 8K (8,186 bytes and the header): %s' % [(hex(a), n) for a, n in files])
+    for nm in ('main', 'lib'):                                  # the demo (examples/obj2ea5): lib first, so the image starts with the stub
+        r = subprocess.run([sys.executable, X, '-R', '-q', os.path.join(ROOT, 'examples', 'obj2ea5', nm + '.a99'), '-o', os.path.join(d, 'demo_' + nm + '.obj')], capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+    r = run(os.path.join(d, 'demo_lib.obj'), os.path.join(d, 'demo_main.obj'), '--disk', os.path.join(d, 'demo.dsk'), '--name', 'LINKA')
+    check(r.returncode == 0 and 'started by B @' in r.stdout and os.path.exists(os.path.join(d, 'demo.dsk')), 'the demo (examples/obj2ea5) links onto a disk, starting with the stub: %s' % r.stdout.strip())
+    xdm = os.path.join(os.path.dirname(X), 'xdm99.py')
+    disk = os.path.join(d, 'objs.dsk')
+    subprocess.run([sys.executable, xdm, disk, '--initialize', 'SSSD', '-n', 'OBJECTS'], capture_output=True)
+    for o, n in (('a.obj', 'AOBJ'), ('b.obj', 'BOBJ')):
+        subprocess.run([sys.executable, xdm, disk, '-a', os.path.join(d, o), '-n', n, '-f', 'DIS/FIX80'], capture_output=True)
+    r = run('--from-disk', disk, 'AOBJ', 'BOBJ', '-o', os.path.join(d, 'DSK'))
+    check(r.returncode == 0 and os.path.exists(os.path.join(d, 'DSK')) and same(memory(os.path.join(d, 'DSK'))[0], memory(os.path.join(d, 'AB'))[0]),
+          'the objects read off a TI disk (DIS/FIX 80 files AOBJ and BOBJ) give the same image: %s' % (r.stdout.strip() or 'nothing')[:90])
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('obj2ea5', obj2ea5), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

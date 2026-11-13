@@ -1,0 +1,20 @@
+* lib.a99 - the library module of the obj2ea5 demo (see main.a99).
+* SHOW: R0 = VRAM address, R1 = a length-prefixed string; writes it.
+* R2 is changed.
+       DEF  SHOW,MSG
+       REF  VDPWA,VDPWD       the console's fixed names: obj2ea5 knows them
+SHOW   ORI  R0,>4000          a write address
+       SWPB R0
+       MOVB R0,@VDPWA         low byte first
+       SWPB R0
+       MOVB R0,@VDPWA
+       MOVB *R1+,R2
+       SRL  R2,8
+SH1    MOVB *R1+,@VDPWD
+       DEC  R2
+       JNE  SH1
+       RT
+MSG    BYTE 28
+       TEXT 'LINKED FROM TWO OBJECT FILES'
+       EVEN
+       END

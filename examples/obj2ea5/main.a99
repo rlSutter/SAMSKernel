@@ -1,0 +1,23 @@
+* main.a99 - the main module of the obj2ea5 demo: two object files
+* linked into a RUN PROGRAM FILE image by tools/obj2ea5.py.  It REFs
+* SHOW and MSG from lib.a99, shows MSG on row 12, waits about three
+* seconds and goes back to RUN PROGRAM FILE.  Build (see README.md):
+*   xas99.py -R main.a99 -o main.obj
+*   xas99.py -R lib.a99 -o lib.obj
+*   tools/obj2ea5.py lib.obj main.obj --disk demo.dsk --name LINKA
+* lib first on purpose: the entry is then not the lowest address, and
+* the image starts with the four-byte stub.
+       DEF  START
+       REF  SHOW,MSG
+START  MOV  R11,R9            the way back to RUN PROGRAM FILE
+       LI   R0,12*32+2        row 12, column 2
+       LI   R1,MSG
+       BL   @SHOW
+       LI   R2,6              about three seconds at the console's speed
+WAIT1  CLR  R3
+WAIT2  DEC  R3
+       JNE  WAIT2
+       DEC  R2
+       JNE  WAIT1
+       B    *R9
+       END  START

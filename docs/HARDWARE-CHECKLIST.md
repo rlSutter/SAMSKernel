@@ -102,6 +102,7 @@ With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console
 | R2 | a program you know runs under the Editor/Assembler's option 5 (`DSK1.UTIL1` style files): type its name | it runs as under the module | that a real option 5 image runs with the console as the runner leaves it (interrupts on, GPL workspace); **tell me which program and what it does** |
 | R3 | `images/hello-diskstart-sssd.dsk` (the hello program as a kernel disk program): `DSK1.HELLO` | the kernel's hello screen | a kernel disk program through the runner |
 | R4 | a name that is not on the disk; `FCTN =` | `I/O ERROR 7`; the console restarts | the error path and the quit |
+| R5 | `images/obj2ea5-demo.dsk`: `DSK1.LINKA` (two object files linked by `tools/obj2ea5.py`; the image's first file is a four-byte stub, `B @entry`) | `LINKED FROM TWO OBJECT FILES` on row 12 for about three seconds, then the prompt | a linked image, its stub and the order of its files (docs/OBJ2EA5.md), on a real runner; under the Editor/Assembler's own option 5 too, if you have the cartridge (L1) |
 
 ## Module programs (1.32.0; nothing of it has run on a real machine)
 

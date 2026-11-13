@@ -1067,7 +1067,7 @@ there is no exit hook.
 - **`disk_name`** (optional, 1-6 capitals and digits) and **`prun`** (optional, true puts `PRUN` in the kernel): the disk start, see "A program on disk" in Part 9.
 - **`motion`** (optional, true puts sprite motion in the kernel: `SPMINI`, `SPMPUT`, `SPMVEL`; 226 bytes) and **`motion_helpers`** (true adds `SPMBOX`, bounce inside a box, `SPMHIT`, sprite overlap, `SPMSWP`, swap velocities; 320 bytes more, and implies `motion`): VIDEO-MODES.md part 7.
 - **`modprog`** (optional, true lets the cartridge's RUN PROGRAM FILE run module programs from disk; implies `ea5`): docs/MODPROG.md, `tools/skmodprog.py`.
-- **`ea5`** (optional, true adds RUN PROGRAM FILE, Editor/Assembler option 5, as a second program on the cartridge's console menu: workbench manual).
+- **`ea5`** (optional, true adds RUN PROGRAM FILE, Editor/Assembler option 5, as a second program on the cartridge's console menu: workbench manual). Object files from the TI Assembler or xas99 become such programs with `tools/obj2ea5.py` (docs/OBJ2EA5.md).
 - **`rows`** on a picture data entry (88 by default, 1 to 96): see "Pictures" in Part 5; **`sfx`** (optional, true puts `SFXPLAY` in the kernel).
 - **`module_size`** (optional, 8192 or 4096) and a module's own **`"size"`**: a module of at most 4K leaves window `>D000` to the program (see Part 8).
 - **`omit`** (optional) is a list of parts of the kernel your program does not use and leaves out, from `"music"` (the song engine: 506
