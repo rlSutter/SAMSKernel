@@ -102,7 +102,8 @@ With `workbench8.bin` (or any cartridge built with `"ea5": true`) on the console
 | R2 | a program you know runs under the Editor/Assembler's option 5 (`DSK1.UTIL1` style files): type its name | it runs as under the module | that a real option 5 image runs with the console as the runner leaves it (interrupts on, GPL workspace); **tell me which program and what it does** |
 | R3 | `images/hello-diskstart-sssd.dsk` (the hello program as a kernel disk program): `DSK1.HELLO` | the kernel's hello screen | a kernel disk program through the runner |
 | R4 | a name that is not on the disk; `FCTN =` | `I/O ERROR 7`; the console restarts | the error path and the quit |
-| R5 | `images/obj2ea5-demo.dsk`: `DSK1.LINKA` (two object files linked by `tools/obj2ea5.py`; the image's first file is a four-byte stub, `B @entry`) | `LINKED FROM TWO OBJECT FILES` on row 12 for about three seconds, then the prompt | a linked image, its stub and the order of its files (docs/OBJ2EA5.md), on a real runner; under the Editor/Assembler's own option 5 too, if you have the cartridge (L1) |
+| R5 | `images/obj2ea5-demo.dsk`: `DSK1.LINKA` (two object files linked by `tools/obj2ea5.py`; the image's first file is a four-byte stub, `B @entry`) | `LINKED FROM TWO OBJECT FILES` on row 12 for about three seconds, then the prompt | a linked image, its stub and the order of its files (docs/OBJ2EA5.md), on a real runner |
+| L1 | the same disk and name under the Editor/Assembler cartridge's own option 5 (needs that cartridge) | the same line on row 12 | that the linked image is ordinary option 5 files, as the linker's notes assume |
 
 ## Module programs (1.32.0; nothing of it has run on a real machine)
 
@@ -120,7 +121,7 @@ The kernel has been run on 1M-or-smaller real cards by its ancestors (Press, The
 
 | Step | Do | Good looks like | What it settles |
 | --- | --- | --- | --- |
-| H1 | `images/diag` as a cartridge, or any program, on the machine with the card | it starts (no `NEEDS A MEMORY CARD WITH 512K`); the diagnostic's memory line says 1,024 pages (4M), 2,048 (8M) | that the card is found with no register readback, and sized right |
+| H1 | `images/skdiag8.bin` as a cartridge, or any program, on the machine with the card | it starts (no `NEEDS A MEMORY CARD WITH 512K`); the diagnostic's memory line says 1,024 pages (4M), 2,048 (8M) | that the card is found with no register readback, and sized right |
 | H2 | CTRL T in the diagnostic | the page test passes | that every page holds what is written, with the register written as a word, odd byte first |
 | H3 | a program that uses pages above >FF (the pool: `PALLOC` many pages) | the data comes back right from pages 256-1023 | the register's upper bits (the odd byte's low two bits) |
 | H4 | quit with FCTN =, then pick the program again | it starts again | that QUIT leaves the CRU bits set and the kernel's exit cleared them |
