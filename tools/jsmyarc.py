@@ -1,4 +1,4 @@
-"""js99er's "Myarc floppy controller", ported from its source (JS99er-angular, src/app/emulator/classes/myarc-fdc.ts and wd177x.ts,
+"""js99er's "Myarc floppy controller", ported from its source (js99er-angular, src/app/emulator/classes/myarc-fdc.ts and wd177x.ts,
 read 12 November 2026) so that the simulator can run what js99er runs: its own DSR ROM (an 8K Myarc FDC image, header >AA03, DSR list
 at >4064: not the DDCC-1's >AA02) on ITS chip, which is simpler than a real WD177x in ways a DSR can notice:
   * a read-sector command never sets busy; DRQ ("ready for data", CRU bit 1) is true until the byte buffer is empty, and reading
