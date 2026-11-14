@@ -755,7 +755,7 @@ the kernel's own pages, which are always mapped, and reached with a plain `BL @N
 
 `resident.a99` is an ordinary source with no `AORG` and no `END`; it may `COPY "linein.a99"` to carry the line editor
 once for the whole program. The listed labels join `kernel.equ`; nothing else in it is visible to the modules. There is
-room for about 780 bytes (the kernel is 6,898 of the 7,680 it may be; the line editor, about 1,090, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
+room for about 770 bytes (the kernel is 6,906 of the 7,680 it may be; the line editor, about 1,090, needs `"pool_max_pages"` as well); the build says how much is resident and refuses
 a kernel that runs into the pool bitmap. **[PC] only.** The design, the options it was chosen over, how to write the
 routines and the levers for more room are in `docs/RESIDENT.md`; `tests/apps/resident` is a worked two-module example.
 

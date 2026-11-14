@@ -137,6 +137,7 @@ The kernel has been run on 1M-or-smaller real cards by its ancestors (Press, The
 | S2 | the arrow keys (FCTN S D E X), and joystick 1 if you have one | the view moves 8 pixels a press (2 a frame with the joystick), stops at the world's edges, and the walk starts again 2 seconds after the last press | the input path, and the clamping at the edges |
 | S3 | note any tile that is wrong (a row or column of the wrong tile at the screen's right or bottom edge while moving) | none | that the strips written as the window moves arrive in time, with the video chip's own timing, which the simulator does not have |
 | A1 | `images/aim8.bin`: the turret in the middle fires every second or so at the ring | the ring drifts and bounces in the box; a bullet through its hollow middle is a miss; SHOTS and HITS on the top line | pixel-exact collision (`SPMPIX`), `FXATN2` and `FXPOL` on a real F18A's sprites |
+| G1 | the workbench (`images/workbench8.bin`): `E` on a long source, hold the down arrow until the text scrolls | the title bar's first four characters (`SAMS`) stay as they are | the GPU program touches no VRAM below `>0960` (1.38.1; before it, an F18A's workspace at 0 put its registers on the first four name table cells) |
 | A2 | `images/spritemotion8.bin` | eight balls bouncing off the walls and each other | the motion table, `SPMBOX`, `SPMHIT` and `SPMSWP` on real sprites |
 
 ## How to report

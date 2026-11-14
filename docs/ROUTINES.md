@@ -192,7 +192,7 @@ test the F18A's DMA engine once: 80 bytes of a pattern at VRAM >1500 are copied 
 
 ### `GPUPRG` *(internal)*
 
-the GPU's program, copied to VRAM at GPUAD by T80INI: the mailbox's 8 bytes into the DMA registers (>8000->8007), then a write to >8008 starts the copy; IDLE until the next start.
+the GPU's program, copied to VRAM at GPUAD by T80INI: the mailbox's 8 bytes into the DMA registers (>8000->8007), then a write to >8008 starts the copy; IDLE until the next start.  It uses NO REGISTER: an F18A's GPU workspace is at address 0 (PICO9918's reference: its own is at >FFFE "rather than 0, so the workspace registers are not aliased into low VRAM"), so R0 and R1 there would be the first four bytes of VRAM, the name table's first four cells, overwritten at every scroll.  Memory to memory moves with symbolic operands touch nothing else (and the GPU has no LWPI to move the workspace on an F18A).  30 bytes, in the 32 at GPUAD.
 
 ## The keyboard (keys.a99)
 

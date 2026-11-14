@@ -119,7 +119,7 @@ kernel never gets that far because the loader has refused a machine without an F
 with auto-increment, two data-port writes per entry). The kernel loads 0-15 (the colour scheme); VR24 and the attribute
 bytes select which entries each layer uses.
 
-**DMA and the GPU.** `VSHIFT` writes an 8-byte mailbox to VRAM `>0960`, points the GPU at its program at
+**DMA and the GPU.** The GPU program uses **no register**: an F18A's GPU workspace is at address 0, so its registers would be VRAM `>0000-001F` (a PICO9918's is `>FFFE`, not aliased), and the first version, which used R0 and R1, overwrote the name table's first four cells at every scroll (fixed in 1.38.1; the simulator's GPU workspace is now at 0). `VSHIFT` writes an 8-byte mailbox to VRAM `>0960`, points the GPU at its program at
 `>0970` (VR54/55), and waits on status register 2 bit 7. The kernel tests the DMA engine once at boot
 (`DMATST`: copy 80 bytes, read them back) and sets `NODMA` if the copy did not arrive.
 

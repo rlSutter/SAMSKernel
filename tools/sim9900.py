@@ -545,7 +545,7 @@ class Machine:
                 m.dma_count = getattr(m, 'dma_count', 0) + 1
         gm = GPUMem()
         gpu = CPU(gm)
-        gpu.wp = 0xF000
+        gpu.wp = getattr(self, 'gpu_wp', 0x0000)   # a real F18A's workspace is at 0 (its registers are VRAM >0000-001F); a PICO9918's is >FFFE
         gpu.pc = pc
         for _ in range(100000):
             if gm.rw(gpu.pc) == 0x0340:          # IDLE

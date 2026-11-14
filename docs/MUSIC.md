@@ -183,7 +183,7 @@ the song's writes to that channel go to the player's shadow of the chip and not 
 each channel it owned is given the song's last bytes back, or is silenced if no song is playing or it is paused. One effect plays at a time. `MUPAUSE` under an effect silences only the song's own channels, and `MUSTOP` and `SNDOFF` silence the whole chip (an
 effect carries on and is heard again at its next write). This is the behaviour of TXA's player (its effect voices 4-5 over music voices 0-3); the kernel owns whole channels, as TXA does, and does not mix volumes.
 
-Cost: **512 bytes of kernel** (7,410 against 6,898), so it is off unless `app.json` says `"sfx": true` (a program that uses `SFXPLAY` without it is refused by name; so is the flag with `"music"` left out) and five words of slot A (`>20F6-20FF`).
+Cost: **512 bytes of kernel** (7,418 against 6,906), so it is off unless `app.json` says `"sfx": true` (a program that uses `SFXPLAY` without it is refused by name; so is the flag with `"music"` left out) and five words of slot A (`>20F6-20FF`).
 Test group `sfx`, with a test application (`tests/apps/sfx`) that plays a looping song and an effect on voice B and the noise: compared with the song alone frame by frame, the chip differs only on the effect's channels and only while it plays;
 its own bytes are what the chip is given there; the song's writes to the noise channel in that window (16 bytes) were held back; when it ends, is stopped, or is replaced, the chip is exactly what the song alone has; with no song its channels end
 silent; pages with no effect answer 1; `MUPAUSE` leaves the effect sounding. None of it has run on a real TI.

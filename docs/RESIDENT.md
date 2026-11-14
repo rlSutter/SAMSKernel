@@ -14,7 +14,7 @@ mapped at a time, in slot C (`>C000-DFFF`). Until now there were two ways round 
 | --- | --- | --- |
 | `COPY` the source into every module that needs it | its size, once per module (LINEIN is about 1,090 bytes) | nothing: but the copies are separate, and a fix has to rebuild them all (the build does) |
 | a **library module** and `MODCALL` | a call that maps two pages and back (the mapping changes `R0-R4`, `R7`; arguments go in `R5 R6 R8 R9` or slot A) | the routine runs with *its* module in slot C, so it cannot read the caller's tables or strings or call back into the caller's code |
-| **resident code**, assembled into the kernel's pages | kernel space, shared by the whole program (about 780 bytes: 7,680 allowed, 6,898 used by the kernel alone) | exceed that space; and it is `[PC]` only |
+| **resident code**, assembled into the kernel's pages | kernel space, shared by the whole program (about 770 bytes: 7,680 allowed, 6,906 used by the kernel alone) | exceed that space; and it is `[PC]` only |
 
 Resident code is plain code in the pages that are always mapped (`>A000-BDFF`, with the kernel). A module reaches
 it with an ordinary `BL @NAME` from any module, with any registers, and the routine runs while the caller's module is
@@ -66,7 +66,7 @@ An application without `"resident"` builds exactly as before.
 
 ## The budget, and what to do when it runs out
 
-The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,898 bytes:
+The kernel may be 7,680 bytes (`>A000-BDFF`); the page-pool bitmap is at `>BE00-BFFF`. The kernel itself is 6,906 bytes:
 **about 780 bytes for resident code**, shared with every other thing you put there, and up to 480 more with a smaller pool
 bitmap (below). **`LINEIN` (about 1,130 bytes as resident code since it gained its scrolling field and long lines, with `RSUM` and `RCALL` in the test
 application) no longer fits the default room**: the test application declares `"pool_max_pages": 1024` (a 128-byte bitmap, room for a kernel
@@ -92,7 +92,7 @@ into the bitmap and says how much of it is resident. The levers, in the order I 
    engine (506 bytes; `MUTICK`, which the key loop calls, becomes a bare return), the **files** code (the DSR calls, `FOPEN` and the rest,
    `CLKGET`: 2,026 bytes), the **page pool** (220 bytes, and, since there is then no bitmap, the 512 bytes it needed: the kernel may be
    8,192 bytes instead of 7,680; it is an error to ask for `"omit": ["pool"]` and `"pool_max_pages"` together). All three together: a kernel
-   of 4,146 bytes instead of 6,898, with 4,046 bytes free in its 8K, about five times the default room. A module (or the resident code, or a
+   of 4,154 bytes instead of 6,906, with 4,038 bytes free in its 8K, about five times the default room. A module (or the resident code, or a
    file it `COPY`s) that uses a routine that was left out is refused by name, with the word that removes it. Two more words (1.19.0)
    cut inside `VMODE`, which sets the boot screen and so cannot go whole: **`"graphics"`** leaves out Graphics I, Graphics II and
    Multicolor (308 bytes: their tables, branches and the VMGM1, VMGM2, VMMC names) and **`"enhanced"`** leaves out enhanced colour and

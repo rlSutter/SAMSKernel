@@ -3185,7 +3185,7 @@ def motion():
     """Sprite motion (app.json "motion": true; kernel/motion.a99): a motion table in CPU RAM that the kernel steps every frame.  The test application puts four sprites on a table at APPRAM (a dot a frame down and half a
     dot right; a dot and a half right from X 250, so it wraps; one that does not move; one a dot a frame up).  Runs of different length: the positions moved by exactly the velocity for each frame between them, the attribute
     table in VRAM holds the table's high bytes for the moving sprites, the stationary sprite's entry is left alone, and X wraps at 256.  Keys drive the guards: 1 sets SPMSKP (the flag KPFR sets: no step) and 2 clears it;
-    3 calls SPMINI with a count of 0 (motion stops).  A program that calls SPMINI without the flag is refused by name; the kernel is 6,898 bytes without the feature."""
+    3 calls SPMINI with a count of 0 (motion stops).  A program that calls SPMINI without the flag is refused by name; the kernel is 6,906 bytes without the feature."""
     import tempfile, shutil, re
     c = build('tests/apps/motiontest')
     ev = {}
@@ -3273,7 +3273,7 @@ def motion():
     out = r.stdout + r.stderr
     check(r.returncode != 0 and 'SPM' in out and '"motion' in out, 'a program that calls SPMINI and the rest without "motion": true is refused by name: %s' % out.strip().split('\n')[-1][:100])
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'examples', 'hello'), '--out', d + '/h'], capture_output=True, text=True)
-    check('kernel 6898 bytes' in r.stdout, 'without the feature the kernel is still 6,898 bytes')
+    check('kernel 6906 bytes' in r.stdout, 'without the feature the kernel is still 6,906 bytes')
     r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'skbuild.py'), os.path.join(ROOT, 'tests', 'apps', 'motiontest'), '--out', d + '/m'], capture_output=True, text=True)
     n = re.search(r'kernel (\d+) bytes', r.stdout)
     check(n and 7300 < int(n.group(1)) < 7600, 'with motion and its helpers the kernel is %s bytes' % (n.group(1) if n else '?'))
@@ -4080,7 +4080,29 @@ def js99er():
           'with the chip as js99er has it, the same run overwrites sectors of the disk image (%s) and the assembly is not clean: %s' % (changed[:4], ' '.join(text.split())[60:150]))
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('obj2ea5', obj2ea5), ('js99er', js99er), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+def gpuws():
+    """The kernel's GPU program (the DMA mover, VSHIFT's) uses no workspace register.  An F18A's GPU has its workspace at address 0
+    (the PICO9918 reference, 'Differences from the F18A': its own is >FFFE 'rather than 0, so the workspace registers are not aliased
+    into low VRAM'), so a program that used R0 and R1 overwrote the first four bytes of VRAM, the name table's first four cells, every
+    time it ran.  The simulator's GPU now has its workspace at 0 (or >FFFE, as a PICO9918's): with the mailbox filled in, the 80-byte
+    copy arrives and VRAM >0000-0007 is untouched, with either."""
+    c = build('hello')
+    for wp in (0x0000, 0xFFFE):
+        def setup(m, wp=wp):
+            m.gpu_wp = wp
+        m, cpu, halt = sim9900.run(c, keys='<WAIT 40>', frames=120, setup=setup)
+        for i, b in enumerate(b'ABCDEFGH'):
+            m.vram[i] = b
+        for i in range(80):
+            m.vram[0x0100 + i] = 0x30 + i % 10
+        for i, b in enumerate(bytes([0x01, 0x00, 0x02, 0x00, 80, 1, 80, 0])):      # source, destination, width, height, stride, flags
+            m.vram[0x0960 + i] = b
+        m.run_gpu(0x0970)
+        check(bytes(m.vram[0x0200:0x0250]) == bytes(m.vram[0x0100:0x0150]) and bytes(m.vram[0:8]) == b'ABCDEFGH',
+              'the GPU program moves its 80 bytes and leaves VRAM >0000-0007 alone, with the GPU workspace at >%04X (VRAM now %s)' % (wp, bytes(m.vram[0:8]).hex()))
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('obj2ea5', obj2ea5), ('gpuws', gpuws), ('js99er', js99er), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':

@@ -361,7 +361,7 @@ ROWS   EQU  30
 * +>200) fit beside the sprites and the file service.
 NAMTAB EQU  >0000            name table (Graphics II: NAMGM2)
 GPUMB  EQU  >0960            the GPU's mailbox (8 bytes: a DMA's settings)
-GPUAD  EQU  >0970            the GPU's program (about 26 bytes)
+GPUAD  EQU  >0970            the GPU's program (30 bytes; no registers)
 * Graphics I's colour table (32 bytes; with ECM or VOPOS ATRTAB is used)
 GM1CT  EQU   >09C0
 ATRTAB EQU  >0A00            attribute table (2,400 bytes at 80 x 30)
