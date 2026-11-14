@@ -4038,7 +4038,49 @@ def obj2ea5():
           'the objects read off a TI disk (DIS/FIX 80 files AOBJ and BOBJ) give the same image: %s' % (r.stdout.strip() or 'nothing')[:90])
 
 
-GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('obj2ea5', obj2ea5), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
+def js99er():
+    """js99er's "Myarc floppy controller", ported (tools/jsmyarc.py) with its own DSR ROM and chip model.  Found 12 November 2026 from the
+    owner's report that assembling ED/A99 on it looped (the line number past 22,000 of a 1,105-line file): js99er's chip counts every write
+    to its data register, the track number of each seek included, as a byte of a sector to be written, and after 256 seeks overwrites the
+    sector the registers point at, so a program that reads a few hundred sectors has its disk image corrupted.  Here: the catalog lists the
+    360K disk's files on the ported controller; with the chip corrected (a data write outside a write command only sets the register)
+    ED/A99 assembles from the 360K disk to the bytes xas99 makes and the image is untouched; with the chip as js99er has it, the run
+    overwrites sectors of the image and the assembly is not clean (the emulator's fault, recorded here so a fixed js99er can be told)."""
+    import tempfile, asmharness, skdisk, jsmyarc
+    if not (os.environ.get('TIFDC_ROM') and os.path.exists(os.environ['TIFDC_ROM'])) or not jsmyarc.available():
+        print('  (skipped: TIFDC_ROM and js99er\'s Myarc ROM (JSMYARC_ROM) are needed)')
+        return
+    build('workbench')
+    kequ = os.path.join(ROOT, 'build', 'workbench', 'kernel.equ')
+    files = [os.path.join(ROOT, f) for f in (
+        'examples/hello/hello.a99', 'examples/workbench/programs/beep.a99', 'examples/workbench/programs/copy.a99',
+        'examples/reversi/revers.a99', 'examples/modes/modes.a99', 'examples/workbench/wb.a99', 'examples/workbench/ed.a99',
+        'examples/workbench/asm.a99')]
+    d = tempfile.mkdtemp()
+    p = d + '/w.dsk'
+    skdisk.make_disk(p, files, kequ, 'WORKBENCH', 'dsdd')
+    disk = open(p, 'rb').read()
+    want = asmharness.assemble(os.path.join(ROOT, 'examples/workbench/ed.a99'), 'workbench')
+    box = {}
+    def run(fix, keys, frames):
+        def hook(m):
+            box['card'] = jsmyarc.JSMYARC(image=bytearray(disk), fix=fix)
+            m.tifdc = box['card']
+        m, img = asmharness.workbench_ui(keys, frames, [], setup2=hook)
+        return ' '.join(sim9900.screen(m).split('\n'))
+    text = run(True, '<WAIT 10>c<WAIT 400>', 700)
+    names = ['HELLO/A99', 'REVERS/A99', 'KERNEL/EQU', 'WB/A99', 'ED/A99', 'ASM/A99']
+    check(all(n in text for n in names), 'js99er\'s Myarc controller (its ROM and chip): the catalog of the 360K disk lists the programs (%d of %d names seen)' % (sum(n in text for n in names), len(names)))
+    text = run(True, '<WAIT 10>nED/A99<ENTER><WAIT 10>a<WAIT 3900>', 4000)
+    check('Assembled' in text and ('%d' % want.length) in text and box['card'].image == bytearray(disk),
+          'with its chip corrected, ED/A99 (1,105 lines, 146 sectors) assembles from the 360K disk: %d bytes as xas99 makes it, and the disk image is untouched' % want.length)
+    text = run(False, '<WAIT 10>nED/A99<ENTER><WAIT 10>a<WAIT 3900>', 4000)
+    changed = [i // 256 for i in range(0, len(disk), 256) if bytes(box['card'].image[i:i + 256]) != disk[i:i + 256]]
+    check(len(changed) >= 1 and 'Assembled' not in text.split('workbench', 1)[-1][:200],
+          'with the chip as js99er has it, the same run overwrites sectors of the disk image (%s) and the assembly is not clean: %s' % (changed[:4], ' '.join(text.split())[60:150]))
+
+
+GROUPS = [('sources', sources), ('dbg', dbg), ('sams16', sams16), ('tipi', tipi), ('hfdccru', hfdccru), ('linein', linein), ('resident', resident), ('poolmax', poolmax), ('trim', trim), ('textonly', textonly), ('fastmap', fastmap), ('fileprog', fileprog), ('poolscan', poolscan), ('slotd', slotd), ('common', common), ('cycles', cycles), ('ea5', ea5), ('diskboot', diskboot), ('prun', prun), ('arcode', arcode), ('txm', txm), ('exprcheck', exprcheck), ('sfx', sfx), ('pic', pic), ('ea5run', ea5run), ('modprog', modprog), ('motion', motion), ('float', float), ('fixed', fixed), ('pixel', pixel), ('scroll', scroll), ('sktiles', sktiles), ('progress', progress), ('obj2ea5', obj2ea5), ('js99er', js99er), ('fplayout', fplayout), ('framehook', framehook), ('brkflag', brkflag), ('editorapp', editorapp), ('sourcesdisk', sourcesdisk), ('jumpcheck', jumpcheck), ('fileapi', fileapi), ('dsdd', dsdd), ('dsddworkbench', dsddworkbench), ('editorpages', editorpages), ('reversi', reversi), ('reversiti', reversiti), ('joystick', joystick), ('files2', files2), ('native', native), ('nativemods', nativemods), ('nativedisk', nativedisk), ('tiprograms', tiprograms), ('workbench', workbench), ('workbenchfull', workbenchfull), ('boot', boot), ('refusal', refusal), ('sams4m', sams4m), ('ram', ram), ('keys', keys), ('quit', quit_), ('modules', modules),
           ('files', files), ('browser', browser), ('modes', modes), ('modesquit', modes_quit), ('music', music), ('rom', rom), ('realdsr', realdsr)]
 
 if __name__ == '__main__':
